@@ -9,14 +9,14 @@
     "destroy": "alchemy destroy"
   },
   "dependencies": {
-    "@machine-run/ai-tools": "workspace:*",
-    "@machine-run/dotfiles": "workspace:*",
-    "@machine-run/git-identity": "workspace:*",
-    "@machine-run/macos-defaults": "workspace:*",
-    "@machine-run/secrets": "workspace:*",
-    "@machine-run/ssh": "workspace:*",
-    "@machine-run/system-packages": "workspace:*",
-    "@machine-run/tailscale": "workspace:*",
+    "@machine-run/ai-tools": "*",
+    "@machine-run/dotfiles": "*",
+    "@machine-run/git-identity": "*",
+    "@machine-run/macos-defaults": "*",
+    "@machine-run/secrets": "*",
+    "@machine-run/ssh": "*",
+    "@machine-run/system-packages": "*",
+    "@machine-run/tailscale": "*",
     "alchemy": "2.0.0-beta.67",
     "effect": "4.0.0-beta.102"
   }

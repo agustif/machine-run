@@ -1,10 +1,11 @@
 import { OnePassword } from "@machine-run/secrets";
+import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
 import { CommandExecutor } from "alchemy/Command";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { Resource } from "alchemy/Resource";
-import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
 import * as Effect from "effect/Effect";
+import * as Redacted from "effect/Redacted";
 
 export interface TailscaleConnectionProps {
   /** 1Password reference to a Tailscale auth key, e.g. "op://Personal/Tailscale/authkey". */
@@ -46,18 +47,41 @@ export const TailscaleConnectionProvider = () =>
         list: () => Effect.succeed([]),
         diff: Effect.fn(function* ({ news, output }) {
           if (!isResolved(news)) return undefined;
-          if (!output) return { action: "update" as const };
+          if (!output || output.hostname !== news.hostname) {
+            return { action: "update" as const };
+          }
         }),
-        reconcile: Effect.fn(function* ({ news, session }) {
+        reconcile: Effect.fn(function* ({ news, output, session }) {
           const running = yield* isRunning(session);
           if (!running) {
             const authKey = yield* onePassword.read(news.authKeyOpRef, session);
-            const hostnameFlag = news.hostname ? ` --hostname=${news.hostname}` : "";
+            const hostnameFlag = news.hostname ? ` --hostname="$TS_HOSTNAME"` : "";
             yield* executor.run(
               {
-                command: `tailscale up --authkey=${authKey}${hostnameFlag}`,
+                // The auth key never touches the command string or argv —
+                // it's passed via `env` as `Redacted` so alchemy's own
+                // command-error redaction can scrub it, and it's never
+                // visible to `ps`/other processes the way an interpolated
+                // `--authkey=<value>` argument would be.
+                command: `tailscale up --authkey="$TS_AUTHKEY"${hostnameFlag}`,
                 shell: true,
+                env: {
+                  TS_AUTHKEY: Redacted.make(authKey),
+                  ...(news.hostname ? { TS_HOSTNAME: news.hostname } : {}),
+                },
                 timeout: "2 minutes",
+              },
+              session,
+            );
+          } else if (output && output.hostname !== news.hostname) {
+            // Already connected, but the desired hostname changed — apply
+            // just that instead of silently claiming a change was made.
+            yield* executor.run(
+              {
+                command: news.hostname ? `tailscale set --hostname="$TS_HOSTNAME"` : "tailscale set --hostname=",
+                shell: true,
+                env: news.hostname ? { TS_HOSTNAME: news.hostname } : {},
+                timeout: "1 minute",
               },
               session,
             );

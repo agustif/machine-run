@@ -1,8 +1,7 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
-export const makeCargoBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeCargoBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "cargo",
   list: (session) =>
     executor.run({ command: "cargo install --list" }, session).pipe(

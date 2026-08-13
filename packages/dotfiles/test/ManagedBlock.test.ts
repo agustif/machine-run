@@ -1,4 +1,4 @@
-import { NodeContext } from "@effect/platform-node";
+import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -42,5 +42,5 @@ it.effect("File resource round-trips through a real temp directory", () =>
     expect(result).toContain("# hand-written setup");
     expect(result).toContain("# machine-run:example BEGIN");
     expect(result).toContain('export MACHINE_RUN="1"');
-  }).pipe(Effect.provide(NodeContext.layer)),
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

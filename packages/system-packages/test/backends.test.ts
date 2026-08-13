@@ -1,5 +1,4 @@
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
-import type { CommandExecutor } from "alchemy/Command";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { makeAptBackend } from "../src/backends/Apt.ts";
@@ -7,24 +6,25 @@ import { makeBrewBackend, makeBrewCaskBackend } from "../src/backends/Brew.ts";
 import { makeCargoBackend } from "../src/backends/Cargo.ts";
 import { makePortBackend } from "../src/backends/MacPorts.ts";
 import { makeNpmBackend } from "../src/backends/Npm.ts";
+import type { CommandExecutorService } from "../src/Backend.ts";
 
 const session = undefined as unknown as ScopedPlanStatusSession;
 
 /** A fake CommandExecutor whose `run` returns a fixed stdout for every call — enough to unit test each backend's parsing/command shape without a real shell. */
-const fakeExecutor = (stdout: string): CommandExecutor =>
+const fakeExecutor = (stdout: string): CommandExecutorService =>
   ({
     run: () => Effect.succeed({ exitCode: 0, stdout, stderr: "" }),
     spawn: () => Effect.die("not used in these tests"),
-  }) as unknown as CommandExecutor;
+  }) as unknown as CommandExecutorService;
 
-const capturingExecutor = (stdout: string, calls: string[]): CommandExecutor =>
+const capturingExecutor = (stdout: string, calls: string[]): CommandExecutorService =>
   ({
     run: (props: { command: string }) => {
       calls.push(props.command);
       return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
     },
     spawn: () => Effect.die("not used in these tests"),
-  }) as unknown as CommandExecutor;
+  }) as unknown as CommandExecutorService;
 
 it.effect("brew backend parses `brew list --formula` output into names", () =>
   Effect.gen(function* () {

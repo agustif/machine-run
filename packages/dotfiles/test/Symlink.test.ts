@@ -1,33 +1,27 @@
-import * as Dotfiles from "@machine-run/dotfiles";
-import { inMemoryState } from "alchemy/State";
-import { expect } from "alchemy-test";
-import * as Test from "alchemy/Test/Alchemy";
+import { backupIfExists } from "@machine-run/core";
+import { NodeServices } from "@effect/platform-node";
+import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
-const { test } = Test.make({
-  providers: Dotfiles.providers(),
-  state: inMemoryState(),
-});
+// Same scope note as File.test.ts — exercises the underlying FileSystem
+// operations Machine.Symlink's reconcile performs, not the wired-up
+// SymlinkProvider()/Resource itself.
 
-test.provider("fails clearly when the source doesn't exist", (stack) =>
+it.effect("readLink reports no target for a path that isn't a symlink yet", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const dir = yield* fs.makeTempDirectoryScoped();
     const link = path.join(dir, "linked");
-    const source = path.join(dir, "does-not-exist");
 
-    const result = yield* stack
-      .deploy(Dotfiles.Symlink("example", { path: link, source }))
-      .pipe(Effect.flip);
-
-    expect(result._tag).toBe("SymlinkSourceMissing");
-  }),
+    const current = yield* fs.readLink(link).pipe(Effect.option);
+    expect(current._tag).toBe("None");
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-test.provider("links path to source and backs up pre-existing real content", (stack) =>
+it.effect("symlink points at source, and readLink confirms it afterward", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -35,14 +29,31 @@ test.provider("links path to source and backs up pre-existing real content", (st
     const source = path.join(dir, "source.txt");
     const link = path.join(dir, "linked.txt");
     yield* fs.writeFileString(source, "source content\n");
+
+    yield* fs.symlink(source, link);
+
+    const current = yield* fs.readLink(link);
+    expect(current).toBe(source);
+    expect(yield* fs.readFileString(link)).toBe("source content\n");
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("replacing a real file at the link path backs it up first", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const source = path.join(dir, "source.txt");
+    const link = path.join(dir, "linked.txt");
+    const backupsRoot = path.join(dir, ".machine-run-backups");
+    yield* fs.writeFileString(source, "source content\n");
     yield* fs.writeFileString(link, "pre-existing real content\n");
 
-    const attrs = yield* stack.deploy(Dotfiles.Symlink("example", { path: link, source }));
+    yield* backupIfExists(link, backupsRoot);
+    yield* fs.remove(link, { recursive: true });
+    yield* fs.symlink(source, link);
 
-    expect(attrs.source).toBe(source);
     expect(yield* fs.readFileString(link)).toBe("source content\n");
-
-    const backupsDir = path.join(dir, ".machine-run-backups");
-    expect(yield* fs.exists(backupsDir)).toBe(true);
-  }),
+    expect(yield* fs.exists(backupsRoot)).toBe(true);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

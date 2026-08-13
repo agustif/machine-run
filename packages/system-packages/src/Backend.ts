@@ -1,7 +1,17 @@
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
-import type { CommandError } from "alchemy/Command";
+import type { CommandError, CommandExecutor } from "alchemy/Command";
+import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import type * as Effect from "effect/Effect";
+
+/**
+ * The resolved shape of `CommandExecutor` (as you'd get from `yield*
+ * CommandExecutor`) — NOT the bare class name. `CommandExecutor` extends
+ * `Context.Service`, so the class itself types as the tag/constructor, not
+ * the service instance; every backend factory takes this as its parameter
+ * type instead.
+ */
+export type CommandExecutorService = Context.Tag.Service<typeof CommandExecutor>;
 
 export class BackendParseError extends Data.TaggedError("BackendParseError")<{
   cause: unknown;

@@ -1,9 +1,8 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
 /** MacPorts — the second real option on macOS, alongside Homebrew. Install commands need `sudo` (MacPorts, unlike brew, expects root). */
-export const makePortBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makePortBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "port",
   list: (session) =>
     executor

@@ -1,12 +1,15 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import { BackendParseError, type PackageManagerBackend } from "../Backend.ts";
+import {
+  BackendParseError,
+  type CommandExecutorService,
+  type PackageManagerBackend,
+} from "../Backend.ts";
 
 interface NpmLsOutput {
   dependencies?: Record<string, unknown>;
 }
 
-export const makeNpmBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeNpmBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "npm",
   list: (session) =>
     Effect.gen(function* () {

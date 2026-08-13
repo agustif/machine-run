@@ -1,9 +1,8 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
 /** Fedora/RHEL. Same sudo caveat as Apt.ts. */
-export const makeDnfBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeDnfBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "dnf",
   list: (session) =>
     executor

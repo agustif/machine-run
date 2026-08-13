@@ -14,7 +14,7 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@machine-run/secrets": "workspace:*"
+    "@machine-run/secrets": "*"
   },
   "peerDependencies": {
     "alchemy": "2.0.0-beta.67",

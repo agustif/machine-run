@@ -1,6 +1,5 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
 /**
  * Debian/Ubuntu. `install`/`addRepo` run as root — on a server this means
@@ -8,7 +7,7 @@ import type { PackageManagerBackend } from "../Backend.ts";
  * for these commands; a `sudo` that prompts interactively will hang, since
  * nothing here feeds it a terminal or a password.
  */
-export const makeAptBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeAptBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "apt",
   list: (session) =>
     executor

@@ -1,8 +1,7 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
-export const makeBrewBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeBrewBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "brew",
   list: (session) =>
     executor
@@ -20,7 +19,7 @@ export const makeBrewBackend = (executor: CommandExecutor): PackageManagerBacken
     executor.run({ command: `brew tap ${repo}` }, session).pipe(Effect.asVoid),
 });
 
-export const makeBrewCaskBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makeBrewCaskBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "brew-cask",
   list: (session) =>
     executor

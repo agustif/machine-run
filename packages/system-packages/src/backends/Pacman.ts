@@ -1,9 +1,8 @@
-import { CommandExecutor } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../Backend.ts";
+import type { CommandExecutorService, PackageManagerBackend } from "../Backend.ts";
 
 /** Arch Linux. Same sudo caveat as Apt.ts. No AUR support (that needs a separate helper like yay/paru). */
-export const makePacmanBackend = (executor: CommandExecutor): PackageManagerBackend => ({
+export const makePacmanBackend = (executor: CommandExecutorService): PackageManagerBackend => ({
   id: "pacman",
   list: (session) =>
     executor
