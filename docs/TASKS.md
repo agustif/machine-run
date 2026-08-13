@@ -11,6 +11,7 @@ own `TASKS.md`:
 | `dotfiles` | [packages/dotfiles/TASKS.md](../packages/dotfiles/TASKS.md) |
 | `secrets` | [packages/secrets/TASKS.md](../packages/secrets/TASKS.md) |
 | `system-packages` | [packages/system-packages/TASKS.md](../packages/system-packages/TASKS.md) |
+| `system-services` | [packages/system-services/TASKS.md](../packages/system-services/TASKS.md) |
 | `system-settings` | [packages/system-settings/TASKS.md](../packages/system-settings/TASKS.md) |
 | `macos-defaults` | [packages/macos-defaults/TASKS.md](../packages/macos-defaults/TASKS.md) |
 | `runtimes` | [packages/runtimes/TASKS.md](../packages/runtimes/TASKS.md) |
@@ -20,7 +21,7 @@ own `TASKS.md`:
 | `tailscale` | [packages/tailscale/TASKS.md](../packages/tailscale/TASKS.md) |
 | `ssh` | [packages/ssh/TASKS.md](../packages/ssh/TASKS.md) |
 
-All fourteen have one. Six of these files did not exist until the inventory in
+All fifteen have one. Six of the original fourteen did not exist until the inventory in
 [MAP.md](./MAP.md) was written, which is how gaps in `ai`, `git`, `shell`, `ssh`,
 `system-settings` and `tailscale` went untracked.
 
@@ -236,8 +237,29 @@ this repo already owns.
 Each follows the established shape: one interface, one module per
 implementation, dispatched from inside one generic resource.
 
-- [ ] **`System.Service` + `ServiceBackend`** — `launchd` / `systemd --user` /
-      `brew services`. The last major machine surface with no coverage.
+- [x] **`System.Service` + `ServiceBackend`** — `launchd` / `systemd --user` /
+      `brew services`, user-level only (`@machine-run/system-services`).
+      `launchd` and `brew-services` verified read-only against real state on a
+      real Mac (this machine); `systemd-user` verified in a genuinely booted
+      systemd container — see `packages/system-services/src/backends/linux/SystemdUser.ts`'s
+      doc comment for the transcript and the one gap (`enable`/`disable`
+      themselves were not executed). System-level services (root, `sudo brew
+      services`, plain `systemctl`) are an explicit non-goal — see
+      `packages/system-services/TASKS.md`.
+  - [ ] **Not folded into `@machine-run/machine`'s aggregate `providers()`**,
+        by the deliberate scope boundary of the change that added the
+        package (`packages/machine` was left untouched). `examples/complete-machine`
+        works around this today by merging `SystemServices.providers()`
+        directly into its stack's `providers:` field alongside
+        `Machine.providers()` (see `alchemy.run.ts`) — which does type-check
+        and would resolve for real, unlike a version that only *looked*
+        wired up. Folding it into the aggregate itself is still the right
+        end state, so every future recipe gets it for free: add
+        `SystemServices.providers()` to `packages/machine/src/Providers.ts`'s
+        `Layer.mergeAll` list, add `@machine-run/system-services` to that
+        package's `dependencies`, add `packages/system-services` to its
+        `tsconfig.json` `references` — the three edits that file's own doc
+        comment already calls for.
 - [ ] **Manifest resources** — `Brew.Bundle`, `Mise.Toml`,
       `Asdf.ToolVersions`, `Nix.Flake`. Atomic and manifest layers are
       complementary (V1-PLAN §3), but a manifest resource must refuse to

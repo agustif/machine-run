@@ -51,6 +51,9 @@
     },
     {
       "path": "packages/runtimes"
+    },
+    {
+      "path": "packages/system-services"
     }
   ]
 }

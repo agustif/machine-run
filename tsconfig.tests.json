@@ -49,6 +49,9 @@
       "path": "packages/system-packages"
     },
     {
+      "path": "packages/system-services"
+    },
+    {
       "path": "packages/system-settings"
     },
     {
