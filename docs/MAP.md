@@ -120,7 +120,7 @@ it becomes a real hole the moment `ssh` grows `Ssh.Key`.
 | `Machine.Directory` | dotfiles | a directory and its mode | presence, mode |
 | `Machine.Download` | dotfiles | a fetched artifact, pinned by SHA-256 | content hash, mode |
 | `Machine.Exec` | dotfiles | an escape hatch, guarded by `unless`/`creates` | guard outcome |
-| `Machine.SecretFile` | secrets | a secret materialised from a vault | value hash, mode |
+| `Machine.SecretFile` | secrets | a secret materialised from a vault | path, mode — **no secret material** |
 | `System.Package` | system-packages | one installed package | presence, version |
 | `System.Repo` | system-packages | one tap/PPA/COPR | presence |
 | `System.Setting` | system-settings | one gsettings/dconf key | GVariant text |
@@ -377,7 +377,8 @@ reasoning and the judgement calls.
 ✗ Artifacts     — Machine.Download rolls its own fetch+hash instead
 ✗ KeyPair       — the natural implementation of Ssh.Key
 ✗ Namespace     — no multi-machine scoping
-✗ ProviderMode  — plan-vs-apply capability is hand-rolled in toProvider
+✗ ProviderMode  — `live` vs `local` emulation for `alchemy dev`; unrelated
+                  to plan-vs-apply, which is Alchemy's own lifecycle
 ```
 
 ---

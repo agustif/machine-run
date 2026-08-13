@@ -64,13 +64,77 @@ Routes what `read` reports: `undefined` → create; plain attributes → silent
 adopt; `Unowned`-branded → fail, or take over under `--adopt`. Resources with no
 ownership semantics return plain attributes and are adopted silently.
 
-### Not yet used
+### Deliberately not used
 
-`Action` (graph node with no provider lifecycle), `RemovalPolicy`
-(`retain`/`destroy`), `ProviderMode` (`live`/`local`), `KeyPair`, `Namespace`,
-`Artifacts` — see
-[V1-PLAN.md §3b](./V1-PLAN.md#3b-alchemy-primitives-not-yet-bridged) for what
-each would solve.
+Each of these was read in Alchemy's own source and decided on. "We never looked"
+is not a decision, so the reasoning is here rather than left implicit.
+
+**`Artifacts`** — a per-resource in-memory bag shared across one
+`diff → create/update` run, for expensive deterministic intermediates.
+**Rejected at the engine level.** `toProvider` observes twice per resource (once
+in `diff`, once inside the lock before `apply`) and caching the first would look
+like free savings. It is not: the second observation is what makes the write
+race-safe, and a plan-time result reused at apply time would mask drift that
+happened in between — a package uninstalled by something else between a human
+reading a plan and confirming it would still read as present.
+`system-packages` already solved this for itself with two *independent* memoized
+listings rather than one shared cache, which is the correct shape. Full
+reasoning in `packages/engine/TASKS.md`. `Machine.Download` has no use for it
+either: its checksum is a prop, so it never fetches anything just to decide
+whether a re-fetch is needed.
+
+**`KeyPair`** — generates and persists a keypair. **Rejected for `Ssh.Key`.**
+Its state is `{algorithm, privateKey: Redacted<string>, publicKey}` and its own
+doc says the pair is "persisted in state so subsequent deploys keep the same
+keys". Combined with the `Redacted` finding below, that puts an SSH private key
+in plaintext in `.alchemy/`, outside `~/.ssh` and without ssh's `0600`
+expectations — strictly worse than `ssh-keygen`, which never lets the private
+half leave the file it was written to. Secondary problem: the formats are PEM
+`pkcs8`/`spki`, and PEM `spki` is not the `authorized_keys` format.
+
+**`Action`** — a graph node that runs an Effect when its input changes, with no
+provider lifecycle, no `read`, no `delete`. Superficially this is
+`Machine.Exec`, and it is worth being clear why it is not: an Action's
+idempotence comes from *input equality*, while `Machine.Exec`'s comes from
+observing a `unless`/`creates` guard against the real machine. Those differ
+exactly when it matters — an Action whose input did not change is skipped even
+if the machine drifted underneath it. Still open as the right primitive for
+genuinely imperative one-shots that observe nothing, of which this repo has one:
+`MacOS.Default`'s `restartApp`.
+
+**`Namespace`** — hierarchical id scoping (`push(id, effect)`). Nothing to scope
+yet: a stack manages one machine, so every FQN is already unique. It becomes the
+right answer the moment a `machines-<you>` repo manages several machines from
+one stack, which is the intended usage and does not exist yet.
+
+**`ProviderMode`** — `live` versus `local` emulation, for `alchemy dev`. It has
+nothing to do with plan-versus-apply, which is Alchemy's ordinary lifecycle.
+A machine reconciler has no obvious "emulated" mode, because the machine *is*
+local. The one plausible reading — resources converging against a throwaway
+directory instead of the real `~`, as a sandbox — is speculative, and `plan`
+already answers "what would change" without touching anything.
+
+**`RemovalPolicy`** is used, not unused: `toProvider` reads it and defaults to
+`retain`, deliberately inverting Alchemy's class-level `destroy` default.
+
+### `Redacted` does not protect state at rest
+
+Worth stating plainly because the name suggests otherwise.
+`State/StateEncoding.ts` encodes a `Redacted<T>` as
+`{ "__redacted__": <the actual string> }`, with the comment that this is done
+"so the actual string is persisted rather than the `<redacted>` placeholder".
+
+`Redacted` prevents a secret from being *printed* — in logs, in errors, in a
+console inspect. It does nothing about the state file. Anything that puts a
+`Redacted` value in state has put the plaintext on disk.
+
+This repo's answer is not to encrypt around the problem but to avoid it:
+`Machine.SecretFile`'s state is `{path, mode}` and contains no secret material
+at all, not even a hash. The cost is that secret rotation is undetectable by
+construction (V1-PLAN §5), which is a trade made knowingly. See
+[TASKS.md](./TASKS.md) for the encrypted state store that would cover what
+unavoidably lands in state — Alchemy's `StateService` is an explicit extension
+point, so it is implementable without forking anything.
 
 ---
 

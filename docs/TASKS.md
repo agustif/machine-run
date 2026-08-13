@@ -173,6 +173,65 @@ comment still says *unverified*. The Windows runner type-checks only — see
 
 ---
 
+## P1 — `Machine.EncryptedState`
+
+**Recommended: build it.** Not because secrets are in state today — they are
+not, and that rule must hold regardless — but because three things put material
+there that nobody chose to put there.
+
+The evidence, from Alchemy's own source rather than inference:
+
+- `State/StateEncoding.ts` encodes `Redacted<T>` as
+  `{ "__redacted__": <the actual string> }`, explicitly "so the actual string is
+  persisted". **`Redacted` is log-redaction, not encryption at rest.**
+- `Alchemy.KeyPair`'s state is `{privateKey: Redacted<string>, ...}` and its
+  doc says the pair is persisted so deploys keep the same keys. Any Alchemy
+  resource of that shape writes plaintext key material into `.alchemy/`.
+- Alchemy's wider resource library (Cloudflare, AWS, Neon, Planetscale…) is
+  full of API tokens. The moment one machine-run stack also manages a cloud
+  resource — which is the whole point of it being an Alchemy stack — those
+  tokens are plaintext on the machine's disk.
+
+State also records vault references (`op://Personal/GitHub SSH Key/private
+key`), paths and package lists. Individually dull; together a map of the
+machine.
+
+**Why this repo is unusually well placed to build it.** `StateService`
+(`State/State.ts`) is a documented extension point — "third-party state stores
+should pick a short, stable, kebab-case slug" — with a small interface (`id`,
+`getVersion`, `listStacks`, `listStages`, `get`, `set`,
+`getReplacedResources`). And the hard part of any encrypted store is *where the
+key lives*, which machine-run already has an answer for: `@machine-run/secrets`
+owns a `SecretBackend` seam whose `keychain` backend is exactly the right home
+for a local encryption key. The key comes from the OS keychain through a seam
+this repo already owns.
+
+- [ ] **Decide the threat model first, and write it down.** This protects
+      against *disk-at-rest* reads: a stolen laptop, a synced backup, a
+      `.alchemy/` directory accidentally committed. It does **not** protect
+      against anything running as the user, because that process can ask the
+      keychain too. Claiming more than that would be theatre.
+- [ ] **`StateService` implementation** wrapping `LocalState`, encrypting the
+      value on `set` and decrypting on `get`. Envelope shape: a per-stack data
+      key, itself stored in the OS keychain; AES-256-GCM via Effect's `Crypto`
+      service (already wired into `core`'s `services()`), with the FQN as
+      additional authenticated data so a row cannot be moved between resources.
+- [ ] **Design for losing the key.** The tool that manages your machine needing
+      a secret to read its own state is a real bootstrapping hazard. It is
+      survivable *because state is not the source of truth — the machine is*:
+      an unreadable state file should degrade to "nothing is managed" and lean
+      on the existing adoption path (`read` → `AdoptPolicy`), not hard-fail.
+      That path exists and is the reason this is tractable at all.
+- [ ] **Do not weaken the primary rule.** Encrypting state is defence in depth
+      for what unavoidably lands there. `Machine.SecretFile` must still keep
+      secret material out of state entirely; an encrypted store is not a licence
+      to start storing values.
+- [ ] **Then reconsider `Ssh.Key`.** A generated key that survives across
+      deploys is only safe once this exists — and even then, writing the private
+      half anywhere other than `~/.ssh` deserves its own argument.
+
+---
+
 ## P2 — remaining seams
 
 Each follows the established shape: one interface, one module per
