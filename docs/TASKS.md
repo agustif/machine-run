@@ -91,10 +91,15 @@ package rather than shrinking:
 ## P1 — verification CI can now close
 
 CI runs on `ubuntu`, `macos` and `windows` runners, which removes the last
-"unreachable target" excuses. Each item below is a backend whose doc comment
+"unreachable target" excuses. The Windows runner type-checks only — see
+"Windows" under P2 for the 16 tests that fail there and why. Each item below is a backend whose doc comment
 currently says *unverified*.
 
-- [ ] `winget` / `choco` parsers against captured Windows output.
+- [ ] `winget` / `choco` parsers against captured Windows output. One thing is
+      already confirmed: `winget list` **exits 1** without
+      `--accept-source-agreements` on any machine that has not accepted the
+      `msstore` terms, which is every fresh machine. The backend already passes
+      it; the CI step did not, and failed exactly that way.
 - [ ] `mas`, and the `defaults` read path, against a real macOS runner.
 - [ ] `snap` — needs systemd, so a container is not enough.
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).
@@ -118,6 +123,36 @@ implementation, dispatched from inside one generic resource.
       `KeyPair` or materialise from a vault), agent configuration.
 - [ ] **Windows** — `Platform` service in `core`, registry `SettingsBackend`,
       `bootstrap.ps1`, and an audit of path handling for `/` assumptions.
+
+      The repo now **type-checks** on Windows (`typecheck (windows)` in CI) but
+      the test suite does not pass there: 16 tests across 7 files fail, for
+      three distinct reasons. This is the concrete work list.
+
+      *Platform truth — POSIX modes are not representable.* Node reports `0o666`
+      (`438`) for every file on Windows and `chmod` only toggles the read-only
+      bit, so a pinned `mode` can never be observed back and `matches` reports
+      drift forever. Affects `Directory` (4), `File` (2), `SecretFile` (3),
+      `Download` (1). The decision to make: ignore `mode` on Windows, or reject
+      it with a typed error. Ignoring it silently is not acceptable for
+      `SecretFile`, where the whole point of `0o600` is that nobody else reads
+      the file — Windows needs an ACL (`icacls`) path, which is its own seam.
+
+      *Platform truth — `chmod 0o000` does not make a directory unreadable.*
+      Three tests build an unreadable-parent fixture that way to prove
+      `observe` raises a typed error instead of reporting absence. The
+      invariant is right; the fixture cannot express it on Windows. Affects
+      `File`, `SecretFile`, `Symlink`.
+
+      *Suspected real bug, not a platform truth.* `packages/engine/test/unapply.test.ts`
+      → "unapply restores the pre-existing content it backed up on adoption"
+      fails because `output.backupPath` is `undefined`: `snapshotBeforeApply`
+      produced no backup at all on Windows. If that reproduces outside the
+      test, adopting an existing file on Windows overwrites it with no backup,
+      which is the one failure mode the snapshot exists to prevent. Diagnose
+      this one before the two above.
+
+      *Also unverified on Windows:* `git clone`/`remote` behaviour — three
+      `Git.Repo` `apply` tests fail and the cause has not been read yet.
 
 **Not before a deploy works.** Every package added while `plan` is broken is a
 package whose `observe`/`apply` the engine has never run.

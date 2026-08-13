@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -45,6 +45,29 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run lint
 
+  # Windows gets its own job because it verifies strictly less, and the job
+  # name should say so rather than a green `check (windows-latest)` implying
+  # the suite passes there. It does not: 16 tests fail on Windows for three
+  # distinct reasons, enumerated in docs/TASKS.md under "Windows". Two are
+  # platform truths (POSIX modes are not representable; `chmod 0o000` does not
+  # make a directory unreadable), and one — `snapshotBeforeApply` producing no
+  # `backupPath` — is a suspected real bug.
+  #
+  # Type-checking on Windows is still worth a runner of its own: it is
+  # platform-independent, and it is what caught a second copy of `effect`
+  # reaching one OS's install and nowhere else.
+  typecheck-windows:
+    name: typecheck (windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: tsc -b
+        run: npm run build
+
   # ---------------------------------------------------------------------
   # Verification jobs: run the real tools this repo parses, on a machine
   # that actually has them. Each one closes a gap that is currently marked
@@ -65,11 +88,17 @@ jobs:
       # obtain real output from tools no developer here has access to, so the
       # fixtures in packages/system-packages/test stop being documented
       # guesses. A parser change should be driven by this output.
+      # `--accept-source-agreements` is not optional: without it `winget list`
+      # exits 1 on a machine that has never accepted the `msstore` source's
+      # terms, which is every fresh machine and every CI runner. Verified here
+      # — this step failed exactly that way before the flag was added, which
+      # confirms the flag our Winget backend already passes is required rather
+      # than defensive.
       - name: Capture real winget output
         shell: pwsh
         run: |
           winget --version | Tee-Object -FilePath winget-version.txt
-          winget list --disable-interactivity | Tee-Object -FilePath winget-list.txt
+          winget list --accept-source-agreements --disable-interactivity | Tee-Object -FilePath winget-list.txt
       - name: Capture real choco output
         shell: pwsh
         run: |
