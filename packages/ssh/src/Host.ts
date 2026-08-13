@@ -61,7 +61,25 @@ export interface SshHostProps {
  * an existing marked block is always updated in place afterward — see
  * {@link Dotfiles.ManagedBlockProps.position}.
  */
-export const sshHost = (props: SshHostProps) => {
+export const sshHost = (props: SshHostProps) =>
+  Dotfiles.ManagedBlock(`ssh-host-${props.name}`, sshHostBlockProps(props));
+
+/**
+ * The `Dotfiles.ManagedBlockProps` `sshHost` hands to `Dotfiles.ManagedBlock`
+ * — split out as a pure function, rather than inlined in {@link sshHost},
+ * because `Dotfiles.ManagedBlock(id, props)` returns an `Effect` that only
+ * resolves inside a running Alchemy stack. Rendering the block's content and
+ * choosing its position/mode needs none of that, so keeping it a plain
+ * function lets it be tested directly (see `test/Host.test.ts`) the same way
+ * `Dotfiles.ManagedBlock`'s own `renderFile`/`readBlock` are pure and tested
+ * without a filesystem.
+ *
+ * `path` is passed straight through, `~` and all — this function never
+ * expands it. Expansion is `Dotfiles.ManagedBlock`'s reconciler's job (via
+ * `MachinePaths`, at observe/apply time), not this composition's; doing it
+ * twice would only risk the two disagreeing.
+ */
+export const sshHostBlockProps = (props: SshHostProps): Dotfiles.ManagedBlockProps => {
   const lines = [`Host ${props.hostnames.join(" ")}`];
   if (props.user) lines.push(`\tUser ${props.user}`);
   if (props.identityFile) lines.push(`\tIdentityFile ${props.identityFile}`);
@@ -70,12 +88,12 @@ export const sshHost = (props: SshHostProps) => {
     lines.push(`\t${key} ${value}`);
   }
 
-  return Dotfiles.ManagedBlock(`ssh-host-${props.name}`, {
+  return {
     path: props.configPath,
     marker: `ssh-host:${props.name}`,
     content: lines.join("\n"),
     position: "prepend",
     directoryMode: 0o700,
     ...(props.after !== undefined ? { after: props.after } : {}),
-  });
+  };
 };
