@@ -19,5 +19,10 @@ The file-shaped primitives every other package composes on.
       `ManagedBlock` and `SecretFile` each create parent directories themselves.
       Once a directory resource exists that is a second way to say the same
       thing; pick one.
-- [ ] **`ManagedBlock` marker escaping.** Content containing its own end marker
-      corrupts the region on the next read.
+- [x] **`ManagedBlock` marker escaping.** Closed by refusing rather than
+      escaping. Content carrying either of this region's own markers is
+      rejected at render time, because these are shell and ssh configs whose
+      bytes must survive verbatim — there is no escaping scheme worth having.
+      A file that _already_ carries a duplicated marker is also refused, since
+      splicing the first pair would silently discard whatever sits between the
+      others. Both paths verified to fail without the guards.

@@ -134,6 +134,9 @@ export interface RenderOptions {
 /** Region content is compared and stored without trailing blank lines. */
 const normalize = (content: string) => content.replace(/\n+$/, "");
 
+/** How many times `needle` appears in `haystack`, counting non-overlapping hits. */
+const occurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
+
 /**
  * The current content of a region, or `undefined` when the file has no such
  * region.
@@ -173,13 +176,39 @@ export const renderFile = (
   const comment = options.commentPrefix ?? DEFAULT_COMMENT;
   const begin = beginMarker(marker, comment);
   const end = endMarker(marker, comment);
-  const region = `${begin}\n${normalize(content)}\n${end}`;
+  const body = normalize(content);
+
+  // Content carrying either marker would make the region's own boundaries
+  // ambiguous the moment it is written: the next read finds the marker inside
+  // the content and treats it as the edge, so the region truncates and the
+  // real END is left orphaned in the file. There is no escaping scheme worth
+  // having here — these files are shell configs and ssh configs, whose bytes
+  // must survive verbatim — so this refuses instead, and the caller changes
+  // either the content or the marker.
+  if (body.includes(begin) || body.includes(end)) {
+    return Result.fail({
+      detail: `the content contains this region's own marker ("${begin}" or "${end}"), which would make its boundaries ambiguous`,
+    });
+  }
+
+  const region = `${begin}\n${body}\n${end}`;
 
   const beginIndex = existing.indexOf(begin);
   // END is searched for after BEGIN so an inverted pair is detected rather
   // than spliced into nonsense.
   const endIndex =
     beginIndex === -1 ? existing.indexOf(end) : existing.indexOf(end, beginIndex + begin.length);
+
+  // A file that already carries a duplicated marker cannot be spliced
+  // unambiguously, whoever put it there — an older write that predates the
+  // guard above, a hand edit, or two resources sharing one marker. Splicing
+  // the first pair would silently discard whatever sits between the others.
+  if (occurrences(existing, begin) > 1 || occurrences(existing, end) > 1) {
+    return Result.fail({
+      detail:
+        "the file contains more than one of this region's markers, so its boundaries are ambiguous",
+    });
+  }
 
   if (beginIndex === -1 && endIndex === -1) {
     if (options.position === "prepend") {

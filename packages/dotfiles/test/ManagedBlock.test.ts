@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import * as Result from "effect/Result";
-import { readBlock, renderFile } from "../src/ManagedBlock.ts";
+import { beginMarker, endMarker, readBlock, renderFile } from "../src/ManagedBlock.ts";
 
 /** Unwraps a render that is expected to succeed. */
 const render = (
@@ -96,4 +96,66 @@ it("a hand-edited region no longer matches what was written", () => {
   const file = render("", "example", "export A=1");
   const edited = file.replace("export A=1", "export A=99");
   expect(readBlock(edited, "example")).toBe("export A=99");
+});
+
+/**
+ * The corruption these two guards close.
+ *
+ * A managed region is delimited by literal marker lines, so content carrying
+ * one of those lines makes the region's own boundaries ambiguous. Left
+ * unguarded it is silent and destructive: the next read finds the marker
+ * inside the content, treats it as the edge, and the splice that follows
+ * writes over everything up to it — leaving the real END orphaned in a file
+ * whose other lines this tool does not own.
+ */
+it("refuses content carrying this region's own END marker", () => {
+  const result = renderFile("", "shell-path", `echo '${endMarker("shell-path")}'`);
+  expect(Result.isFailure(result)).toBe(true);
+});
+
+it("refuses content carrying this region's own BEGIN marker", () => {
+  const result = renderFile("", "shell-path", `echo '${beginMarker("shell-path")}'`);
+  expect(Result.isFailure(result)).toBe(true);
+});
+
+it("allows content mentioning a different region's marker", () => {
+  // Only this region's own markers are ambiguous. A file may legitimately
+  // talk about another one.
+  const result = renderFile("", "shell-path", `echo '${endMarker("other-block")}'`);
+  expect(Result.isSuccess(result)).toBe(true);
+});
+
+it("refuses to splice a file that already carries a duplicated marker", () => {
+  // Whoever produced it — a write predating the guard above, a hand edit, or
+  // two resources sharing one marker — the first pair cannot be chosen
+  // safely, because whatever sits between the others would be discarded.
+  const begin = beginMarker("shell-path");
+  const end = endMarker("shell-path");
+  const corrupted = [begin, "export A=1", end, "", begin, "export B=2", end, ""].join("\n");
+
+  const result = renderFile(corrupted, "shell-path", "export A=1");
+  expect(Result.isFailure(result)).toBe(true);
+});
+
+it("still replaces a single well-formed region in place", () => {
+  // The guards must not make the ordinary case stricter.
+  const begin = beginMarker("shell-path");
+  const end = endMarker("shell-path");
+  const existing = [
+    "# hand-written above",
+    begin,
+    "export OLD=1",
+    end,
+    "# hand-written below",
+    "",
+  ].join("\n");
+
+  const result = renderFile(existing, "shell-path", "export NEW=1");
+  expect(Result.isSuccess(result)).toBe(true);
+  if (Result.isSuccess(result)) {
+    expect(result.success).toContain("export NEW=1");
+    expect(result.success).not.toContain("export OLD=1");
+    expect(result.success).toContain("# hand-written above");
+    expect(result.success).toContain("# hand-written below");
+  }
 });
