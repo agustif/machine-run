@@ -9,13 +9,11 @@
     { "path": "../../packages/ai-tools" },
     { "path": "../../packages/dotfiles" },
     { "path": "../../packages/git-identity" },
-    { "path": "../../packages/homebrew" },
     { "path": "../../packages/macos-defaults" },
-    { "path": "../../packages/roles" },
     { "path": "../../packages/secrets" },
     { "path": "../../packages/ssh" },
-    { "path": "../../packages/tailscale" },
-    { "path": "../../packages/toolchains" }
+    { "path": "../../packages/system-packages" },
+    { "path": "../../packages/tailscale" }
   ],
   "include": ["alchemy.run.ts"]
 }

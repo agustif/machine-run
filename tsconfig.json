@@ -3,15 +3,13 @@
   "references": [
     { "path": "packages/core" },
     { "path": "packages/dotfiles" },
-    { "path": "packages/homebrew" },
     { "path": "packages/git-identity" },
     { "path": "packages/secrets" },
-    { "path": "packages/roles" },
-    { "path": "packages/toolchains" },
     { "path": "packages/ai-tools" },
     { "path": "packages/macos-defaults" },
     { "path": "packages/ssh" },
+    { "path": "packages/system-packages" },
     { "path": "packages/tailscale" },
-    { "path": "apps/macbook-neo" }
+    { "path": "examples/example-machine" }
   ]
 }

@@ -31,7 +31,7 @@ const beginMarker = (marker: string) => `# machine-run:${marker} BEGIN`;
 const endMarker = (marker: string) => `# machine-run:${marker} END`;
 
 /** Replaces (or appends) the marked block within `existing`, leaving the rest of the file untouched. */
-const renderFile = (existing: string, marker: string, content: string) => {
+export const renderFile = (existing: string, marker: string, content: string) => {
   const begin = beginMarker(marker);
   const end = endMarker(marker);
   const block = `${begin}\n${content.replace(/\n+$/, "")}\n${end}`;
