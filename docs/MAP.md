@@ -166,7 +166,7 @@ macOS    ✓ brew        ~ brew-cask   ~ port(MacPorts)   ✓ mas (list only)
 Linux    ✓ apt         ✓ dnf         ✓ pacman           ✓ yay   ~ paru
          ✓ flatpak     ~ snap  ← needs systemd; a container is not enough
 Windows  ! winget      ✓ choco
-language ~ cargo  ~ npm  ~ pipx  ~ uv-tool  ~ gem  ~ go-install
+language ✓ cargo  ✓ npm  ✓ pipx  ✓ uv-tool  ✓ gem  ✓ go-install
 ```
 
 `! winget` — the `list` path is verified against real runner output and the
@@ -180,20 +180,36 @@ the real fix — `✗`, not started. winget's *install* flags remain unverified:
 nothing here has ever installed a Windows package.
 
 `✓ mas (list only)` — verified on a real signed-in machine, but `mas install`
-needs root and was never run. `~ paru` is the same shape: `yay` was genuinely
-built from the AUR and run, `paru` is the identical command applied to the other
-binary. `~ snap` is the one backend a container genuinely cannot verify.
+needs root and was never run. `~ paru` was attempted twice: `paru-bin` built
+and installed but failed to *run* (`libalpm.so.15` missing — a real ABI
+mismatch, unlike `yay-bin`'s clean run in the same kind of container), and a
+from-source build compiled cleanly through its whole ~140-crate dependency
+tree but didn't finish its final LTO link inside the session's time budget
+(see `docs/notes/system-packages-notes.md`). `~ snap` is the one backend a
+container genuinely cannot verify.
 
 ### `SecretBackend` — 5 ids, `secrets`
 
 ```
-~ 1password (op)   ~ doppler   ~ keychain (security)   ~ pass   ~ env
+~ 1password (op)   ~ doppler   ~ keychain (security)   ✓ pass   ~ env
 ```
 
-**Not one of these has read a real secret.** Doppler's flags were checked against
-`doppler secrets get --help`, which confirms the CLI's contract and nothing about
-its output. The rest need an authenticated vault, which CI has none of. This is
-the least-verified seam in the repo, and it is the one that writes files with
+**`✓ pass`** — the one backend in this seam a container can fully verify: no
+account, just a locally-generated GPG key. Verified against `docker run --rm
+debian:stable`: a real `gpg --batch --gen-key`, `pass init`, `pass insert -m`
+for both a single-line secret and a multi-line one, and `pass show` reading
+both back — confirming the first-line-is-the-secret convention
+`PassBackend.read` assumes, and that a missing entry's real error text
+classifies as `SecretReadFailed`, not `SecretCliMissing` (see
+`docs/notes/secrets-pass-notes.md`).
+
+**None of the other four has read a real secret.** Doppler's flags were
+checked against `doppler secrets get --help`, which confirms the CLI's
+contract and nothing about its output. `1password`/`keychain` need an
+authenticated vault or a real macOS login keychain, neither of which this
+environment can supply without violating the rule against automating
+authentication to a secret store (`AGENTS.md` rule 8). This remains the
+least-verified seam in the repo, and it is the one that writes files with
 `0o600` on the strength of being right.
 
 ### `SettingsBackend` — 2 ids, `system-settings`

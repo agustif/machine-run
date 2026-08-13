@@ -16,6 +16,17 @@ import { firstTokens, lines } from "../../parse.ts";
  * installed versions (no `--all` flag needed; `gem list --local` already
  * shows every installed version).
  *
+ * Independently reverified against `docker run --rm ruby:3.3` (Ruby 3.3.12,
+ * gem 3.5.22 — a different Ruby entirely, not SIP-affected): a fresh image
+ * already carried one plain (non-default) `rake (13.1.0)`, and after
+ * `gem install --user-install cowsay` plus two more pinned
+ * `gem install --user-install rake -v <version>` calls, `gem list --local`
+ * collapsed all three `rake` installs into the one expected line —
+ * `rake (13.4.2, 13.1.0, 13.0.6)` — alongside a new `cowsay (0.3.0)` line,
+ * for 72 total lines, confirming the parser doesn't depend on anything
+ * macOS- or SIP-specific (fixture: `test/fixtures/gem-list-local.txt`,
+ * captured after both installs).
+ *
  * `install` uses `--user-install`: this machine's system Ruby refused a
  * plain `gem install` with `Gem::FilePermissionError` (SIP-protected gem
  * directory), and `--user-install` works whether or not that protection

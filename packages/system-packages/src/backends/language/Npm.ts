@@ -18,6 +18,15 @@ import { BackendParseError, type PackageManagerBackend } from "../../Backend.ts"
  * see `makeNpmBackend`'s own comment) that this doesn't need and
  * `Schema.Struct` ignores by default (`onExcessProperty: "ignore"`), rather
  * than failing to decode over fields nothing here reads.
+ *
+ * Verified against `docker run --rm node:22` (npm 10.9.8): a fresh image's
+ * `npm ls -g --depth=0 --json` printed `{"name":"lib","dependencies":
+ * {"corepack":{...},"npm":{...}}}` — the top-level `name` key this container
+ * happened to add is exactly the kind of extra field `onExcessProperty:
+ * "ignore"` above exists for — and after `npm install -g cowsay` and
+ * `npm install -g typescript`, both new names appeared alongside the
+ * originals with no other shape change (fixtures:
+ * `test/fixtures/npm-ls-global-{before,after}.json`).
  */
 const NpmLs = Schema.fromJsonString(
   Schema.Struct({

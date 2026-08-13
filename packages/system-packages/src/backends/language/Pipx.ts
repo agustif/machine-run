@@ -17,6 +17,14 @@ import { lines } from "../../parse.ts";
  * `pipx install cowsay` then `pipx list --short` printed exactly
  * `cowsay 6.1`, and installing needed no extra flags — `pipx install` is
  * non-interactive by default.
+ *
+ * Independently reverified against `docker run --rm python:3.12`
+ * (`python -m pip install pipx`, pipx 1.16.6): the empty-state banner is
+ * byte-identical to the local capture above, and after `pipx install cowsay`
+ * followed by `pipx install yt-dlp`, `pipx list --short` printed
+ * `cowsay 6.1` and `yt-dlp 2026.7.4` on separate lines — the first real
+ * multi-package listing this parser has been checked against (fixtures:
+ * `test/fixtures/pipx-list{,-empty}.txt`).
  */
 export const parsePipxList = (stdout: string): string[] => {
   const names: string[] = [];

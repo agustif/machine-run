@@ -1,0 +1,4 @@
+just v1.58.0:
+    just
+ripgrep v15.2.0:
+    rg

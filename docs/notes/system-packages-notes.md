@@ -261,3 +261,122 @@ Both resources' backends (`src/backends/*.ts`) no longer take a
 (`@machine-run/engine`'s own type — the reconciler's command-running
 capability, already bound to the right session by the engine) per call, so a
 backend can never run a command outside the reconciler's own bookkeeping.
+
+## The six language backends, in containers (`src/backends/language/*.ts`)
+
+All six had already been checked against a real local install on this
+machine (see "New package-manager backends" above), but none of that had
+ever produced a committed fixture or run anywhere but this one Mac. This
+session ran every one of them again inside Docker — `rust:latest`,
+`node:22`, `python:3.12`, `ruby:3.3`, `golang:1.23` — installed a real
+package with each manager, and captured the actual `list` output as a
+fixture under `test/fixtures/`, pinned by `test/languageBackends.test.ts`.
+
+**All six parsers matched on the first try — no code changes.** Specifics
+worth recording:
+
+- **`cargo`** — a fresh `rust:latest` printed nothing for `cargo install
+  --list`; after `cargo install just --locked` then `cargo install ripgrep
+  --locked`, it printed two unindented `<crate> v<version>:` headers each
+  followed by one indented binary line, exactly as documented.
+- **`npm`** — `node:22`'s `npm ls -g --depth=0 --json` came back with an
+  extra top-level `"name": "lib"` key this container's npm added that the
+  local capture hadn't shown; `NpmLs`'s `Schema.Struct` ignoring excess
+  properties by default is exactly what kept this from being a parse
+  failure — a real, if narrowly-averted, confirmation of that design choice.
+- **`pipx`/`uv-tool`** — `python:3.12` gave the first real *multi-package*
+  listings for both (previously only ever verified with one installed
+  package apiece): `pipx list --short` after installing `cowsay` and
+  `yt-dlp` printed both on separate two-token lines; `uv tool list` printed
+  two full header-plus-sub-line pairs back to back, confirming the `v\d`
+  header regex doesn't false-match a second tool's own `- <bin>` line.
+- **`gem`** — `ruby:3.3` (Ruby 3.3.12, gem 3.5.22) is a different Ruby
+  entirely from this machine's SIP-protected system Ruby 2.6.10, and parsed
+  identically: a pre-existing `rake (13.1.0)` plus two more pinned installs
+  collapsed into one `rake (13.4.2, 13.1.0, 13.0.6)` line, alongside a new
+  `cowsay (0.3.0)` line.
+- **`go-install`** — `golang:1.23` (go1.23.12) reproduced the documented
+  empty-directory case exactly (`go version -m dir/*` fails on the literal
+  `*`, `2>/dev/null; true` swallows it, `list` sees empty stdout) and, after
+  installing two binaries, printed both build-info blocks back to back with
+  `parseGoVersionM` correctly pulling just the two import paths out. It also
+  surfaced a real but incidental finding: `go install ...@latest` failed
+  outright against go1.23.12 with `golang.org/x/tools@v0.49.0 requires go >=
+  1.25.0` — a dependency's own version floor, unrelated to this backend's
+  parsing, and worth knowing about if this ever runs on a machine with an
+  older Go. Installing pinned `@v0.21.0` builds of the same two tools worked
+  and is what the committed fixture reflects.
+
+All six are `✓` in [MAP.md](../MAP.md) as of this session.
+
+One thing this session broke and fixed, unrelated to any backend: this
+sandbox's `docker run --platform linux/amd64` emulation started failing
+outright (`exec ...: exec format error`, even for `echo` in a fresh `alpine`
+container) partway through, for reasons unrelated to any pacman transaction
+— `docker run --privileged --rm tonistiigi/binfmt --install all` re-registered
+the QEMU binfmt handlers and fixed it. Noted here in case a future session
+hits the same wall: it is an environment issue, not a finding about any tool
+under test.
+
+## `paru` — attempted, still `~` (`src/backends/linux/Aur.ts`)
+
+Two attempts, same `docker run --rm --platform linux/amd64 archlinux:latest`
+image `yay`'s own verification used, neither reaching a running `paru` this
+session:
+
+**Attempt 1 — `paru-bin`, mirroring exactly what worked for `yay-bin`:**
+`pacman -Sy --noconfirm --disable-sandbox sudo base-devel git` (sync only, no
+upgrade — the same as the `yay` session), then as a non-root `builder` user
+`git clone https://aur.archlinux.org/paru-bin.git && makepkg -si --noconfirm`.
+The package built and installed without error. Running it immediately failed:
+
+```
+$ paru --version
+paru: error while loading shared libraries: libalpm.so.15: cannot open shared object file: No such file or directory
+```
+
+This is a real ABI mismatch, not a fluke: `paru-bin` is a precompiled binary
+built against whatever `libalpm` version the AUR's own build server had at
+build time, and a container that only synced package databases (`pacman -Sy`)
+without upgrading installed packages (`pacman -Syu`) can easily have an older
+one. `yay-bin`'s successful run in the identical kind of container in the
+earlier session did **not** mean every AUR `-bin` package tolerates a
+freshly-synced-but-not-upgraded system this well — that was this session's
+assumption walking in, and it was wrong.
+
+A `pacman -Syu` before installing would plausibly fix this, but the first
+attempt at that combination corrupted this sandbox's own amd64 QEMU emulation
+mid-transaction (`exec ...: exec format error` for every subsequent command,
+including a bare `echo`, in **any** amd64 container — not just this one).
+Re-registering the binfmt handlers (`docker run --privileged --rm
+tonistiigi/binfmt --install all`, noted above) fixed the emulation, but
+whether it was `pacman -Syu` itself or an unrelated sandbox hiccup that broke
+it first was not isolated — the safer path taken afterward was attempt 2.
+
+**Attempt 2 — building plain `paru` from source**, which sidesteps the ABI
+question entirely (it links against whatever `libalpm` is actually present,
+rather than shipping its own expectation of one): `pacman -Sy --noconfirm
+--disable-sandbox sudo base-devel git rust` (no `-Syu`), then `git clone
+https://aur.archlinux.org/paru.git && makepkg -si --noconfirm` as `builder`.
+This compiled cleanly through paru's entire dependency tree — `alpm`,
+`alpm-utils`, `aur-depends`, `aur-fetch`, `raur`, `reqwest`, `scraper`,
+`html5ever`, `cssparser`, `tokio`, `chrono`, roughly 140 crates in total, zero
+compile errors — and reached the final step: linking the `paru` binary itself
+in release mode with full LTO and `codegen-units=1`. That final link was
+still actively running (steady 100% CPU, memory climbing past 2.6GB, no
+crash) when this session's verification work concluded; it simply did not
+finish inside the time available. `codegen-units=1` plus full LTO means the
+whole ~140-crate dependency graph gets optimized and linked as one
+single-threaded unit — normally a multi-minute cost even natively, and this
+sandbox runs amd64 Arch entirely under QEMU emulation on Apple Silicon, which
+compounds it further. Nothing about the *build* suggested it would fail; it
+was purely a matter of time.
+
+**Net result:** `paru` stays `~` in [MAP.md](../MAP.md) — the `-S`/`-Qmq`
+behavioural checks `yay`'s section already has were never reached — but this
+is no longer the same `~` as before. The `paru-bin` ABI-mismatch finding is
+real and worth remembering the next time an AUR `-bin` package is verified in
+a freshly-synced container, and the from-source path is now known to compile
+cleanly; a session with either more time or a faster (non-emulated) amd64
+host can pick the same container recipe back up and just wait out the final
+link.
