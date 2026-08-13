@@ -17,7 +17,8 @@
     "check": "tsc -b && oxlint",
     "build": "tsc -b",
     "test": "vitest run",
-    "lint": "oxlint"
+    "lint": "oxlint",
+    "clean": "rm -rf .tsbuild packages/*/lib examples/*/lib packages/*/tsconfig.tsbuildinfo examples/*/tsconfig.tsbuildinfo tsconfig.tests.tsbuildinfo"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.108",

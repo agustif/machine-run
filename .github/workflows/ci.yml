@@ -115,6 +115,11 @@ jobs:
       # packages/system-packages/test/fixtures and pins the fix. What this step
       # adds is the other direction: noticing if winget or choco changes its
       # format, which a frozen fixture never can.
+      # `tsc -b` first: every package's `exports` map points at `lib/`, so a
+      # cross-package import does not resolve from a bare `npm ci` checkout.
+      - name: tsc -b
+        run: npm run build
+
       - name: Assert the parsers against that output
         env:
           MACHINE_RUN_WINGET_LIST: winget-list.txt
