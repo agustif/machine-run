@@ -205,26 +205,36 @@ owns a `SecretBackend` seam whose `keychain` backend is exactly the right home
 for a local encryption key. The key comes from the OS keychain through a seam
 this repo already owns.
 
-- [ ] **Decide the threat model first, and write it down.** This protects
-      against *disk-at-rest* reads: a stolen laptop, a synced backup, a
-      `.alchemy/` directory accidentally committed. It does **not** protect
-      against anything running as the user, because that process can ask the
-      keychain too. Claiming more than that would be theatre.
-- [ ] **`StateService` implementation** wrapping `LocalState`, encrypting the
-      value on `set` and decrypting on `get`. Envelope shape: a per-stack data
-      key, itself stored in the OS keychain; AES-256-GCM via Effect's `Crypto`
-      service (already wired into `core`'s `services()`), with the FQN as
-      additional authenticated data so a row cannot be moved between resources.
-- [ ] **Design for losing the key.** The tool that manages your machine needing
-      a secret to read its own state is a real bootstrapping hazard. It is
-      survivable *because state is not the source of truth — the machine is*:
-      an unreadable state file should degrade to "nothing is managed" and lean
-      on the existing adoption path (`read` → `AdoptPolicy`), not hard-fail.
-      That path exists and is the reason this is tractable at all.
-- [ ] **Do not weaken the primary rule.** Encrypting state is defence in depth
-      for what unavoidably lands there. `Machine.SecretFile` must still keep
-      secret material out of state entirely; an encrypted store is not a licence
-      to start storing values.
+- [x] **Decide the threat model first, and write it down.** Disk-at-rest reads
+      only — a stolen laptop, a synced backup, a `.alchemy/` directory
+      accidentally committed — not anything running as the user, since that
+      process can ask the keychain too. Written into
+      `packages/state/src/EncryptedState.ts`'s module doc comment.
+- [x] **`StateService` implementation**, `@machine-run/state`'s
+      `encryptedState()`, wrapping `LocalState` and encrypting the value on
+      `set`/decrypting on `get`. Envelope: a per-stack data key in the OS
+      keychain (`packages/state/src/DataKey.ts`, via `@machine-run/secrets`'s
+      `keychain` backend), AES-256-GCM through `SubtleCrypto` — Effect's
+      `Crypto` service has no AES-GCM primitive (checked against
+      `effect/src/Crypto.ts`; only `digest`/`randomBytes`), so randomness
+      comes from `Crypto` and the cipher itself from the WebCrypto global, the
+      same split Effect's own `effect/unstable/eventlog/EventLogEncryption.ts`
+      uses — with `stack\0stage\0fqn` as additional authenticated data so a
+      row cannot be moved between resources, stages, or stacks. `core` cannot
+      depend on `secrets` (would invert the dependency graph — verified by
+      reading both `package.json`s), so this is its own package rather than
+      living in `core`; see `packages/state/TASKS.md` for the fuller
+      reasoning.
+- [x] **Design for losing the key.** `get` degrades any row that fails to
+      decrypt — missing key, corrupt ciphertext, tampering, wrong resource —
+      to `undefined`, logging a warning, leaning on the existing adoption path
+      (`read` → `AdoptPolicy`). `set` does not get the same treatment: if no
+      key can be obtained or created, nothing was lost yet, so it surfaces as
+      an ordinary `StateStoreError` instead of silently writing plaintext.
+- [x] **Do not weaken the primary rule.** Nothing about `Machine.SecretFile`
+      changed; this store is unconditioned on it and is defence in depth for
+      what unavoidably lands in state regardless (Alchemy's own
+      `Redacted`-shaped attributes, cloud resource tokens).
 - [ ] **Then reconsider `Ssh.Key`.** A generated key that survives across
       deploys is only safe once this exists — and even then, writing the private
       half anywhere other than `~/.ssh` deserves its own argument.

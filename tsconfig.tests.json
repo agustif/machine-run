@@ -46,6 +46,9 @@
       "path": "packages/ssh"
     },
     {
+      "path": "packages/state"
+    },
+    {
       "path": "packages/system-packages"
     },
     {
