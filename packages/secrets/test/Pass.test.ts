@@ -30,11 +30,13 @@ const failingExec =
   () =>
     Effect.fail(new CommandError({ command, reason: new UnexpectedExit({ exitCode: 1, stderr }) }));
 
-it.effect("PassBackend.read returns only the first line (real `pass show`, single-line secret)", () =>
-  Effect.gen(function* () {
-    const value = yield* PassBackend.read("work/github/token", fakeExec("sup3rsecret\n"));
-    expect(Redacted.value(value)).toBe("sup3rsecret");
-  }),
+it.effect(
+  "PassBackend.read returns only the first line (real `pass show`, single-line secret)",
+  () =>
+    Effect.gen(function* () {
+      const value = yield* PassBackend.read("work/github/token", fakeExec("sup3rsecret\n"));
+      expect(Redacted.value(value)).toBe("sup3rsecret");
+    }),
 );
 
 it.effect(
@@ -54,16 +56,18 @@ it.effect(
     }),
 );
 
-it.effect("PassBackend.read surfaces a missing entry as SecretReadFailed, not SecretCliMissing", () =>
-  Effect.gen(function* () {
-    const failure = yield* PassBackend.read(
-      "nope/does/not/exist",
-      failingExec(
-        "pass show nope/does/not/exist",
-        "Error: nope/does/not/exist is not in the password store.\n",
-      ),
-    ).pipe(Effect.flip);
-    expect(failure).toBeInstanceOf(SecretReadFailed);
-    expect(failure).toMatchObject({ backend: "pass", ref: "nope/does/not/exist" });
-  }),
+it.effect(
+  "PassBackend.read surfaces a missing entry as SecretReadFailed, not SecretCliMissing",
+  () =>
+    Effect.gen(function* () {
+      const failure = yield* PassBackend.read(
+        "nope/does/not/exist",
+        failingExec(
+          "pass show nope/does/not/exist",
+          "Error: nope/does/not/exist is not in the password store.\n",
+        ),
+      ).pipe(Effect.flip);
+      expect(failure).toBeInstanceOf(SecretReadFailed);
+      expect(failure).toMatchObject({ backend: "pass", ref: "nope/does/not/exist" });
+    }),
 );

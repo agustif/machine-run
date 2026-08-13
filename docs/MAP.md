@@ -60,6 +60,14 @@ was checked against it", never "this resource has been deployed".
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │
    ┌──────────────────────────────────────┴──────────────────────────────────┐
+   │  @machine-run/state — an encrypted Alchemy state store. Optional, and   │
+   │  sideways rather than below: it implements Alchemy's StateService, not  │
+   │  anything the engine depends on. Its own package because the key comes  │
+   │  from `secrets`, and putting that in `core` would invert the dependency │
+   │  rule every other package follows.                                      │
+   └──────────────────────────────────────┬──────────────────────────────────┘
+                                          │
+   ┌──────────────────────────────────────┴──────────────────────────────────┐
    │  @machine-run/core — no dependencies. The shared vocabulary.            │
    │  MachinePaths (~ expansion) · Backups · FileLock · Sh (quoting,         │
    │  posix + pwsh + fish + nu) · hash (Crypto) · Sessions (silentSession)   │

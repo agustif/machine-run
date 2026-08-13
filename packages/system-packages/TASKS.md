@@ -43,7 +43,7 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       command of its own.
 - [ ] **`paru`.** Still `~`, but no longer untried: `paru-bin` built and
       installed cleanly in a fresh `archlinux:latest` container, then failed
-      to *run* (`libalpm.so.15` missing — an ABI mismatch this container's
+      to _run_ (`libalpm.so.15` missing — an ABI mismatch this container's
       un-upgraded pacman genuinely has, unlike `yay-bin`'s successful run in
       the same kind of container). Building plain `paru` from source instead
       compiled cleanly through its whole ~140-crate dependency tree but did
