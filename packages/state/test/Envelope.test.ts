@@ -4,7 +4,13 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Redacted from "effect/Redacted";
-import { additionalData, decrypt, encrypt, EnvelopeDecryptFailed, KEY_BYTES } from "../src/Envelope.ts";
+import {
+  additionalData,
+  decrypt,
+  encrypt,
+  EnvelopeDecryptFailed,
+  KEY_BYTES,
+} from "../src/Envelope.ts";
 
 /** Resolved once: the real Node `Crypto` service, for `randomBytes`. */
 const crypto = Effect.runSync(Crypto.Crypto.pipe(Effect.provide(NodeCrypto.layer)));

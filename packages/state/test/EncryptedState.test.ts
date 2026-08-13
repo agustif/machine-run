@@ -27,7 +27,8 @@ import type { Envelope } from "../src/Envelope.ts";
  */
 const makeFakeUnderlying = () => {
   const rows = new Map<string, unknown>();
-  const key = (r: { stack: string; stage: string; fqn: string }) => `${r.stack}/${r.stage}/${r.fqn}`;
+  const key = (r: { stack: string; stage: string; fqn: string }) =>
+    `${r.stack}/${r.stage}/${r.fqn}`;
 
   const service: StateService = {
     id: "fake-underlying",
@@ -177,9 +178,9 @@ it.effect("the plaintext secret does not appear in what gets written to the unde
 
     // And the row is still recoverable — this isn't corruption, it's encryption.
     const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
-    expect(Redacted.value((read as CreatedResourceState).attr.privateKey as Redacted.Redacted<string>)).toBe(
-      secret,
-    );
+    expect(
+      Redacted.value((read as CreatedResourceState).attr.privateKey as Redacted.Redacted<string>),
+    ).toBe(secret);
   }),
 );
 
@@ -192,7 +193,10 @@ it.effect("a modified ciphertext fails to decrypt: get degrades to undefined, no
     yield* state.set({ stack: "s", stage: "dev", fqn: "MyResource", value: row() });
 
     const stored = rows.get("s/dev/MyResource") as Envelope;
-    const tampered = { ...stored, ciphertext: `${stored.ciphertext.slice(0, -1)}${stored.ciphertext.at(-1) === "A" ? "B" : "A"}` };
+    const tampered = {
+      ...stored,
+      ciphertext: `${stored.ciphertext.slice(0, -1)}${stored.ciphertext.at(-1) === "A" ? "B" : "A"}`,
+    };
     rows.set("s/dev/MyResource", tampered);
 
     const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
@@ -200,39 +204,48 @@ it.effect("a modified ciphertext fails to decrypt: get degrades to undefined, no
   }),
 );
 
-it.effect("a row moved to a different fqn fails to decrypt rather than being read as the wrong resource", () =>
-  Effect.gen(function* () {
-    const { service: underlying, rows } = makeFakeUnderlying();
-    const { exec } = makeFakeKeychain();
-    const state = yield* wrapState(underlying, exec, crypto);
+it.effect(
+  "a row moved to a different fqn fails to decrypt rather than being read as the wrong resource",
+  () =>
+    Effect.gen(function* () {
+      const { service: underlying, rows } = makeFakeUnderlying();
+      const { exec } = makeFakeKeychain();
+      const state = yield* wrapState(underlying, exec, crypto);
 
-    yield* state.set({ stack: "s", stage: "dev", fqn: "ResourceA", value: row({ fqn: "ResourceA" }) });
+      yield* state.set({
+        stack: "s",
+        stage: "dev",
+        fqn: "ResourceA",
+        value: row({ fqn: "ResourceA" }),
+      });
 
-    // Simulate a row physically relocated to a different resource's key —
-    // e.g. a bug, or a hand-edited state file — without re-encrypting it.
-    rows.set("s/dev/ResourceB", rows.get("s/dev/ResourceA"));
+      // Simulate a row physically relocated to a different resource's key —
+      // e.g. a bug, or a hand-edited state file — without re-encrypting it.
+      rows.set("s/dev/ResourceB", rows.get("s/dev/ResourceA"));
 
-    const read = yield* state.get({ stack: "s", stage: "dev", fqn: "ResourceB" });
-    expect(read).toBeUndefined();
-  }),
+      const read = yield* state.get({ stack: "s", stage: "dev", fqn: "ResourceB" });
+      expect(read).toBeUndefined();
+    }),
 );
 
-it.effect("a lost keychain entry degrades an existing row to absent instead of failing the run", () =>
-  Effect.gen(function* () {
-    const { service: underlying } = makeFakeUnderlying();
-    const { exec, entries } = makeFakeKeychain();
-    const state = yield* wrapState(underlying, exec, crypto);
+it.effect(
+  "a lost keychain entry degrades an existing row to absent instead of failing the run",
+  () =>
+    Effect.gen(function* () {
+      const { service: underlying } = makeFakeUnderlying();
+      const { exec, entries } = makeFakeKeychain();
+      const state = yield* wrapState(underlying, exec, crypto);
 
-    yield* state.set({ stack: "s", stage: "dev", fqn: "MyResource", value: row() });
-    expect(entries.size).toBe(1);
+      yield* state.set({ stack: "s", stage: "dev", fqn: "MyResource", value: row() });
+      expect(entries.size).toBe(1);
 
-    // The keychain entry is gone — a user ran `security delete-generic-password`,
-    // migrated to a new machine without exporting the keychain, or similar.
-    entries.clear();
+      // The keychain entry is gone — a user ran `security delete-generic-password`,
+      // migrated to a new machine without exporting the keychain, or similar.
+      entries.clear();
 
-    const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
-    expect(read).toBeUndefined();
-  }),
+      const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
+      expect(read).toBeUndefined();
+    }),
 );
 
 it.effect("getReplacedResources finds a replaced row through this store's own decryption", () =>

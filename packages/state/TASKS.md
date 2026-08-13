@@ -12,7 +12,7 @@ state at rest".
 the reverse. The key for this store has to live somewhere reachable, and the
 only home this repo already has for "where does a local secret live" is
 `@machine-run/secrets`'s `keychain` backend, which itself depends on `core`
-*and* `engine`. Putting the state store in `core` would make `core` depend on
+_and_ `engine`. Putting the state store in `core` would make `core` depend on
 `secrets`, inverting the one dependency rule this repo enforces everywhere
 else (AGENTS.md's layout section; verified by reading both packages'
 `package.json`s before writing a line of this). A new package was the only
@@ -40,7 +40,7 @@ doesn't list `engine` even though it depends on `secrets`, which does.
       need its own write primitive; nothing here abstracts over "a keychain",
       only over "the OS keychain via `security`".
 - [ ] **No multi-process test.** The per-stack `Cache` in `EncryptedState.ts`
-      only serialises key generation *within one process*. Two concurrent
+      only serialises key generation _within one process_. Two concurrent
       `alchemy deploy` invocations against a stack with no key yet could still
       race to write two different keys to the keychain — the last write wins,
       and whichever rows the losing process encrypted in that window become
