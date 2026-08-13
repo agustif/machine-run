@@ -3,6 +3,13 @@
 `Machine.SecretFile` over a `SecretBackend` seam. Backends are plain values
 that receive a command runner; nothing here needs a service.
 
+- [ ] **Nothing in this seam has ever read a real secret.** All five backends
+      are `~` in [docs/MAP.md](../../docs/MAP.md) — Doppler's evidence is
+      `doppler secrets get --help` output, which confirms the CLI's contract and
+      nothing about its behaviour. This is the least-verified seam in the repo,
+      and it is the one writing `0o600` files on the strength of being right.
+      `pass` is installable in a container and needs only a generated GPG key, so
+      it is the cheapest one to convert from `~` to `✓` and should go first.
 - [ ] **Verify `op read`'s output shape against a real `op` CLI.** Not installed
       on the development machine, so no output-shaping flag is used and bytes
       are returned verbatim. Confirm whether `op read` appends a newline, then

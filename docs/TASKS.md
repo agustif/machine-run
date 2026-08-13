@@ -7,12 +7,22 @@ own `TASKS.md`:
 |---|---|
 | `core` | [packages/core/TASKS.md](../packages/core/TASKS.md) |
 | `engine` | [packages/engine/TASKS.md](../packages/engine/TASKS.md) |
+| `machine` | [packages/machine/TASKS.md](../packages/machine/TASKS.md) |
 | `dotfiles` | [packages/dotfiles/TASKS.md](../packages/dotfiles/TASKS.md) |
 | `secrets` | [packages/secrets/TASKS.md](../packages/secrets/TASKS.md) |
 | `system-packages` | [packages/system-packages/TASKS.md](../packages/system-packages/TASKS.md) |
+| `system-settings` | [packages/system-settings/TASKS.md](../packages/system-settings/TASKS.md) |
 | `macos-defaults` | [packages/macos-defaults/TASKS.md](../packages/macos-defaults/TASKS.md) |
 | `runtimes` | [packages/runtimes/TASKS.md](../packages/runtimes/TASKS.md) |
-| `machine` | [packages/machine/TASKS.md](../packages/machine/TASKS.md) |
+| `shell` | [packages/shell/TASKS.md](../packages/shell/TASKS.md) |
+| `git` | [packages/git/TASKS.md](../packages/git/TASKS.md) |
+| `ai` | [packages/ai/TASKS.md](../packages/ai/TASKS.md) |
+| `tailscale` | [packages/tailscale/TASKS.md](../packages/tailscale/TASKS.md) |
+| `ssh` | [packages/ssh/TASKS.md](../packages/ssh/TASKS.md) |
+
+All fourteen have one. Six of these files did not exist until the inventory in
+[MAP.md](./MAP.md) was written, which is how gaps in `ai`, `git`, `shell`, `ssh`,
+`system-settings` and `tailscale` went untracked.
 
 [MAP.md](./MAP.md) is the inventory — what exists, what is verified, what does
 not exist yet. [V2-PLAN.md](./V2-PLAN.md) is the current priority order and
@@ -88,6 +98,41 @@ package rather than shrinking — 671 across seven rules:
 - [ ] **`noAs`** — 49. Audit for genuine assertions among the `as const`s.
 - [ ] **The tail** — `noRuntimeTypeof` 11, `noNodeBuiltinImport` 6,
       `noUnknownParameters` 4. Small enough to clear in one pass each.
+
+---
+
+## P1 — gaps the inventory surfaced
+
+Writing [MAP.md](./MAP.md) meant checking claims instead of recalling them, and
+these came out of it. None was tracked anywhere before.
+
+- [ ] **One resource in seventeen implements `unapply`** — `Shell.Login`. The
+      unmanage story is therefore mostly unbuilt, not merely undecided. The
+      per-package backlogs now carry the judgement for each: `system-settings`
+      *should* have one (`gsettings reset` is a real revert), `tailscale`
+      probably should **not** (logging out could cut the operator's own access to
+      the machine). Work through the remaining fifteen and record a decision per
+      resource rather than leaving silence.
+- [ ] **Five Alchemy primitives are unbridged.** `Action` (no imperative
+      one-shots), `Artifacts` (`Machine.Download` rolls its own fetch-and-hash
+      instead), `KeyPair` (the natural `Ssh.Key`), `Namespace` (no multi-machine
+      scoping), `ProviderMode` (plan-vs-apply capability is hand-rolled inside
+      `toProvider`). Each is a decision to make, not necessarily work to do —
+      but "we never looked" is not a decision.
+- [ ] **`@machine-run/ssh` has a `src/` and no `test/`** — the only package like
+      that. Details in `packages/ssh/TASKS.md`.
+- [ ] **The two least-verified seams are `secrets` (5 backends) and `ai` (12).**
+      Between them that is 17 of the repo's 48 backend implementations that have
+      never run against the real tool. `secrets` matters more: it writes
+      `0o600` files, and `tailscale` depends on it, so its auth-key path is
+      unverified twice over. `pass` in a container is the cheapest first
+      conversion.
+- [ ] **Nothing checks that a doc claim is still true.** Six task files were
+      missing, four verification claims in prose were wrong, and a stale "sixteen
+      packages" survived two package deletions. `ExampleCoverage.test.ts` shows
+      the shape of the fix: a test that reads source and fails on a mismatch.
+      Candidates worth the same treatment — the resource-kind count, the backend
+      id lists, and every package having a `TASKS.md`.
 
 ---
 

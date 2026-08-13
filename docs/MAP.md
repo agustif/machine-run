@@ -322,6 +322,11 @@ removal policy defaults to `retain`.
 
 Nothing in this section exists. Ordered by what blocks the most.
 
+Every item here is a tracked task: cross-cutting ones in
+[TASKS.md](./TASKS.md), package-local ones in that package's own `TASKS.md`
+(all fourteen have one). This section is the summary; those files carry the
+reasoning and the judgement calls.
+
 ```
 ✗ P0  A working `plan`. Bisect alchemy versions / drive Plan+Apply directly and
       bypass the CLI / wait upstream. Then: deploy → EMPTY SECOND PLAN (the

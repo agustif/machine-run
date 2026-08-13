@@ -3,12 +3,13 @@
 The single aggregate providers layer. Its whole value is that a recipe cannot
 forget a package's `providers()`, so it is only correct while it is complete.
 
-- [ ] **Add every package that defines a resource**, as each lands:
-      `@machine-run/git`, `@machine-run/ai`, `@machine-run/shell`,
-      `@machine-run/system-settings`, `@machine-run/runtimes`. A missing entry
-      shows up as a compile error at the recipe (`Provider<X>` not satisfied),
-      which is the failure mode this package converts a silent runtime error
-      into — but only for resources someone actually uses.
+- [x] **Add every package that defines a resource.** All ten are merged today:
+      `ai`, `dotfiles`, `git`, `macos-defaults`, `runtimes`, `secrets`, `shell`,
+      `system-packages`, `system-settings`, `tailscale`, plus `coreServices()`
+      and `CommandExecutorLive()`. `@machine-run/ssh` is deliberately absent
+      because it defines no resource — it composes `dotfiles` ones — and that
+      stays correct only until `Ssh.Key` lands. See
+      `packages/ssh/TASKS.md`.
 - [ ] **A test that fails when a package is missing from the merge.** The
       current smoke test proves the layer _resolves_; it cannot notice that a
       newly added package was never included. Enumerating the workspace and
