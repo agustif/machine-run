@@ -4,7 +4,7 @@
 that receive a command runner; nothing here needs a service.
 
 - [x] **`pass` now reads a real secret.** Verified against `docker run --rm
-    debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
+debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       `pass show` reading both a single-line and a multi-line entry back
       correctly — see `docs/notes/secrets-pass-notes.md` and
       `src/backends/Pass.ts`'s doc comment. `pass` is now `✓` in

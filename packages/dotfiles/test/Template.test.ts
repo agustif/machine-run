@@ -181,7 +181,10 @@ it.effect("apply also fails with TemplateRenderFailed rather than writing a brok
     // directly with a hand-built desired state to confirm it independently
     // refuses rather than assuming `desired` was always called first.
     const error = yield* reconciler
-      .apply({ props, observed: undefined, desired: { path: target, hash: "irrelevant" } }, applyCtx)
+      .apply(
+        { props, observed: undefined, desired: { path: target, hash: "irrelevant" } },
+        applyCtx,
+      )
       .pipe(Effect.flip);
     expect(error).toBeInstanceOf(TemplateRenderFailed);
     expect(yield* fs.exists(target)).toBe(false);

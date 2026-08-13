@@ -31,20 +31,16 @@ It also owns the only `unapply` in the codebase.
       existing `alias`/`envVar`/`hook` shape exactly — a plain function
       returning a `Dotfiles.ManagedBlock`, not a new `Resource` type. Backend
       seam extended with `ShellBackend.renderFunction(name, body, params?)`,
-      one implementation per shell:
-      - zsh/bash share `renderPosixFunction` (`backends/posix.ts`):
-        `name() { body }`, positional args via `$1`/`$2`/`$@` — no
-        declaration needed.
-      - fish: `function name ... end`, args via `$argv`/`$argv[n]`.
-      - pwsh: `function name { body }`, args via the automatic `$args` array
-        — a real function body, distinct from `renderAlias`'s
-        forward-via-`@args` trick for aliasing another command.
-      - nu: `def name [params] { body }` — nu's `def` is genuinely different
-        from every other backend here: it's statically parameterised, so
-        there's no implicit "argv" a body can read. `FunctionProps.params`
-        (ignored by every other backend) names the positional parameters nu's
-        signature must declare; omitting it declares a zero-argument
-        function, and a caller can pass `["...rest"]` for nu's variadic form.
+      one implementation per shell: - zsh/bash share `renderPosixFunction` (`backends/posix.ts`):
+      `name() { body }`, positional args via `$1`/`$2`/`$@` — no
+      declaration needed. - fish: `function name ... end`, args via `$argv`/`$argv[n]`. - pwsh: `function name { body }`, args via the automatic `$args` array
+      — a real function body, distinct from `renderAlias`'s
+      forward-via-`@args` trick for aliasing another command. - nu: `def name [params] { body }` — nu's `def` is genuinely different
+      from every other backend here: it's statically parameterised, so
+      there's no implicit "argv" a body can read. `FunctionProps.params`
+      (ignored by every other backend) names the positional parameters nu's
+      signature must declare; omitting it declares a zero-argument
+      function, and a caller can pass `["...rest"]` for nu's variadic form.
 
       **Verified live in containers** (not just read from docs): zsh, bash
       and fish via `docker run --rm ubuntu:24.04` (installing zsh/fish with
@@ -62,6 +58,7 @@ It also owns the only `unapply` in the codebase.
       change) — the container output confirmed the *mechanism* per shell,
       and `test/backends.test.ts`'s new `renderFunction` cases assert the
       exact rendered syntax against that confirmed mechanism.
+
 - [ ] **Completion registration.** Every one of these shells has a
       completions directory or a registration call, and nothing models it.
 - [ ] **Prompt / theme.** Deliberately out of scope so far — starship,

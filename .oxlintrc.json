@@ -43,7 +43,21 @@
       "rules": {
         "effect/noThrowStatement": "off",
         "effect/noNewError": "off",
-        "effect/noGlobals": "off"
+        "effect/noGlobals": "off",
+        "effect/noAsyncFunction": "off"
+      }
+    },
+    {
+      "files": [
+        "packages/cli/src/bin.ts",
+        "packages/cli/src/Diagnostics.ts",
+        "packages/cli/src/Recipe.ts"
+      ],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noAsyncFunction": "off",
+        "effect/noNewPromise": "off",
+        "effect/noDynamicImports": "off"
       }
     }
   ]

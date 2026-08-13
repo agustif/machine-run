@@ -25,7 +25,12 @@ const applyCtx = {
 const observeCtx = { exec: () => Effect.die("not used") };
 
 /** Unwraps a render that is expected to succeed. */
-const render = (existing: string, match: string, line: string, options?: Parameters<typeof renderLine>[3]) => {
+const render = (
+  existing: string,
+  match: string,
+  line: string,
+  options?: Parameters<typeof renderLine>[3],
+) => {
   const result = renderLine(existing, match, line, options);
   if (Result.isFailure(result)) {
     throw new Error(`expected a successful render, got: ${result.failure.detail}`);
@@ -185,39 +190,43 @@ it.effect("a second call replaces the line rather than appending a duplicate", (
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe fails with LineInFileMalformed, not a guessed pick, when more than one line matches", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeLineInFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "hosts");
+it.effect(
+  "observe fails with LineInFileMalformed, not a guessed pick, when more than one line matches",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeLineInFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "hosts");
 
-    yield* fs.writeFileString(target, "127.0.0.1 one.local\n127.0.0.1 two.local\n");
+      yield* fs.writeFileString(target, "127.0.0.1 one.local\n127.0.0.1 two.local\n");
 
-    const props: LineInFileProps = {
-      path: target,
-      match: "^127\\.0\\.0\\.1 ",
-      line: "127.0.0.1 example.local",
-    };
-    const error = yield* reconciler.observe(props, observeCtx).pipe(Effect.flip);
-    expect(error).toBeInstanceOf(LineInFileMalformed);
-  }).pipe(Effect.provide(layer)),
+      const props: LineInFileProps = {
+        path: target,
+        match: "^127\\.0\\.0\\.1 ",
+        line: "127.0.0.1 example.local",
+      };
+      const error = yield* reconciler.observe(props, observeCtx).pipe(Effect.flip);
+      expect(error).toBeInstanceOf(LineInFileMalformed);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("desired fails with LineInFileMalformed when the desired line does not satisfy match", () =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const reconciler = yield* makeLineInFileReconciler;
+it.effect(
+  "desired fails with LineInFileMalformed when the desired line does not satisfy match",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const reconciler = yield* makeLineInFileReconciler;
 
-    const props: LineInFileProps = {
-      path: path.join("/nonexistent", "hosts"),
-      match: "^127\\.0\\.0\\.1 ",
-      line: "192.168.1.1 wrong-prefix",
-    };
-    const error = yield* reconciler.desired(props).pipe(Effect.flip);
-    expect(error).toBeInstanceOf(LineInFileMalformed);
-  }).pipe(Effect.provide(layer)),
+      const props: LineInFileProps = {
+        path: path.join("/nonexistent", "hosts"),
+        match: "^127\\.0\\.0\\.1 ",
+        line: "192.168.1.1 wrong-prefix",
+      };
+      const error = yield* reconciler.desired(props).pipe(Effect.flip);
+      expect(error).toBeInstanceOf(LineInFileMalformed);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("apply fails with LineInFileMalformed rather than writing over an ambiguous match", () =>

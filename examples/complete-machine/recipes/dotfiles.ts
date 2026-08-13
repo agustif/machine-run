@@ -62,4 +62,26 @@ export const dotfiles = Effect.gen(function* () {
     unless: "test ! -f ~/.zcompdump",
     cwd: "~",
   });
+
+  // A rendered file. `${name}` substitution over a flat string record, one
+  // non-recursive pass — a value containing `${...}` is never re-expanded, so
+  // the result cannot depend on key order. A missing placeholder fails the
+  // render rather than leaving literal `${...}` on disk, which is how a broken
+  // config reaches a machine looking fine.
+  yield* Dotfiles.Template("gitconfig-fragment", {
+    path: "~/.config/complete-machine/rendered.conf",
+    template: ["[user]", "  name = ${NAME}", "  email = ${EMAIL}", ""].join("\n"),
+    variables: { NAME: "Your Name", EMAIL: "you@example.com" },
+  });
+
+  // One line, identified by a regex rather than by markers. It refuses when
+  // `match` hits more than once — there is no safe first-wins default — and
+  // requires `line` to satisfy `match`, or a later plan could never find what
+  // it wrote and would duplicate it forever. Reach for `ManagedBlock` instead
+  // when you own several lines, or when a collision is plausible.
+  yield* Dotfiles.LineInFile("hosts-entry", {
+    path: "~/.config/complete-machine/hosts",
+    match: "^127\\.0\\.1\\.1\\s",
+    line: "127.0.1.1 complete-machine",
+  });
 });

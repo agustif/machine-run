@@ -18,3 +18,4 @@ lib
 
 # Agent worktrees (git worktrees, not content)
 .claude/worktrees/
+.scratch/

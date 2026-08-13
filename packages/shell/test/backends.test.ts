@@ -167,7 +167,7 @@ it("nu renders a zero-parameter def when params is omitted", () => {
 
 it("nu renders a variadic def when params carries a ...rest spread — verified in a container that greetall a b c reads all three back", () => {
   const nu = shellBackend("nu");
-  expect(nu.renderFunction("greetall", '$"all: ($rest | str join \' \')"', ["...rest"])).toBe(
+  expect(nu.renderFunction("greetall", "$\"all: ($rest | str join ' ')\"", ["...rest"])).toBe(
     ["def greetall [...rest] {", "    $\"all: ($rest | str join ' ')\"", "}"].join("\n"),
   );
 });

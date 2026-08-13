@@ -63,6 +63,6 @@ The file-shaped primitives every other package composes on.
       and `@machine-run/machine`'s aggregate.** Out of scope for the change that
       added these two resources (`examples/` and `packages/machine/` are the
       orchestrator's territory, not `dotfiles`'s) — `packages/machine/test/
-      ExampleCoverage.test.ts` already fails naming exactly these two kinds as
+  ExampleCoverage.test.ts` already fails naming exactly these two kinds as
       uncovered, which is the expected, self-documenting signal that this is
       still open, not a bug in either resource.

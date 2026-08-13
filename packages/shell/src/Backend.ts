@@ -72,11 +72,7 @@ export interface ShellBackend {
    * them at all. Passing `params` for a backend that ignores it is harmless;
    * omitting it for nu produces a valid zero-argument function.
    */
-  readonly renderFunction: (
-    name: string,
-    body: string,
-    params?: ReadonlyArray<string>,
-  ) => string;
+  readonly renderFunction: (name: string, body: string, params?: ReadonlyArray<string>) => string;
   /** Renders a directory-change hook — see {@link ShellHookProps}. */
   readonly renderHook: (props: ShellHookProps) => string;
   /**

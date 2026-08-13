@@ -55,9 +55,11 @@ export const NuBackend: ShellBackend = {
    * `docs/shell-notes.md`.
    */
   renderFunction: (name, body, params = []) =>
-    [`def ${name} [${params.join(", ")}] {`, ...body.split("\n").map((line) => `    ${line}`), "}"].join(
-      "\n",
-    ),
+    [
+      `def ${name} [${params.join(", ")}] {`,
+      ...body.split("\n").map((line) => `    ${line}`),
+      "}",
+    ].join("\n"),
 
   /**
    * ## The mechanism, and what's verified vs. not

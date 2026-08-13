@@ -32,9 +32,59 @@ Established by bisection and independently reproduced:
 So it is not our resources, not our providers, not Docker, not Linux, and not
 the effect version.
 
-**What it actually is.** `alchemy --version` and `--help` exit 0, so the CLI
-works; `plan` specifically dies. Running the CLI's own `main` effect through
-`Effect.runPromiseExit` surfaces a `Die` defect:
+### Root cause, part one: found and worked around
+
+`Stack.evalStack` wires its platform layer as
+`Layer.provideMerge(alchemy(dev), platform)` — it provides `platform` **to** the
+layer that produces `AlchemyContext`. But `platform` contains
+`Logger.layer([fileLogger("out")])`, and `fileLogger` opens with
+`yield* AlchemyContext` to find the `.alchemy` directory to log into, while
+`AlchemyContextLive` in turn needs the `FileSystem` and `Path` that `platform`
+supplies. Circular, and fatal before any resource is looked at:
+
+```
+Error: Service not found: alchemy/Context
+    at alchemy/src/Stack.ts:307
+    at alchemy/src/Util/FileLogger.ts:7
+```
+
+That is why it reproduces identically for a stack with zero resources,
+`providers: Layer.empty`, and no machine-run import — the failure is in
+Alchemy's own wiring, not in anything a recipe contains.
+
+`@machine-run/cli` works around it by supplying both services from outside
+`evalStack`, which needs no change to Alchemy.
+
+### Root cause, part two: still open
+
+Past that, the original defect remains:
+
+```
+Fiber.runLoop: Not a valid effect: undefined
+```
+
+Something in the plan path yields a non-Effect. Ruled out so far: a missing
+provider (`findProviderByType` dies with a clear message), `providerForMode`'s
+unchecked `modes` index (our providers carry no `modes`, so that branch never
+runs), and `Logger.layer` receiving an Effect (its signature accepts one).
+
+**The silence is a separate bug and arguably the worse one.** A defect thrown
+inside the fiber's run loop can leave the driving promise unsettled. The event
+loop then drains and **Node exits 0 having printed nothing** — verified with a
+minimal one-resource stack: no output, no uncaught exception, no unhandled
+rejection, exit code 0, and an `Effect.timeout` that never fired because the
+timeout lived in the fiber that died. A total failure indistinguishable from
+success.
+
+`@machine-run/cli` cannot fix that upstream, but it refuses to reproduce it:
+every path prints, failure is always non-zero, and a program that never settles
+is raced against a plain timer outside Effect and reported as a hang.
+
+---
+
+**Original diagnosis, kept for the record.** `alchemy --version` and `--help`
+exit 0, so the CLI works; `plan` specifically dies. Running the CLI's own `main`
+effect through `Effect.runPromiseExit` surfaces a `Die` defect:
 
 ```
 Fiber.runLoop: Not a valid effect: undefined

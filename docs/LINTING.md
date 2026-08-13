@@ -84,3 +84,27 @@ ambient dependency. Nothing else is relaxed anywhere.
 Flip to `warn`, run `npx oxlint` for the real count, work it down, then flip to
 `error`. Do not add file-level suppressions — a rule that needs suppressing in
 many files is a rule this document should be arguing about instead.
+
+## The two override blocks, and why they exist
+
+Nothing is disabled globally. Two narrow overrides carry the exceptions, and
+both are cases the rules' own text anticipates — several `noGlobals` messages
+end with "platform adapters may disable this rule explicitly".
+
+**`packages/*/test/**`** — `noThrowStatement`, `noNewError`, `noGlobals`,
+`noAsyncFunction`. Tests construct failures deliberately, read fixtures off
+disk, and drive promise-returning helpers. Applying the rules here would mean
+writing tests that cannot express the failure they are pinning.
+
+**`packages/cli/src/{bin,Diagnostics,Recipe}.ts`** — `noGlobals`,
+`noAsyncFunction`, `noNewPromise`, `noDynamicImports`. This is the process
+boundary: `process.argv`, `process.stdout`, `process.exitCode`, and a dynamic
+`import()` of a recipe path known only at runtime.
+
+`Diagnostics.ts` deserves its own note, because the exception there is
+load-bearing rather than convenient. `runToExit` races the program against a
+plain `setTimeout` **outside** Effect. Using `Effect.sleep` or `Effect.timeout`
+would put the timer in the same fiber as the work — and the failure being
+guarded against is precisely a defect that kills that fiber without settling its
+promise, which leaves the timeout unobserved and the process exiting 0 in
+silence. An Effect-native timer cannot catch the thing it needs to catch.

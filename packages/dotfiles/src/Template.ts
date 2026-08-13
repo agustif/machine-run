@@ -9,7 +9,12 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type { PlatformError } from "effect/PlatformError";
-import { type FileProps, type FileState, type FilePathUnreadable, makeFileReconciler } from "./File.ts";
+import {
+  type FileProps,
+  type FileState,
+  type FilePathUnreadable,
+  makeFileReconciler,
+} from "./File.ts";
 
 /**
  * `${name}` substitution over `Record<string, string>`, and nothing else.
@@ -152,12 +157,12 @@ export const Template = Resource<Template>("Machine.Template");
  * Shared by `desired` and `apply` so both fail identically on a bad template,
  * rather than one silently tolerating what the other rejects.
  */
-const toFileProps = (
-  props: TemplateProps,
-): Effect.Effect<FileProps, TemplateRenderFailed> => {
+const toFileProps = (props: TemplateProps): Effect.Effect<FileProps, TemplateRenderFailed> => {
   const rendered = renderTemplate(props.template, props.variables);
   if (Result.isFailure(rendered)) {
-    return Effect.fail(new TemplateRenderFailed({ path: props.path, missing: rendered.failure.missing }));
+    return Effect.fail(
+      new TemplateRenderFailed({ path: props.path, missing: rendered.failure.missing }),
+    );
   }
   return Effect.succeed({
     path: props.path,
@@ -177,7 +182,11 @@ const toFileProps = (
  * before ever touching the filesystem, since `desired` runs during planning.
  */
 export const makeTemplateReconciler: Effect.Effect<
-  Reconciler<TemplateProps, TemplateState, PlatformError | FilePathUnreadable | TemplateRenderFailed>,
+  Reconciler<
+    TemplateProps,
+    TemplateState,
+    PlatformError | FilePathUnreadable | TemplateRenderFailed
+  >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
 > = Effect.gen(function* () {

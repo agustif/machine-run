@@ -96,7 +96,11 @@ export const LineInFileState = Schema.Struct({
 
 export type LineInFileState = typeof LineInFileState.Type;
 
-export interface LineInFile extends Resource<"Machine.LineInFile", LineInFileProps, LineInFileState> {}
+export interface LineInFile extends Resource<
+  "Machine.LineInFile",
+  LineInFileProps,
+  LineInFileState
+> {}
 
 export const LineInFile = Resource<LineInFile>("Machine.LineInFile");
 
@@ -187,7 +191,7 @@ export const renderLine = (
   if (!regex.test(line)) {
     return Result.fail({
       detail:
-        "the desired line does not itself satisfy \"match\", so a later plan could never find it again and would insert a duplicate on every apply",
+        'the desired line does not itself satisfy "match", so a later plan could never find it again and would insert a duplicate on every apply',
     });
   }
 
@@ -240,7 +244,11 @@ export const makeLineInFileReconciler: Effect.Effect<
         const found = readLine(existing, props.match);
         if (Result.isFailure(found)) {
           return yield* Effect.fail(
-            new LineInFileMalformed({ path: target, match: props.match, detail: found.failure.detail }),
+            new LineInFileMalformed({
+              path: target,
+              match: props.match,
+              detail: found.failure.detail,
+            }),
           );
         }
         if (found.success === undefined) return undefined;
@@ -284,7 +292,11 @@ export const makeLineInFileReconciler: Effect.Effect<
         const rendered = renderLine(existing, props.match, props.line, props);
         if (Result.isFailure(rendered)) {
           return yield* Effect.fail(
-            new LineInFileMalformed({ path: target, match: props.match, detail: rendered.failure.detail }),
+            new LineInFileMalformed({
+              path: target,
+              match: props.match,
+              detail: rendered.failure.detail,
+            }),
           );
         }
 
