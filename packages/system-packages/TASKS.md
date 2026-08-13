@@ -9,9 +9,26 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       `fedora:latest` (dnf5) and `archlinux:latest` — see
       `docs/notes/system-packages-notes.md` and the module doc comments in
       `src/backends/linux/{Dnf,Pacman}.ts`.
-- [ ] **`winget` / `choco` against a real Windows target.** Not reachable from
-      here — needs a CI runner or a VM. Until then they stay documented as
-      unverified and must not be presented as supported.
+- [x] **`winget` / `choco` against a real Windows target.** Done via CI's
+      `verify winget / choco parsers` job. Real output is committed as
+      `test/fixtures/{winget,choco}-list.txt` and pinned by
+      `test/windowsBackends.test.ts`; `test/windowsLive.test.ts` re-asserts the
+      same parsers against freshly captured output on every run, which is the
+      direction a frozen fixture cannot cover.
+
+      It found a real bug: winget truncates an over-long cell with an ellipsis
+      that consumes the column padding, so the old "split on 2+ spaces" parser
+      merged `Id` and `Version` on 9 of 64 rows and produced nothing for 6 more.
+      It now slices by header column offsets. Chocolatey 2.7.3 confirmed
+      `--local-only` is accepted and `--limit-output` has no header or footer.
+
+- [ ] **`winget export` rather than `winget list`.** A truncated id is not
+      recoverable from the table, so those packages read as not installed and
+      get a no-op `winget install` every deploy. `winget export` emits JSON with
+      full identifiers, but writes to a file rather than stdout — needs a temp
+      path through the `exec` seam.
+- [ ] **`winget install` flags.** Still unverified: nothing here has installed a
+      Windows package. Only the `list` path has been exercised.
 - [ ] **MacPorts against a real `port`.** Not installed here; verify the
       `port installed` header and column shape.
 

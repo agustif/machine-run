@@ -159,7 +159,7 @@ placeholder. Bringing a real config under management is a deliberate, reviewed
 step — copy it into the repo yourself — because these directories can also
 contain credentials that must never be copied into git unreviewed.
 
-That's why `ai-tools` symlinks a hand-picked allowlist and never a tool's whole
+That's why `ai` symlinks a hand-picked allowlist and never a tool's whole
 config directory: never `auth.json`, `*session*`, `*token*`, `*credential*`,
 `*.db`, `logs`, `cache`, or `history.jsonl`.
 
@@ -269,3 +269,48 @@ cannot install two copies regardless of what a package declares. Verified by
 The general rule: anything whose types or classes cross a package boundary by
 identity — not just by shape — belongs in `overrides`, because a version skew
 in it fails at runtime rather than at resolution.
+
+### Overrides were not sufficient on their own
+
+The same hazard came back through a different door, and this time it was `effect`
+rather than `alchemy`. Every `@machine-run/*` package declares `effect`,
+`@effect/platform-node` and `alchemy` as **peer** dependencies with ranges, which
+is the right declaration for a published library. npm's response to that is to
+auto-install each package's peers into a nested `node_modules` — writing, for
+this workspace, 17 placeholder nodes carrying `{"peer": true}` and no version at
+all.
+
+Two consequences, one loud and one silent:
+
+- `npm ci` refuses the lockfile outright with `Invalid Version:`, because a
+  package entry with no version is not something it can install.
+- On some installs those placeholders materialise a real second copy of
+  `effect`. That gives two structurally identical but distinct sets of types, and
+  the symptom is a type error nobody can reproduce: `Property
+  '[NodeInspectSymbol]' is missing in type 'Effect<void, any, any>'`. It was red
+  on all three CI runners while every local tree was green.
+
+The fix is `legacy-peer-deps=true` in `.npmrc`. The root's own `dependencies`
+plus `overrides` already pin one exact version of every peer, so peer resolution
+has nothing left to decide — turning it off removes a mechanism that could only
+produce a wrong answer here. Placeholder entries drop to zero and `npm ci`
+succeeds.
+
+The alternative considered and rejected was `peerDependenciesMeta.optional` on
+every peer, which also stops the auto-install. It was rejected because it would
+be a lie in published metadata: these packages genuinely cannot work without
+`effect`, and marking it optional would suppress the warning a real consumer
+should get. A workaround for an npm resolution quirk belongs in this repo's
+install configuration, not in what the packages claim about themselves.
+
+The cost is that peer *conflict checking* is off too. That is acceptable only
+because `overrides` pins exact versions; if those pins are ever loosened, this
+decision has to be revisited.
+
+Two follow-ons fell out of it. CI now runs `npm ci` rather than `npm install`, so
+it installs the committed lockfile instead of re-resolving a graph nobody ran
+locally — letting CI re-resolve is what let this hide. And the one peer npm's
+auto-install had been silently supplying, `ioredis` (imported by
+`@effect/platform-node`'s `NodeRedis` barrel, and a *required* peer of it), is now
+a direct dev dependency. Alchemy's other ten unfulfilled peers are all
+`optional: true` and correctly absent.

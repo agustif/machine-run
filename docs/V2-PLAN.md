@@ -1,9 +1,12 @@
 # machine-run → v2
 
 [V1-PLAN.md](./V1-PLAN.md) asked "what does a personal-machine reconciler have
-to cover, and what is missing". Most of that answer got built: sixteen packages,
+to cover, and what is missing". Most of that answer got built: fourteen packages,
 a uniform reconciler engine, backend seams for packages, secrets, settings,
 shells, runtimes, AI tooling and git, all verified against real systems.
+
+[MAP.md](./MAP.md) is the inventory that goes with this plan: what exists, what
+is verified against a real system, and what is still only planned.
 
 This document exists because the question changed. v1 was about **breadth**.
 v2 is about the fact that **none of it has ever run**, and about the debts that
@@ -90,14 +93,14 @@ Everything below is downstream of a working `plan`. In order:
 
 ### 2. Pay down what breadth cost
 
-Sixteen packages arrived faster than the invariants tying them together.
+Fourteen packages arrived faster than the invariants tying them together.
 
 - [ ] **Eight naming conventions.** Settle before anything ships — a rename is
       a state-schema break.
 - [ ] **`observe` → `Option<State>`.** Written up in
       `packages/engine/TASKS.md` as a single atomic change with the full
       implementer list. It is the largest single contributor to a lint backlog
-      that grew from ~150 to ~660 warnings as packages landed.
+      that now stands at 671 warnings across seven rules.
 - [ ] **Two ways to express a directory** — `directoryMode` props versus
       `Machine.Directory`.
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
@@ -107,10 +110,12 @@ Sixteen packages arrived faster than the invariants tying them together.
 
 ### 3. Close verification gaps CI can now close
 
-CI has `windows-latest` and `macos-latest` runners, which removes the last
+CI has `windows-latest` and `macos-latest` runners, which removed the last
 "unreachable target" excuses:
 
-- [ ] `winget` / `choco` parsers against captured Windows output.
+- [x] `winget` / `choco` parsers against captured Windows output. Done, and it
+      found a real winget parsing bug — detail in [TASKS.md](./TASKS.md) and
+      [MAP.md](./MAP.md#4-the-six-backend-seams).
 - [ ] `mas`, and the `defaults` read path, against a real macOS runner.
 - [ ] `snap` — needs systemd, so a container is not enough; a VM or a runner
       with systemd is required.
@@ -131,7 +136,7 @@ CI has `windows-latest` and `macos-latest` runners, which removes the last
 
 ## What v2 is not
 
-Not more breadth. Sixteen packages is already more surface than something that
+Not more breadth. Fourteen packages is already more surface than something that
 has never executed can honestly support, and every package added before `plan`
 works is a package whose `observe`/`apply` has never been run by the engine.
 

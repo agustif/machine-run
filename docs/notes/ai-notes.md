@@ -129,6 +129,8 @@ not a breaking change against anything real.
 
 ## `ai-tools` should be removed before 1.0
 
+> **RESOLVED since this note was written.** The package has been deleted.
+
 `packages/ai-tools/src/Vault.ts` is now a thin shim re-exporting
 `@machine-run/ai`'s registry under its old names (`aiTools`,
 `aiToolSkills`, `aiToolConfigFiles`, `AI_TOOL_SKILLS_DIRS`,

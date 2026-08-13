@@ -1,6 +1,7 @@
 # Architecture
 
-How machine-run is built. For *why* each tradeoff was made, see
+How machine-run is built. For the inventory of what exists and what is verified,
+see [MAP.md](./MAP.md). For *why* each tradeoff was made, see
 [SYSTEM-DESIGN.md](./SYSTEM-DESIGN.md). For what's missing and the ordered path
 to v1, see [V1-PLAN.md](./V1-PLAN.md).
 

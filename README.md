@@ -7,11 +7,19 @@ default, a Tailscale connection, a materialized secret are each a typed,
 reconciled **resource**, not a line in a shell script.
 
 > **Status: pre-1.0.** Nothing here has ever been `alchemy deploy`'d against a
-> real machine. The build is green and the test suite passes, but every claim
-> about runtime behaviour is derived from reading Alchemy's source rather than
-> from observing a deploy. Treat this as an in-progress framework whose current
-> state and gaps are written down honestly in
-> [docs/V1-PLAN.md](./docs/V1-PLAN.md).
+> real machine — `alchemy plan` cannot currently complete for *any* stack,
+> including an empty one, which is an upstream defect and the single thing
+> blocking everything else.
+>
+> So the build is green and 310 tests pass (2 more run only in CI, against a
+> live Windows runner), and the CLI surfaces those tests
+> parse have been verified against real systems (Linux containers, a macOS
+> runner, a Windows runner — which is how a real bug in the winget parser was
+> found). But **no resource in this repo has ever been run by the Alchemy
+> engine**, so nothing is known about how they behave under a real plan/apply.
+>
+> [docs/MAP.md](./docs/MAP.md) marks every piece `✓` verified / `~` unverified /
+> `✗` not built, and [docs/V2-PLAN.md](./docs/V2-PLAN.md) has the blocker.
 
 ## Why not a shell script
 
@@ -44,6 +52,7 @@ manager output) instead of a script dying three steps in.
 machine-run is the framework and carries nobody's real values. Your name,
 email, SSH hosts, package lists and secret references belong in a **separate,
 private repo** that depends on this one.
+
 Two examples, with different jobs:
 
 - [`examples/example-machine`](./examples/example-machine/alchemy.run.ts) — a
@@ -63,7 +72,7 @@ Two examples, with different jobs:
 | `@machine-run/machine` | one aggregate `providers()` layer, so a recipe cannot forget one |
 | `@machine-run/dotfiles` | `File`, `ManagedBlock`, `Symlink`, `Directory`, `Download`, `Exec` |
 | `@machine-run/secrets` | `SecretFile` over a `SecretBackend` seam: 1Password, Doppler, Keychain, `pass`, env |
-| `@machine-run/system-packages` | `Package` / `Repo` across brew, cask, MacPorts, apt, dnf, pacman, cargo, npm, winget, choco |
+| `@machine-run/system-packages` | `Package` / `Repo` across 19 managers: brew, cask, MacPorts, mas, apt, dnf, pacman, yay, paru, flatpak, snap, winget, choco, cargo, npm, pipx, uv-tool, gem, go-install |
 | `@machine-run/system-settings` | `Setting` over `gsettings` / `dconf` |
 | `@machine-run/macos-defaults` | `MacOS.Default`, full property-list values including arrays, dicts and data |
 | `@machine-run/runtimes` | `Runtime.Tool` over mise, asdf, rustup, uv — installed and active tracked separately |
@@ -99,6 +108,9 @@ ecosystem artifact that has its own identity and its own idempotent apply — a
 
 ## Docs
 
+- [docs/MAP.md](./docs/MAP.md) — **start here.** Every package, resource, backend
+  and seam, what is verified versus merely written, what is planned and does not
+  exist, and the callstack one `plan` travels
 - [docs/V2-PLAN.md](./docs/V2-PLAN.md) — where things stand now, the blocker,
   and what comes next
 - [docs/V1-PLAN.md](./docs/V1-PLAN.md) — the first-principles map of what a

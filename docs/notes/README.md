@@ -7,6 +7,7 @@ These are **evidence**, not documentation. They are append-only and are not
 maintained as the code changes — a claim here was true when it was written and
 against the machine it was written on. Anything durable graduates into
 [../SYSTEM-DESIGN.md](../SYSTEM-DESIGN.md) (why a decision was made),
+[../MAP.md](../MAP.md) (what exists and what is verified),
 [../ARCHITECTURE.md](../ARCHITECTURE.md) (how it is built) or
 [../TASKS.md](../TASKS.md) (what is left).
 

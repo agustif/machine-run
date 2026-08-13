@@ -14,8 +14,10 @@ own `TASKS.md`:
 | `runtimes` | [packages/runtimes/TASKS.md](../packages/runtimes/TASKS.md) |
 | `machine` | [packages/machine/TASKS.md](../packages/machine/TASKS.md) |
 
-[V2-PLAN.md](./V2-PLAN.md) is the current priority order and explains the
-blocker. [V1-PLAN.md](./V1-PLAN.md) is the coverage map.
+[MAP.md](./MAP.md) is the inventory — what exists, what is verified, what does
+not exist yet. [V2-PLAN.md](./V2-PLAN.md) is the current priority order and
+explains the blocker. [V1-PLAN.md](./V1-PLAN.md) is the first-principles coverage
+map.
 [SYSTEM-DESIGN.md](./SYSTEM-DESIGN.md) carries the reasoning behind decisions
 referenced here. Completed work belongs in the design log, not accumulated here
 as a changelog.
@@ -46,7 +48,7 @@ Everything below is downstream of that.
 
 ## P1 — debts that breadth created
 
-Sixteen packages arrived faster than the invariants tying them together.
+Fourteen packages arrived faster than the invariants tying them together.
 
 - [ ] **Eight resource-type naming conventions** — `Machine.*`, `System.*`,
       `MacOS.*`, `Tailscale.*`, `Git.*`, `Ai.*`, `Runtime.*`, `Shell.*`. The
@@ -55,8 +57,7 @@ Sixteen packages arrived faster than the invariants tying them together.
       anything ships.
 - [ ] **`observe` → `Option<State>`** — written up in
       `packages/engine/TASKS.md` as one atomic change with the full implementer
-      list. Largest single contributor to a lint backlog that grew from ~150 to
-      ~660 warnings as packages landed.
+      list. Largest single contributor to a lint backlog now at 671 warnings.
 - [ ] **Two ways to express a directory** — `directoryMode` props on `File`,
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
@@ -74,25 +75,27 @@ Sixteen packages arrived faster than the invariants tying them together.
 All 25 `oxlint-plugin-effect` rules are enabled and errors are at zero; see
 [LINTING.md](./LINTING.md) for the tier policy and the primitive each pattern
 migrates toward. The `warn` counts are the backlog, and they grew with each new
-package rather than shrinking:
+package rather than shrinking — 671 across seven rules:
 
-- [ ] **`noNullish`** — split it. Roughly two thirds are Alchemy's contract
-      (`diff` returns `undefined`, attributes are JSON, optional props are `?`).
-      The rest are ours, chiefly `observe` above.
-- [ ] **`noTernary`** — the rule exists because Effect has better control-flow
-      primitives, not because ternaries are ugly. `UndefinedOr.match`,
-      `Boolean.match`, `Match`.
-- [ ] **`noConditionalEmptyObjectSpread`** — centralise the omit-a-key pattern
-      as one helper in `core`.
-- [ ] **`noAs`** — audit for genuine assertions among the `as const`s.
+- [ ] **`noNullish`** — 342 of them. Split it: roughly two thirds are Alchemy's
+      contract (`diff` returns `undefined`, attributes are JSON, optional props
+      are `?`). The rest are ours, chiefly `observe` above.
+- [ ] **`noTernary`** — 151. The rule exists because Effect has better
+      control-flow primitives, not because ternaries are ugly.
+      `UndefinedOr.match`, `Boolean.match`, `Match`.
+- [ ] **`noConditionalEmptyObjectSpread`** — 56. Centralise the omit-a-key
+      pattern as one helper in `core`.
+- [ ] **`noAs`** — 49. Audit for genuine assertions among the `as const`s.
+- [ ] **The tail** — `noRuntimeTypeof` 11, `noNodeBuiltinImport` 6,
+      `noUnknownParameters` 4. Small enough to clear in one pass each.
 
 ---
 
 ## P1 — verification CI can now close
 
-CI runs on `ubuntu`, `macos` and `windows` runners, which removes the last
-"unreachable target" excuses. Each item below is a backend whose doc comment
-currently says *unverified*. The Windows runner type-checks only — see
+CI runs on `ubuntu`, `macos` and `windows` runners, which removed the last
+"unreachable target" excuses. Every unchecked item below is a backend whose doc
+comment still says *unverified*. The Windows runner type-checks only — see
 "Windows" under P2 for the 16 tests that fail there and why.
 
 - [x] `winget` / `choco` parsers against captured Windows output. **Done**, and

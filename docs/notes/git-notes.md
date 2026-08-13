@@ -7,6 +7,8 @@ the cross-cutting stuff that doesn't belong in any one file's comment.
 
 ## `git-identity` should be removed before 1.0
 
+> **RESOLVED since this note was written.** The package has been deleted.
+
 `packages/git-identity` is now a thin re-export of `@machine-run/git`'s
 `gitIdentity`/`GitPersonaProps` (`packages/git-identity/src/Identity.ts`).
 It exists only so `examples/example-machine`'s two recipes

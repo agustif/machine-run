@@ -1,10 +1,14 @@
 # AGENTS.md
 
-Read [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and
-[docs/SYSTEM-DESIGN.md](./docs/SYSTEM-DESIGN.md) first — they explain the current
-shape and the tradeoffs behind it, and [docs/CONCEPTS.md](./docs/CONCEPTS.md)
-for what each Effect and Alchemy primitive is used for. This file is the rules
-layer on top.
+Read [docs/MAP.md](./docs/MAP.md) first — it is the inventory: every package,
+resource, backend and seam, marked `✓` verified / `~` written-but-never-run /
+`✗` planned-and-absent, plus the callstack a `plan` travels. Do not describe
+something as working until you have checked which mark it carries.
+
+Then [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) and
+[docs/SYSTEM-DESIGN.md](./docs/SYSTEM-DESIGN.md) for the current shape and the
+tradeoffs behind it, and [docs/CONCEPTS.md](./docs/CONCEPTS.md) for what each
+Effect and Alchemy primitive is used for. This file is the rules layer on top.
 
 ---
 

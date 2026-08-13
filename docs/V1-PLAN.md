@@ -232,6 +232,15 @@ reconciler that only knows what it wrote is a deployment script with extra steps
 
 ## 3. Target package hierarchy
 
+> **Historical.** This is the target map as it stood when v1 was *planned*, and
+> its `✓`/`✗` marks describe that moment — several things marked `✗` here
+> (`shell`, `runtimes`, `Directory`, `Download`, `Exec`, `System.Setting`, the
+> language and Linux package backends) have since been built. It is kept because
+> the reasoning under it is what chose the breadth.
+>
+> For what exists **now**, with verified-versus-merely-written marked per piece,
+> see [MAP.md](./MAP.md).
+
 ```
                         ┌─────────────────────────────┐
                         │  alchemy  (Resource/Provider │   engine seam
@@ -295,7 +304,14 @@ is a permanent state-schema commitment.
 
 ### Package granularity: scope to a domain, not to one function
 
-Two existing packages are mis-scoped, and it shows. They were named after the one
+> **Shipped.** Both renames below happened. `@machine-run/git` and
+> `@machine-run/ai` own their domains, with `Git.Config`, `Git.Repo`,
+> `Ai.McpServer` and the backend seam all built; the `git-identity` and
+> `ai-tools` shims that briefly re-exported them have been deleted. The tables
+> below are kept as the reasoning, not as a plan. Only `Git.Maintenance` from
+> that list was never built.
+
+Two packages were mis-scoped, and it showed. They had been named after the one
 thing that was needed on the day, not after the surface they belong to.
 
 **`git-identity` → `@machine-run/git`.** Identity is one slice of git
@@ -317,7 +333,7 @@ config-shaped and reconcilable:
 `Git.Config` is the load-bearing one: with a live `git config --get` diff it
 subsumes most of the list above, and it's a ~40-line resource.
 
-**`ai-tools` → `@machine-run/ai`, with a real seam.** Today it is two frozen
+**`ai-tools` → `@machine-run/ai`, with a real seam.** It was two frozen
 arrays of paths and a loop. Every entry hardcodes an assumption about a tool's
 layout, and nothing dispatches. It should follow the same backend shape as
 packages and secrets:
@@ -333,8 +349,10 @@ tool stores MCP servers in a different JSON shape, which is precisely the kind o
 per-implementation difference a backend seam exists to absorb. The
 reviewed-allowlist posture stays: never a blanket directory symlink.
 
-**`ssh` is borderline** — `Ssh.Host` exists, but `Ssh.KnownHost`, `Ssh.Key`
-(generate or materialise) and agent configuration all belong with it.
+**`ssh` is borderline** — `sshHost()` exists, but `Ssh.KnownHost`, `Ssh.Key`
+(generate or materialise) and agent configuration all belong with it. Still true:
+none of those three were built, and `ssh` remains composition-only, which is also
+why `@machine-run/machine` does not aggregate it.
 
 The general rule going forward: **a package owns a domain and grows backends
 inside it.** If a package would only ever contain one function, it's a function
@@ -488,8 +506,8 @@ These are prerequisites for most of Phase 3, and each is small.
    `commentPrefix`, and renderers for env / PATH / alias / chdir-hook. Then
    `@machine-run/shell` exposing `Shell.Profile`, `Shell.PathEntry`,
    `Shell.EnvVar`, `Shell.Alias`, `Shell.Hook`, and `Shell.Login` (`chsh`, with
-   `/etc/shells` validation). This retires the hardcoded zsh hook in
-   `git-identity`.
+   `/etc/shells` validation). This retired the hardcoded zsh hook that
+   `git-identity` carried.
 7. **`System.Setting`** with `SettingsBackend` — generalises `MacOS.Default` to
    `defaults` / `gsettings` / `dconf` / Windows registry. `MacOS.Default` becomes
    a thin alias.
@@ -541,13 +559,16 @@ rather than more code.
 - **How dependency versions stay consistent** — packages declare peer *ranges*;
   the root `package.json` pins the exact version for the whole effect family
   plus `alchemy` in `overrides`. Exact peer pins in every package meant one
-  bump touched sixteen files and any skew was an `ERESOLVE` wall; a missing
+  bump touched every package's file and any skew was an `ERESOLVE` wall; a missing
   `alchemy` override let a second copy install, which is a dual-package hazard
   given its identity-sensitive `Resource`/`Provider` machinery.
 - **Windows verification** — GitHub Actions supplies `windows-latest` and
-  `macos-latest` runners. CI now captures real `winget`/`choco`/`defaults`
-  output as artifacts, so the backends stop being documented guesses. That
-  removes the "unreachable target" excuse entirely.
+  `macos-latest` runners, which removed the "unreachable target" excuse
+  entirely. CI captures real `winget`/`choco`/`defaults` output and asserts the
+  parsers against it in the same job; the captured output is committed as
+  fixtures. It immediately found a real bug in the winget parser (see
+  [MAP.md](./MAP.md#4-the-six-backend-seams)). Windows runs `tsc -b` only —
+  16 tests genuinely fail there, enumerated in [TASKS.md](./TASKS.md).
 
 ### Genuinely open
 
