@@ -59,8 +59,6 @@ Sixteen packages arrived faster than the invariants tying them together.
       ~660 warnings as packages landed.
 - [ ] **Two ways to express a directory** — `directoryMode` props on `File`,
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
-- [ ] **Delete the `git-identity` and `ai-tools` shims**, now that `git` and
-      `ai` own those domains.
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
       resolves; it cannot notice a package was never added — precisely the
       failure it exists to prevent.

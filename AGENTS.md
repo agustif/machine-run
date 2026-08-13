@@ -228,7 +228,7 @@ packages/<name>/
   test/
 ```
 
-Composition-only packages (`git-identity`, `ssh`, `ai-tools`) define no resource
+Composition-only packages (`ssh`) define no resource
 and skip `Backend.ts`/`Providers.ts`.
 
 **Split as things grow, rather than letting a file accumulate.** A module that

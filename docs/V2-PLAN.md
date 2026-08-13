@@ -100,7 +100,6 @@ Sixteen packages arrived faster than the invariants tying them together.
       that grew from ~150 to ~660 warnings as packages landed.
 - [ ] **Two ways to express a directory** — `directoryMode` props versus
       `Machine.Directory`.
-- [ ] **Delete the `git-identity` and `ai-tools` shims.**
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
       resolves; it cannot notice a package was never added. That is precisely
       the failure it exists to prevent.

@@ -6,9 +6,7 @@
     "rootDir": "."
   },
   "references": [
-    { "path": "../../packages/ai-tools" },
     { "path": "../../packages/dotfiles" },
-    { "path": "../../packages/git-identity" },
     { "path": "../../packages/machine" },
     { "path": "../../packages/macos-defaults" },
     { "path": "../../packages/secrets" },

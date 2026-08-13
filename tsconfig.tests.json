@@ -16,9 +16,6 @@
       "path": "packages/ai"
     },
     {
-      "path": "packages/ai-tools"
-    },
-    {
       "path": "packages/core"
     },
     {
@@ -29,9 +26,6 @@
     },
     {
       "path": "packages/git"
-    },
-    {
-      "path": "packages/git-identity"
     },
     {
       "path": "packages/machine"

@@ -3,7 +3,7 @@
 // to your own identities; see machines-agusti in this author's own setup
 // for a worked example of what that can look like).
 import * as Dotfiles from "@machine-run/dotfiles";
-import { gitIdentity } from "@machine-run/git-identity";
+import { gitIdentity } from "@machine-run/git";
 import * as MacOsDefaults from "@machine-run/macos-defaults";
 import * as Machine from "@machine-run/machine";
 import * as SystemPackages from "@machine-run/system-packages";

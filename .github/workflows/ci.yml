@@ -27,10 +27,12 @@ jobs:
         with:
           node-version: "22"
 
-      # No lockfile is committed, so this is a real resolution every run —
-      # which is itself worth testing, since a stale transitive pin is how a
-      # second copy of `alchemy` got installed once (see docs/SYSTEM-DESIGN.md).
-      - run: npm install
+      # `npm ci`, not `npm install`: it installs the committed lockfile
+      # exactly and fails if package.json and the lockfile disagree. Letting
+      # CI re-resolve means it tests a dependency graph nobody ran locally,
+      # which is how a second copy of `effect` reached a runner and produced a
+      # `NodeInspectSymbol` type mismatch that reproduced nowhere else.
+      - run: npm ci
 
       - name: tsc -b
         run: npm run build
@@ -57,7 +59,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install
+      - run: npm ci
 
       # Captured as artifacts rather than asserted inline: the point is to
       # obtain real output from tools no developer here has access to, so the
@@ -86,7 +88,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install
+      - run: npm ci
 
       # `defaults export | plutil -extract <key> xml1` is the read path
       # MacOS.Default depends on; this proves it against a real macOS rather
@@ -133,6 +135,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: npm install
+      - run: npm ci
       - name: scripts/deploy-check.sh
         run: bash scripts/deploy-check.sh

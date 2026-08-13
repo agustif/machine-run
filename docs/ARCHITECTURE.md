@@ -378,14 +378,27 @@ inside `Object.keys`.
 ## Package graph
 
 ```
-core
-├── engine ────┬── dotfiles ──┬── git-identity
-│              ├── ssh
-│              └── ai-tools
-├── secrets ───── tailscale
-├── macos-defaults
-└── system-packages
+core                        no dependencies; the shared vocabulary
+└── engine                  Reconciler + toProvider
+    ├── dotfiles            File, ManagedBlock, Symlink, Directory, Download, Exec
+    │   ├── shell           rc-file rendering; Shell.Login
+    │   │   └── git         Git.Config, Git.Repo, personas
+    │   ├── ssh             sshHost() composition
+    │   └── ai ────────┐    Ai.Skill, Ai.Config, Ai.McpServer
+    ├── secrets ───────┤    Secret.File, backends
+    │   └── tailscale       Tailscale.Connection
+    ├── macos-defaults      MacOS.Default
+    ├── system-settings     Setting over gsettings / dconf
+    ├── system-packages     System.Package, 18 backends
+    └── runtimes            Runtime.Tool
+
+machine   aggregates ai, dotfiles, git, macos-defaults, runtimes, secrets,
+          shell, system-packages, system-settings, tailscale
 ```
+
+`ai` depends on `secrets` as well as `dotfiles` — it writes credentials, so the
+two branches meet there. `ssh` is composition-only and defines no resource of
+its own.
 
 Cross-package dependencies are declared as **TypeScript project references**, not
 left to the root tsconfig's incidental listing order.

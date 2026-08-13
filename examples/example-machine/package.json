@@ -9,9 +9,9 @@
     "destroy": "alchemy destroy"
   },
   "dependencies": {
-    "@machine-run/ai-tools": "*",
+    "@machine-run/core": "*",
     "@machine-run/dotfiles": "*",
-    "@machine-run/git-identity": "*",
+    "@machine-run/git": "*",
     "@machine-run/machine": "*",
     "@machine-run/macos-defaults": "*",
     "@machine-run/secrets": "*",
@@ -19,7 +19,6 @@
     "@machine-run/system-packages": "*",
     "@machine-run/tailscale": "*",
     "alchemy": "2.0.0-beta.72",
-    "effect": "4.0.0-rc.108",
-    "@machine-run/git": "*"
+    "effect": "4.0.0-rc.108"
   }
 }

@@ -11,13 +11,7 @@
       "path": "packages/dotfiles"
     },
     {
-      "path": "packages/git-identity"
-    },
-    {
       "path": "packages/secrets"
-    },
-    {
-      "path": "packages/ai-tools"
     },
     {
       "path": "packages/macos-defaults"

@@ -14,3 +14,4 @@ lib
 
 # Type-check-only output for the tests project (tsconfig.tests.json).
 .tsbuild/
+.alchemy/

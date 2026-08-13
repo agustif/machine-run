@@ -66,9 +66,6 @@ minimal recipe using the primitives directly.
 | `@machine-run/tailscale` | `Tailscale.Connection` |
 | `@machine-run/ssh` | `sshHost()` — one `Host` block in `~/.ssh/config` |
 
-`@machine-run/git-identity` and `@machine-run/ai-tools` remain as thin
-re-exports of `git` and `ai`; both should be removed before 1.0.
-
 ## Two ideas do most of the work
 
 **Resources are reconcilers.** A resource says what it manages (`address`),
