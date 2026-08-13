@@ -1,0 +1,14 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/dotfiles" },
+    { "path": "packages/homebrew" },
+    { "path": "packages/git-identity" },
+    { "path": "packages/secrets" },
+    { "path": "packages/roles" },
+    { "path": "packages/toolchains" },
+    { "path": "packages/ai-tools" },
+    { "path": "apps/macbook-neo" }
+  ]
+}

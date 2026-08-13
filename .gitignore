@@ -1,0 +1,13 @@
+node_modules
+lib
+*.tsbuildinfo
+.DS_Store
+
+# Derived content regenerated deterministically from alchemy.run.ts on every
+# apply — not the source of truth, and Command.Exec's memoization rebuilds it
+# from scratch if it's missing.
+.generated/
+
+# Test-run logs only — .alchemy/state/ (the actual reconciled state) IS meant
+# to be committed.
+.alchemy/log/

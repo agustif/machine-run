@@ -1,0 +1,31 @@
+{
+  "name": "machine-run",
+  "version": "0.0.0",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "workspaces": {
+    "packages": ["packages/*", "apps/*"],
+    "catalog": {
+      "@effect/platform-bun": ">=4.0.0-beta.102 || >=4.0.0",
+      "@opentui/core": "latest",
+      "effect": ">=4.0.0-beta.102 || >=4.0.0",
+      "typescript": "^7.0.2"
+    }
+  },
+  "packageManager": "bun@1.3.14",
+  "scripts": {
+    "format": "oxfmt packages apps",
+    "format:check": "oxfmt --check packages apps",
+    "check": "bunx tsc -b",
+    "test": "bun run --filter './packages/*' test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "alchemy": "2.0.0-beta.67",
+    "alchemy-test": "file:/Users/a/alchimist/alchemy/packages/alchemy-test",
+    "effect": "4.0.0-beta.102",
+    "oxfmt": "^0.36.0",
+    "typescript": "^7.0.2"
+  }
+}

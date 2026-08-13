@@ -1,0 +1,27 @@
+{
+  "name": "@machine-run/dotfiles",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./lib/index.js"
+    }
+  },
+  "scripts": {
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "alchemy-test"
+  },
+  "dependencies": {
+    "@machine-run/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "alchemy": "2.0.0-beta.67",
+    "effect": "4.0.0-beta.102"
+  },
+  "devDependencies": {
+    "alchemy-test": "file:/Users/a/alchimist/alchemy/packages/alchemy-test"
+  }
+}
