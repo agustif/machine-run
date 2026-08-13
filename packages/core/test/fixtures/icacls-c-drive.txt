@@ -1,0 +1,8 @@
+C:\ BUILTIN\Administrators:(OI)(CI)(F)
+    NT AUTHORITY\SYSTEM:(OI)(CI)(F)
+    BUILTIN\Users:(OI)(CI)(RX)
+    NT AUTHORITY\Authenticated Users:(OI)(CI)(IO)(M)
+    NT AUTHORITY\Authenticated Users:(AD)
+    Mandatory Label\High Mandatory Level:(OI)(NP)(IO)(NW)
+
+Successfully processed 1 files; Failed processing 0 files

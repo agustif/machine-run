@@ -24,3 +24,10 @@ Nothing here is a resource. See [../../docs/ARCHITECTURE.md](../../docs/ARCHITEC
 - [ ] Tests for `MachinePaths.expand` (`~`, `~/x`, trailing slashes, a bare
       relative path — which currently resolves against the process CWD, and it
       is not obvious that is right).
+- [ ] **`windows/{FilePermissions,Icacls}.ts` is a seam, not yet a feature.**
+      The mode↔ACL translation and the `icacls`-output parser exist and are
+      unit-tested (see `../../docs/notes/windows-permissions.md`), but no
+      resource calls either module yet. Wiring them into `Machine.File` /
+      `Machine.Directory` / `Machine.Download` / `Machine.SecretFile` is
+      separate work, blocked on the `Platform` service above so each
+      resource's `observe`/`apply` has one place to branch POSIX vs. Windows.

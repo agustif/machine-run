@@ -380,8 +380,12 @@ reasoning and the judgement calls.
       to co-manage a manager the atomic layer also manages.
 ✗ P2  ssh breadth — Ssh.KnownHost, Ssh.Key (Alchemy's KeyPair, or materialise
       from a vault), agent config. Also: machine must then depend on ssh.
-✗ P2  Windows properly — Platform service in core, registry SettingsBackend,
-      bootstrap.ps1, POSIX-mode decision, ACL (icacls) path for SecretFile
+~ P2  Windows properly — Platform service in core, registry SettingsBackend,
+      bootstrap.ps1 still ✗. The POSIX-mode decision and an ACL (`icacls`)
+      path are researched, designed and prototyped
+      ([notes/windows-permissions.md](./notes/windows-permissions.md),
+      `packages/core/src/windows/`) but not called by any resource yet — see
+      [TASKS.md](./TASKS.md)'s "Windows" entry for exactly what's left.
 ✗ P2  winget export instead of winget list
 
 ✗ P3  Doctor / drift report — "what no longer matches", without applying

@@ -277,10 +277,23 @@ implementation, dispatched from inside one generic resource.
       (`438`) for every file on Windows and `chmod` only toggles the read-only
       bit, so a pinned `mode` can never be observed back and `matches` reports
       drift forever. Affects `Directory` (4), `File` (2), `SecretFile` (3),
-      `Download` (1). The decision to make: ignore `mode` on Windows, or reject
-      it with a typed error. Ignoring it silently is not acceptable for
-      `SecretFile`, where the whole point of `0o600` is that nobody else reads
-      the file — Windows needs an ACL (`icacls`) path, which is its own seam.
+      `Download` (1). **Researched and designed** —
+      [docs/notes/windows-permissions.md](./notes/windows-permissions.md) is
+      the full evidence trail (Node/libuv source, Microsoft's own `icacls` and
+      well-known-SID docs, a real captured `icacls` transcript) and the
+      decision: translate `mode` → an ACL *intent* on apply, and compare
+      "granted no broader than `mode` allows" (not exact equality) on observe,
+      via a `FilePermissions` domain type in `core`. **Built and unit-tested,
+      not yet wired in**: `packages/core/src/windows/{FilePermissions,
+      Icacls}.ts` is the pure translation and the `icacls`-output parser,
+      pinned by `packages/core/test/windows/*.test.ts` and — once a Windows CI
+      run has actually exercised it — `IcaclsLive.test.ts` (`verify-windows`
+      in `.github/workflows/ci.yml`). None of `Directory`/`File`/`SecretFile`/
+      `Download` calls into it yet; the notes doc's §7 lists exactly what that
+      follow-up change needs (a `Platform` service, each resource's
+      `observe`/`apply` branching to the `icacls` path on Windows, and a
+      decision on the `isNoBroaderThan` comparison's known asymmetry — it
+      cannot detect a principal granted *fewer* rights than `mode` allows).
 
       *Platform truth — `chmod 0o000` does not make a directory unreadable.*
       Three tests build an unreadable-parent fixture that way to prove
