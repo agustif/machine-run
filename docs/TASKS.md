@@ -91,15 +91,32 @@ package rather than shrinking:
 ## P1 — verification CI can now close
 
 CI runs on `ubuntu`, `macos` and `windows` runners, which removes the last
-"unreachable target" excuses. The Windows runner type-checks only — see
-"Windows" under P2 for the 16 tests that fail there and why. Each item below is a backend whose doc comment
-currently says *unverified*.
+"unreachable target" excuses. Each item below is a backend whose doc comment
+currently says *unverified*. The Windows runner type-checks only — see
+"Windows" under P2 for the 16 tests that fail there and why.
 
-- [ ] `winget` / `choco` parsers against captured Windows output. One thing is
-      already confirmed: `winget list` **exits 1** without
-      `--accept-source-agreements` on any machine that has not accepted the
-      `msstore` terms, which is every fresh machine. The backend already passes
-      it; the CI step did not, and failed exactly that way.
+- [x] `winget` / `choco` parsers against captured Windows output. **Done**, and
+      it found a real bug. Output from a Windows runner is now committed as
+      `packages/system-packages/test/fixtures/{winget,choco}-list.txt`, pinned by
+      `windowsBackends.test.ts`, and re-asserted against live output every run by
+      `windowsLive.test.ts`. Three findings:
+      - `winget list` **exits 1** without `--accept-source-agreements` on any
+        machine that has not accepted the `msstore` terms, which is every fresh
+        machine. The backend already passed it; the CI step did not, and failed
+        exactly that way.
+      - winget **truncates an over-long cell with an ellipsis that consumes the
+        column padding**, leaving one space before the next column. The old
+        parser split on runs of 2+ spaces and so returned `Id` and `Version`
+        glued together for 9 of 64 rows, and nothing at all for 6 more. It now
+        slices by header column offsets.
+      - Chocolatey 2.7.3 accepts `--local-only` without error, settling that
+        open question, and `--limit-output` emits no header or footer.
+- [ ] **`winget export` instead of `winget list`.** The remaining winget gap.
+      Truncated ids are unrecoverable from the table, so those packages read as
+      not installed and get a no-op `winget install` on every deploy — correct,
+      but the plan is never empty. `winget export` emits JSON with full
+      identifiers. It writes to a file rather than stdout, so this needs a temp
+      path through the `exec` seam.
 - [ ] `mas`, and the `defaults` read path, against a real macOS runner.
 - [ ] `snap` — needs systemd, so a container is not enough.
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).

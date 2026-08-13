@@ -6,15 +6,17 @@ import { firstTokens, lines } from "../../parse.ts";
 /**
  * Chocolatey. Same PowerShell-quoting rationale as Winget.ts.
  *
- * `--limit-output` (`-r`) is Chocolatey's long-documented "give me
- * machine-parseable output" flag: one line per package as `name|version`,
- * with no header/footer noise — unlike winget, there's no fixed-width table
- * to misparse here. `--local-only` restricts to installed packages (older
- * docs; some Chocolatey v2 builds made `choco list` local-only by default
- * and deprecated the flag, but it is accepted as a no-op there rather than
- * an error, so passing it explicitly is safe across versions AS FAR AS THE
- * DOCUMENTATION DESCRIBES — UNVERIFIED on this machine, no Windows/choco
- * install available to test against).
+ * `--limit-output` (`-r`) is Chocolatey's "give me machine-parseable output"
+ * flag: one line per package as `name|version`, with no header or footer noise
+ * — unlike winget, there is no fixed-width table to misparse here.
+ *
+ * Verified against Chocolatey 2.7.3 on a Windows runner, output kept as
+ * `test/fixtures/choco-list.txt`: 45 lines, every one `name|version`, no
+ * header, no footer, no count line. `--local-only` was accepted without error
+ * or warning, which settles the open question about it — Chocolatey v2 made
+ * `choco list` local-only by default and deprecated the flag, but it is taken
+ * as a no-op rather than an error, so passing it explicitly stays safe across
+ * versions.
  */
 export const makeChocoBackend = (): PackageManagerBackend => ({
   id: "choco",

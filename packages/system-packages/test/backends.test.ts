@@ -592,15 +592,18 @@ it("toId is stable across repeated calls (deterministic, not random)", () => {
 // ---------------------------------------------------------------------------
 
 it("parseWingetList extracts the Id column, not the Name column", () => {
+  // Columns are padded to a fixed width, which is what makes the multi-word
+  // "Visual Studio Code" unambiguous: the space inside it is part of the Name,
+  // and `Id` still begins at the same offset the header's `Id` does. Rows are
+  // sliced at those offsets rather than split on whitespace, because winget
+  // truncates an over-long cell with an ellipsis that leaves only a single
+  // space before the next column — see Winget.ts and the captured fixture in
+  // test/fixtures.
   const table = [
-    "Name              Id               Version   Available Source",
-    "---------------------------------------------------------------",
-    "Git               Git.Git          2.43.0              winget",
-    // A multi-word Name still parses correctly as long as every column
-    // boundary is a run of 2+ spaces, as winget's fixed-width table
-    // alignment guarantees — the single space inside "Visual Studio Code"
-    // is part of the Name itself, not a column boundary.
-    "Visual Studio Code  Microsoft.VSCode  1.85.0              winget",
+    "Name                Id                Version",
+    "----------------------------------------------",
+    "Git                 Git.Git           2.43.0",
+    "Visual Studio Code  Microsoft.VSCode  1.85.0",
   ].join("\n");
   expect(parseWingetList(table)).toEqual(["Git.Git", "Microsoft.VSCode"]);
 });

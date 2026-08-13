@@ -6,36 +6,57 @@ import { lines } from "../../parse.ts";
 /**
  * Parses `winget list`'s human-readable table into package IDs.
  *
- * winget has no stable machine-readable listing output (no `--json`, no
- * `-r`/`--limit-output` the way choco has) — the table is fixed-width
- * columns (`Name  Id  Version  Available  Source`) separated by runs of
- * whitespace, with column widths that depend on the widest value winget
- * happened to print. This locates the header's dashed separator row so a
- * localized header string is never mistaken for data, then splits each data
- * row on runs of 2+ spaces and takes the second column (`Id`) — the first
- * (`Name`) is the human display name, not what `winget install --id`
- * expects.
+ * winget has no machine-readable listing output — no `--json`, and no
+ * `-r`/`--limit-output` the way choco has. The table is fixed-width columns
+ * (`Name  Id  Version  Available  Source`) whose widths depend on the console
+ * width and on the widest value printed.
  *
- * UNVERIFIED: this machine has no Windows/winget install to test against.
- * If a locale/console width wraps a cell onto a second line, or a `Name`
- * contains a run of 2+ spaces, this will misparse that row. `install` below
- * uses `--exact` specifically so an ID this misparsed into is never
- * fuzzy-matched into installing the wrong package.
+ * Verified against real `winget list` output from a Windows runner, kept as
+ * `test/fixtures/winget-list.txt`. That output is why this slices by column
+ * offset rather than splitting on runs of whitespace, which is what it used to
+ * do: **winget truncates an over-long cell with an ellipsis that consumes the
+ * column's padding**, leaving a single space before the next column. Splitting
+ * on 2+ spaces then merges `Id` and `Version` into one string — 9 of the
+ * fixture's 64 rows produced a value like
+ * `ARP\Machine\X64\MozillaMaintenanceServi… 153.0.1`, and 6 more produced no
+ * id at all.
+ *
+ * Column boundaries come from whitespace runs in the header row rather than
+ * from the labels, so a localized winget still parses.
+ *
+ * Two kinds of row are dropped, both deliberately:
+ *
+ * - **Truncated ids** (containing `…`). The full id is simply not present in
+ *   the output, and a truncated one is worse than a missing one: it cannot
+ *   match a desired package, and it could in principle match the wrong thing.
+ * - **`ARP\…` and `MSIX\…` pseudo-ids** (10 of the fixture's rows). These name
+ *   Add/Remove-Programs and MSIX entries with no winget package behind them, so
+ *   `winget install --id` cannot act on them. They are noise for a reconciler.
+ *
+ * The consequence to know about: a package whose id is truncated reads as *not
+ * installed*, so `apply` will run `winget install` for it on every deploy.
+ * winget itself is idempotent, so nothing breaks, but the plan is not empty.
+ * The real fix is `winget export`, which emits JSON with untruncated
+ * identifiers — see docs/TASKS.md.
  */
 export const parseWingetList = (stdout: string): string[] => {
   const rows = lines(stdout);
   const separatorIndex = rows.findIndex((row) => /^-{3,}$/.test(row.replace(/\s/g, "")));
-  if (separatorIndex === -1) return [];
-  const ids: string[] = [];
-  for (const row of rows.slice(separatorIndex + 1)) {
-    const columns = row
-      .split(/\s{2,}/)
-      .map((column) => column.trim())
-      .filter((column) => column.length > 0);
-    const id = columns[1];
-    if (id !== undefined) ids.push(id);
-  }
-  return ids;
+  const header = separatorIndex > 0 ? rows[separatorIndex - 1] : undefined;
+  if (separatorIndex === -1 || header === undefined) return [];
+
+  // Start offset of every column, taken from where the header's labels begin.
+  const starts = [...header.matchAll(/(?:^|\s{2,})(\S)/g)].map(
+    (match) => match.index + match[0].length - 1,
+  );
+  const idStart = starts[1];
+  const idEnd = starts[2];
+  if (idStart === undefined || idEnd === undefined) return [];
+
+  return rows
+    .slice(separatorIndex + 1)
+    .map((row) => row.slice(idStart, idEnd).trim())
+    .filter((id) => id.length > 0 && !id.includes("…") && !/^(?:ARP|MSIX)\\/.test(id));
 };
 
 /**

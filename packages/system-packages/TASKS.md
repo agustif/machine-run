@@ -38,7 +38,7 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
 ## Correctness
 
 - [x] **Tap-qualified brew names.** Fixed: `list` now uses `brew list
-    --formula --full-name`, verified against a real third-party-tap
+--formula --full-name`, verified against a real third-party-tap
       install.
 - [x] **`npm ls -g` exits non-zero** when the global tree has unmet peer
       dependencies. Fixed: the list command forces exit 0

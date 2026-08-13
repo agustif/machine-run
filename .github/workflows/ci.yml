@@ -84,14 +84,10 @@ jobs:
           node-version: "22"
       - run: npm ci
 
-      # Captured as artifacts rather than asserted inline: the point is to
-      # obtain real output from tools no developer here has access to, so the
-      # fixtures in packages/system-packages/test stop being documented
-      # guesses. A parser change should be driven by this output.
       # `--accept-source-agreements` is not optional: without it `winget list`
       # exits 1 on a machine that has never accepted the `msstore` source's
-      # terms, which is every fresh machine and every CI runner. Verified here
-      # — this step failed exactly that way before the flag was added, which
+      # terms, which is every fresh machine and every CI runner. Verified here —
+      # this step failed exactly that way before the flag was added, which
       # confirms the flag our Winget backend already passes is required rather
       # than defensive.
       - name: Capture real winget output
@@ -104,10 +100,26 @@ jobs:
         run: |
           choco --version | Tee-Object -FilePath choco-version.txt
           choco list --local-only --limit-output | Tee-Object -FilePath choco-list.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows-package-manager-output
-          path: "*.txt"
+
+      # Asserted here rather than uploaded for a human to read later. Uploading
+      # was the original design and it was the weaker one twice over: it made
+      # this job depend on the account's artifact storage quota (which it then
+      # hit, failing a job whose commands had all succeeded), and it verified
+      # nothing on its own — someone still had to download the files and
+      # compare by hand.
+      #
+      # The captured output already paid for itself once. It showed that winget
+      # truncates an over-long cell with an ellipsis that eats the column
+      # padding, so the old parser's "split on 2+ spaces" merged Id and Version
+      # on 9 of 64 rows. That fixture now lives in
+      # packages/system-packages/test/fixtures and pins the fix. What this step
+      # adds is the other direction: noticing if winget or choco changes its
+      # format, which a frozen fixture never can.
+      - name: Assert the parsers against that output
+        env:
+          MACHINE_RUN_WINGET_LIST: winget-list.txt
+          MACHINE_RUN_CHOCO_LIST: choco-list.txt
+        run: npx vitest run packages/system-packages/test/windowsLive.test.ts
 
   verify-macos:
     name: verify defaults / mas parsers
