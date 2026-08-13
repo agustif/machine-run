@@ -1,7 +1,7 @@
 # `@machine-run/runtimes` — backlog
 
 `Runtime.Tool` over a `RuntimeBackend` seam (mise / asdf / rustup / uv). See
-[../../docs/runtime-notes.md](../../docs/runtime-notes.md) for exactly what
+[../../docs/notes/runtime-notes.md](../../docs/notes/runtime-notes.md) for exactly what
 was verified by running each CLI, and where the remaining gaps are.
 
 ## Verification
@@ -28,7 +28,7 @@ was verified by running each CLI, and where the remaining gaps are.
       was picked. Either follows the identical `RuntimeBackend` seam.
 - [ ] **A manifest resource** — `Mise.Toml`, `Asdf.ToolVersions` — modeling a
       whole checked-in manifest file the way `Brew.Bundle` would for Homebrew.
-      Deliberately not built in this pass; see `docs/runtime-notes.md`'s
+      Deliberately not built in this pass; see `docs/notes/runtime-notes.md`'s
       closing section for the suggested atomic/manifest boundary and
       `docs/V1-PLAN.md` §3 for why the two layers are meant to coexist rather
       than one replacing the other.
@@ -50,5 +50,5 @@ was verified by running each CLI, and where the remaining gaps are.
 - [ ] **No caching.** Two `Runtime.Tool` resources naming the same `(manager,
       tool, scope)` (unusual, not prevented) each shell out independently.
       `system-packages`'s `PackageIndex` is the precedent if this turns out to
-      matter; see `docs/runtime-notes.md`'s closing section for why it wasn't
+      matter; see `docs/notes/runtime-notes.md`'s closing section for why it wasn't
       an obvious win to port over unchanged.

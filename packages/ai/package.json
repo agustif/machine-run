@@ -20,7 +20,7 @@
     "@machine-run/secrets": "*"
   },
   "peerDependencies": {
-    "alchemy": "2.0.0-beta.72",
-    "effect": "4.0.0-rc.108"
+    "alchemy": ">=2.0.0-beta.72",
+    "effect": ">=4.0.0-beta.105"
   }
 }

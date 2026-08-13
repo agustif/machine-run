@@ -524,69 +524,69 @@ path handling that doesn't assume `/`.
 
 ## 5. Open questions
 
-Resolved questions move out of this section into the design log; what remains
-is what genuinely needs a decision rather than more code.
+Answered questions move into the design log; what stays here needs a decision
+rather than more code.
 
-### Decided, implemented
+### Answered since this was written
 
-- **macOS array/dict/data defaults.** `MacOS.Default` accepts any property-list
-  value. `plutil` validates the *whole* document against the target format
-  before emitting, so `-o json` fails on any domain containing `<data>` even
-  when extracting an unrelated scalar — JSON has no representation for it.
-  `plutil -extract <key> xml1` has no such problem and is the read path. On the
-  write side `defaults`' shorthand list syntax silently coerces (`(alpha, 3)`
-  stores `3` as a *string*), so a full XML document is passed instead. Decoding
-  uses `plist@5.0.0` (MIT, pure JS, no native build step — which matters
-  because `bootstrap.sh` runs before a compiler may exist). Values cross the
-  props boundary JSON-safe, with `{ $data }` / `{ $date }` wrappers, since a
-  raw `Date` or `Uint8Array` degrades silently through Alchemy's state.
-
-- **apt repository detection.** Verified in a real `ubuntu:24.04` container:
-  24.04 ships *only* the deb822 `.sources` format, so a `sources.list`-only
-  parser saw nothing and re-added every PPA on every apply. Both formats are
-  parsed now, against fixtures captured from a real `add-apt-repository` run.
-
-- **Which layer owns `Crypto`.** Alchemy's `StackServices` carries
-  `FileSystem`, `Path`, `HttpClient` and `ChildProcessSpawner` but not
-  `Crypto`, so `@machine-run/core`'s `services()` provides it. Hashing resolves
-  the service once when a reconciler is built rather than requiring it per
-  call, which keeps `Reconciler` methods requirement-free.
+- **macOS array/dict/data defaults** — `MacOS.Default` carries any
+  property-list value via `defaults export | plutil -extract xml1`. `plutil`
+  validates a whole document against the target format before emitting, so
+  JSON is unusable for any domain containing `<data>`; XML is not.
+- **apt repository detection** — Ubuntu 24.04 ships *only* deb822 `.sources`,
+  verified in a container. Both formats are parsed against captured fixtures.
+- **Which layer owns `Crypto`** — `core`'s `services()`, since Alchemy's
+  `StackServices` carries `FileSystem`/`Path`/`HttpClient`/`ChildProcessSpawner`
+  but not `Crypto`.
+- **How dependency versions stay consistent** — packages declare peer *ranges*;
+  the root `package.json` pins the exact version for the whole effect family
+  plus `alchemy` in `overrides`. Exact peer pins in every package meant one
+  bump touched sixteen files and any skew was an `ERESOLVE` wall; a missing
+  `alchemy` override let a second copy install, which is a dual-package hazard
+  given its identity-sensitive `Resource`/`Provider` machinery.
+- **Windows verification** — GitHub Actions supplies `windows-latest` and
+  `macos-latest` runners. CI now captures real `winget`/`choco`/`defaults`
+  output as artifacts, so the backends stop being documented guesses. That
+  removes the "unreachable target" excuse entirely.
 
 ### Genuinely open
 
+- **Alchemy's CLI cannot complete a `plan`.** See
+  [V2-PLAN.md](./V2-PLAN.md#the-blocker) — this now gates everything and is not
+  a machine-run bug, but the answer to "do we wait, work around, or vendor"
+  is a decision nobody has made.
+
 - **Secret rotation is undetectable by construction.** `SecretFile` diffs on
-  existence, permissions and `ref` — never content, because hashing a secret
+  existence, permissions and `ref`, never content, because hashing a secret
   puts secret-derived data in unencrypted state. Rotating a value behind an
-  unchanged `ref` is therefore invisible. Both alternatives are worse: store a
-  hash (forbidden), or fetch every secret on every `plan`, turning a read-only
-  preview into something that hits the vault and can prompt for biometrics.
-  A third option worth exploring: let the *store* answer "when did this last
-  change?" where it can (1Password exposes item version metadata), which would
-  detect rotation without ever reading the value. Until then the forcing
-  function is deleting the file.
+  unchanged `ref` is therefore invisible. Both obvious alternatives are worse:
+  store a hash (forbidden), or fetch every secret on every `plan`, turning a
+  read-only preview into something that hits the vault and can prompt for
+  biometrics. Unexplored third option: ask the *store* when the item last
+  changed — 1Password exposes item version metadata — which detects rotation
+  without ever reading the value.
 
 - **Ordering in shared files is opt-in, and forgetting is silent.** `after`
   makes ordering deterministic by manufacturing a dependency edge, but nothing
-  requires it. A recipe with two `includeIf` blocks and no `after` gets an
-  arbitrary winner and no warning. Options: have `ManagedBlock` refuse a second
-  unordered region in one file; or infer ordering from declaration order, which
-  reads naturally but silently disagrees with how the engine actually schedules.
-  Refusing is safer and worse to use; this needs a call.
+  requires it, so two `includeIf` regions with no `after` get an arbitrary
+  winner and no warning. Refusing a second unordered region in one file is
+  safer and worse to use; inferring from declaration order reads naturally but
+  silently disagrees with how the engine schedules. Still needs a call.
 
-- **`-array-add` / `-dict-add` are additive.** They converge toward a superset
-  rather than toward equality, which is a genuinely different reconciler
-  contract — `matches` becomes "contains" — and needs an explicit `mode` prop
-  rather than a silent merge. Byhost preferences (`defaults -currentHost`) are
-  a separate axis again.
+- **`-array-add` / `-dict-add` are additive**, so they converge toward a
+  superset rather than toward equality — `matches` becomes "contains". That is
+  a different reconciler contract and needs an explicit `mode` prop rather than
+  a silent merge.
 
-- **What `destroy` should actually do.** `RemovalPolicy` gives the mechanism
-  (`retain` by default, `destroy` opt-in), but not the policy: restoring a
-  backup is only correct if the backup is still the right answer, and reverting
-  a macOS default has no defined "before" at all once the original was never
-  recorded. The mechanism should not ship far ahead of a decision about which
-  resources can honestly claim to reverse themselves.
+- **Which resources may honestly claim to reverse themselves.**
+  `RemovalPolicy` supplies the mechanism and two resources implement `unapply`;
+  the remaining ~18 do not. Reverting a `defaults` key has no defined "before"
+  if the original was never recorded, and restoring a backup is only right if
+  the backup is still the right answer. The mechanism should not outrun the
+  policy any further than it already has.
 
-- **Windows is unverifiable from here.** Docker covers every Linux target and
-  macOS is the host, so those excuses are gone. Windows has neither, so the
-  `winget`/`choco` backends stay documented-unverified until there is a CI
-  runner or a VM. They should not be presented as supported before then.
+- **Resource type naming.** `Machine.*`, `System.*`, `MacOS.*`, `Tailscale.*`,
+  `Git.*`, `Ai.*`, `Runtime.*`, `Shell.*` — eight conventions, and the
+  `Machine`/`System` split stopped meaning anything once both became
+  reconcilers. Renaming is a state-schema break, so this has to be settled
+  before anything ships rather than after.

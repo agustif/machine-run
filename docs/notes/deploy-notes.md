@@ -137,11 +137,20 @@ this repo's engine against a resource, and it failed before reaching a
 single `yield*` in the recipe — i.e., before machine-run's own logic ever
 executed at all.
 
-**Fix applied:** added `RUN npx tsc -b examples/example-machine` to the
-Dockerfile, after `npm install`. Deliberately scoped to that one project
-(and its project-referenced dependencies) rather than the whole workspace's
-`tsc -b` — see finding #2 for why the whole-workspace build was, at various
-points during this session, not green for reasons unrelated to this task.
+**Fix applied (superseded, see below):** added `RUN npx tsc -b examples/example-machine`
+to the Dockerfile, after `npm install`.
+
+**Update:** even scoped to just this one project, building *inside* the
+image was still fragile — a later, unrelated concurrent edit (the
+`git-identity` → `git` rename landing mid-session) transiently broke that
+exact build via a project reference, at a moment chosen by another agent's
+commit, not this one. Moved the build to the *host*, once, before `docker
+build` even runs (`scripts/deploy-check.sh` now runs
+`npx tsc -b examples/example-machine` first) and `COPY`s the resulting
+`lib/` output into the image (`.dockerignore` no longer excludes `lib/`,
+only `node_modules`, which is still installed fresh inside the container).
+This fully decouples the image build from the timing of concurrent
+`packages/*` edits landing.
 
 ### 6. The harness's own log-capturing was broken — `grep` on a transcript instead of a path
 
@@ -171,4 +180,125 @@ silently turned every later assertion in this script into a false pass.
 return value) from `plan_log`/`deploy_log` (which compute the deterministic
 log path from a label, with no command substitution involved in capturing
 program output). See that script for the corrected version.
+
+### 7. Hand-assembling providers to dodge instability was itself the trap
+
+**Context:** to keep `alchemy.container.ts` decoupled from `@machine-run/machine`'s
+aggregate `providers()` (which, at one point mid-session, briefly failed to
+type-check because a new `packages/git` — the `git-identity` → `git` rename
+in progress — added a `Git.Config` resource type to the aggregate), it was
+rewritten to hand-assemble just `Dotfiles.providers()` / `Secrets.providers()`
+/ `SystemPackages.providers()` directly, the way `alchemy.run.ts` used to.
+
+**What that immediately broke:** `gitIdentity()` (used at the time) is a
+*composition function* — its transitive provider requirement (`Git.Config`,
+once `git-identity` became a thin re-export of `@machine-run/git`) is
+invisible at the call site. Hand-assembling providers is only safe for a
+recipe that calls resources directly; the moment it calls a composition
+function from another package, the aggregate (`@machine-run/machine`) is the
+only thing that can't have this gap by construction — which is the entire
+reason that package exists (see its own doc comment). This recipe got bitten
+by exactly the failure mode it was hand-assembling providers to avoid.
+
+**Not a machine-run bug** so much as a real design tradeoff worth recording:
+prefer `Machine.providers()` for any recipe that uses more than the bare
+primitives directly, even at the cost of coupling to whatever's newest in
+that aggregate.
+
+### 8. `alchemy plan`/`deploy` never run: `Fiber.runLoop: Not a valid effect: undefined`
+
+This is the actual result of this task. Nothing above blocked it — once
+findings 1–7 were addressed, the container built cleanly, `examples/example-machine`
+typechecked cleanly, and `lib/` resolved correctly at runtime (confirmed by
+directly `import()`-ing `alchemy.container.ts` under plain `node`, which
+succeeded). The engine itself has still never successfully run a plan.
+
+**Command:** `node node_modules/alchemy/bin/alchemy.js plan alchemy.container.ts`
+(equivalently, `node_modules/.bin/alchemy plan alchemy.container.ts` — the
+real CLI entrypoint), from inside `examples/example-machine`, both inside the
+container and directly on the host.
+
+**Observed:** exit code `1`, with **zero output on stdout or stderr**. The
+normal CLI path gives no error message at all — `alchemy`'s own error
+reporting never surfaces anything.
+
+**How the real cause was found:** the CLI's own error-reporting is silent, so
+the failure had to be reproduced by bypassing `NodeRuntime.runMain` (which
+`alchemy/Cli`'s `main` is normally piped through) and running the exact same
+`main` Effect directly:
+
+```js
+process.argv = [process.argv[0], "alchemy", "plan", "alchemy.container.ts"];
+const { main } = await import("alchemy/Cli");
+const Effect = await import("effect/Effect");
+const Cause = await import("effect/Cause");
+const exit = await Effect.runPromiseExit(main);
+console.error(exit._tag, exit._tag === "Failure" ? Cause.pretty(exit.cause) : exit.value);
+```
+
+which prints:
+
+```
+Failure
+Error: Fiber.runLoop: Not a valid effect: undefined
+    at causePrettyError (file:///.../node_modules/effect/dist/internal/effect.js:231:13)
+```
+
+— a `Die` defect (`{ _tag: "Die", defect: "Fiber.runLoop: Not a valid effect: undefined" }`),
+not a typed failure. Something, somewhere in the CLI → `Plan.make` path,
+yields `undefined` to Effect's fiber runtime where an `Effect` was expected.
+
+**Bisection — this is not machine-run's bug:**
+
+1. Reproduced with the real `alchemy.container.ts` (7 resources across 6
+   packages).
+2. Reproduced with a recipe containing a single `Dotfiles.File` resource and
+   nothing else.
+3. Reproduced with **zero resources** — `Effect.gen(function* () { yield*
+   Effect.void; })` as the entire program, with real `Dotfiles.providers()` +
+   `@machine-run/core` services still wired in.
+4. Reproduced with **zero custom providers at all** — `providers: Layer.empty`,
+   no `@machine-run/*` import whatsoever, just
+   `Alchemy.Stack<{}>()("debug-bare", { providers: Layer.empty, state: Alchemy.localState() }, Effect.gen(function* () { yield* Effect.void; }))`.
+5. Reproduced identically **on the host** (macOS, outside Docker entirely,
+   with `HOME` overridden to a scratch directory) — ruling out anything
+   Linux- or container-specific.
+
+Step 4 is the load-bearing one: this is the smallest possible Alchemy stack —
+no machine-run code, no custom resources, no custom providers — and it still
+dies with the identical defect through the identical code path. Nothing in
+`packages/*`, `docker/`, or `scripts/` is implicated by the time you reach
+step 4.
+
+**Diagnosis: a bug in the currently-pinned `alchemy@2.0.0-beta.72` /
+`effect@4.0.0-rc.108` combination (or a genuine incompatibility between
+them), not in this repo.** `alchemy`'s `package.json` declares
+`"effect": ">=4.0.0-beta.105 || >=4.0.0"`, which `4.0.0-rc.108` satisfies by
+semver range — but pre-1.0 beta/rc software satisfying a peer range is not
+the same claim as "this exact combination was ever tested together," and
+Effect's own internal `Fiber`/generator protocol is exactly the kind of thing
+that changes shape between beta and rc without a version bump anyone would
+notice from a `peerDependencies` range alone. This is squarely "Alchemy is a
+dependency, not a fork" territory (`AGENTS.md` §1) — the fix belongs
+upstream, not as a patch in this repo, and it was not investigated further
+inside `alchemy`'s own (obfuscated/bundled) `lib/` output — that would mean
+debugging a third party's bundle rather than reporting the reproduction.
+
+**What this means for this task's actual goal:** every claim this repo makes
+about `observe`/`diff`/idempotence/drift detection is still, as of this
+writing, **unverified against a real `alchemy plan`** — not because those
+reconcilers are wrong (nothing ever got far enough to ask), but because
+Alchemy's own CLI cannot complete a plan for *any* stack, including an empty
+one, against the versions this workspace currently has installed. Deploy,
+drift-detection, and destroy (the rest of this task's checklist) are
+unreachable until this is resolved — there is nothing further down the
+pipeline to exercise.
+
+**Suggested next steps, not taken here (out of this task's scope once the
+blocker was this deep in a third-party dependency):**
+- Try a different `effect` version pinned closer to what `alchemy@2.0.0-beta.72`
+  was actually developed/tested against (check its own lockfile/CI pins in
+  the published package, if any ship).
+- Try a newer/older `alchemy` beta against the same `effect@4.0.0-rc.108`.
+- Report the minimal step-4 repro upstream to Alchemy.
 

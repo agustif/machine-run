@@ -95,8 +95,10 @@ ecosystem artifact that has its own identity and its own idempotent apply — a
 
 ## Docs
 
-- [docs/V1-PLAN.md](./docs/V1-PLAN.md) — honest current state, a
-  first-principles map of what a machine actually has, and the ordered plan
+- [docs/V2-PLAN.md](./docs/V2-PLAN.md) — where things stand now, the blocker,
+  and what comes next
+- [docs/V1-PLAN.md](./docs/V1-PLAN.md) — the first-principles map of what a
+  machine actually has, and how the breadth was chosen
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — how it is built
 - [docs/CONCEPTS.md](./docs/CONCEPTS.md) — what each Effect and Alchemy concept
   is used for here, and when not to reach for it

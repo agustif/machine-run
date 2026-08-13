@@ -7,7 +7,7 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
 
 - [x] **`dnf` and `pacman` against real containers.** Verified against
       `fedora:latest` (dnf5) and `archlinux:latest` — see
-      `docs/system-packages-notes.md` and the module doc comments in
+      `docs/notes/system-packages-notes.md` and the module doc comments in
       `src/backends/linux/{Dnf,Pacman}.ts`.
 - [ ] **`winget` / `choco` against a real Windows target.** Not reachable from
       here — needs a CI runner or a VM. Until then they stay documented as
@@ -20,10 +20,10 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
 - [x] `System.Repo` for dnf (COPR) — `RepoManagerId` now includes `"dnf"`.
       pacman stays out, documented as an intentional decision (AUR has no
       server-side repo concept), not a gap — see `Repo.ts`'s doc comment and
-      `docs/system-packages-notes.md`.
+      `docs/notes/system-packages-notes.md`.
 - [x] More backends: `pipx`, `uv tool`, `gem`, `go install`, `mas`, `flatpak`,
       AUR helpers (`yay`/`paru`) — all added and verified (see
-      `docs/system-packages-notes.md`). `snap` was added too but stays
+      `docs/notes/system-packages-notes.md`). `snap` was added too but stays
       UNVERIFIED (snapd needs `systemd`, unreachable from a plain container
       here). `nix` remains unaddressed.
 - [ ] **Version pinning.** `PackageProps` has no `version`, so "install ripgrep"

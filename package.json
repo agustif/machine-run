@@ -20,11 +20,11 @@
     "lint": "oxlint"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108",
+    "@effect/platform-node": "4.0.0-beta.107",
+    "@effect/vitest": "4.0.0-beta.107",
     "@types/node": "^24.0.0",
     "alchemy": "2.0.0-beta.72",
-    "effect": "4.0.0-rc.108",
+    "effect": "4.0.0-beta.107",
     "oxfmt": "^0.36.0",
     "oxlint": "^1.78.0",
     "oxlint-plugin-effect": "^0.8.2",
@@ -32,7 +32,9 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "effect": "4.0.0-rc.108",
-    "alchemy": "2.0.0-beta.72"
+    "effect": "4.0.0-beta.107",
+    "alchemy": "2.0.0-beta.72",
+    "@effect/platform-node": "4.0.0-beta.107",
+    "@effect/vitest": "4.0.0-beta.107"
   }
 }
