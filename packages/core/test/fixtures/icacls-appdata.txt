@@ -1,0 +1,5 @@
+C:\Users\user\AppData\ NT AUTHORITY\SYSTEM:(I)(OI)(CI)(F)
+                        BUILTIN\Administrators:(I)(OI)(CI)(F)
+                        LOCATION\user:(I)(OI)(CI)(F)
+
+Successfully processed 1 files; Failed processing 0 files

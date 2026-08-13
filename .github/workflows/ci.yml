@@ -75,7 +75,7 @@ jobs:
   # ---------------------------------------------------------------------
 
   verify-windows:
-    name: verify winget / choco parsers
+    name: verify winget / choco / icacls parsers
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -101,6 +101,26 @@ jobs:
           choco --version | Tee-Object -FilePath choco-version.txt
           choco list --local-only --limit-output | Tee-Object -FilePath choco-list.txt
 
+      # docs/notes/windows-permissions.md is the research trail this step
+      # closes the loop on: `packages/core/src/windows/Icacls.ts`'s parser is
+      # pinned against two real, but externally captured, `icacls`
+      # transcripts (a public mailing-list attachment, not this repo's own
+      # output). This is the other half — real `icacls` output from this
+      # repo's own Windows runner, on a file created just for this. The path
+      # is written to `$GITHUB_ENV` because it is only known at runtime
+      # (`$env:RUNNER_TEMP` varies per runner) and the assertion step below
+      # needs the exact string `icacls` was invoked with — it appears
+      # verbatim as the first line's prefix in the captured output, and
+      # `parseIcacls` cannot recover it by guessing where whitespace splits a
+      # path from a principal name.
+      - name: Capture real icacls output
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "machine-run-icacls-test.txt"
+          Set-Content -Path $target -Value "probe"
+          Add-Content -Path $env:GITHUB_ENV -Value "MACHINE_RUN_ICACLS_PATH=$target"
+          icacls $target | Tee-Object -FilePath icacls-listing.txt
+
       # Asserted here rather than uploaded for a human to read later. Uploading
       # was the original design and it was the weaker one twice over: it made
       # this job depend on the account's artifact storage quota (which it then
@@ -125,6 +145,13 @@ jobs:
           MACHINE_RUN_WINGET_LIST: winget-list.txt
           MACHINE_RUN_CHOCO_LIST: choco-list.txt
         run: npx vitest run packages/system-packages/test/windowsLive.test.ts
+
+      # `MACHINE_RUN_ICACLS_PATH` is already in this step's environment via
+      # `$GITHUB_ENV`, set by the capture step above.
+      - name: Assert the icacls parser against that output
+        env:
+          MACHINE_RUN_ICACLS_LISTING: icacls-listing.txt
+        run: npx vitest run packages/core/test/windows/IcaclsLive.test.ts
 
   verify-macos:
     name: verify defaults / mas parsers
