@@ -1,95 +1,193 @@
-import { OnePassword } from "@machine-run/secrets";
-import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
-import { CommandExecutor } from "alchemy/Command";
-import { isResolved } from "alchemy/Diff";
-import * as Provider from "alchemy/Provider";
+import { Sh } from "@machine-run/core";
+import { type Reconciler, toProvider } from "@machine-run/engine";
+import { SecretBackendId, secretBackend, type SecretError } from "@machine-run/secrets";
+import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Redacted from "effect/Redacted";
+import type * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 
-export interface TailscaleConnectionProps {
-  /** 1Password reference to a Tailscale auth key, e.g. "op://Personal/Tailscale/authkey". */
-  authKeyOpRef: string;
-  /** Optional device name to advertise on the tailnet; defaults to the OS hostname. */
-  hostname?: string;
-}
+export const TailscaleConnectionProps = Schema.Struct({
+  /** Which secret store the auth key lives in. @default "1password" */
+  authKeySource: Schema.optionalKey(SecretBackendId),
+  /**
+   * Reference to the auth key within that store. For the default
+   * `"1password"` source this is a secret reference such as
+   * `op://Personal/Tailscale/authkey`; see `SecretFileProps.ref` for the shape
+   * each backend expects.
+   */
+  authKeyRef: Schema.String,
+  /** Device name to advertise on the tailnet. Defaults to the OS hostname. */
+  hostname: Schema.optionalKey(Schema.String),
+});
+
+export type TailscaleConnectionProps = typeof TailscaleConnectionProps.Type;
+
+/**
+ * Being on the tailnet is the state; `hostname` is the one mutable aspect of
+ * it. Absence of this state means the daemon is not up and authenticated, so
+ * observing it is what makes a logged-out or stopped daemon reconnect on the
+ * next apply rather than being reported as unchanged forever.
+ */
+export const TailscaleConnectionState = Schema.Struct({
+  hostname: Schema.optionalKey(Schema.String),
+});
+
+export type TailscaleConnectionState = typeof TailscaleConnectionState.Type;
 
 export interface TailscaleConnection
   extends Resource<
     "Tailscale.Connection",
     TailscaleConnectionProps,
-    { hostname: string | undefined }
+    TailscaleConnectionState
   > {}
 
 export const TailscaleConnection = Resource<TailscaleConnection>("Tailscale.Connection");
 
-interface TailscaleSelfStatus {
-  BackendState?: string;
+/**
+ * The `tailscale` CLI is not installed, or not on `PATH`.
+ *
+ * Distinguished from the other ways the liveness probe comes back negative —
+ * logged out, daemon stopped, unparseable status output. Folding them together
+ * would let a missing binary be answered with `tailscale up`, which fails with
+ * a `CommandError` about a command that was never there instead of telling the
+ * operator to install it.
+ */
+export class TailscaleNotInstalled extends Data.TaggedError("TailscaleNotInstalled")<{
+  cause: CommandError;
+}> {
+  override get message() {
+    return `The "tailscale" CLI is not installed or not on PATH. Install it first — this resource never installs it for you.`;
+  }
 }
 
-export const TailscaleConnectionProvider = () =>
-  Provider.effect(
-    TailscaleConnection,
-    Effect.gen(function* () {
-      const executor = yield* CommandExecutor;
-      const onePassword = yield* OnePassword;
+/**
+ * The fields of `tailscale status --json` this resource reads.
+ *
+ * Decoded rather than cast, so a release that changes the shape, or stdout
+ * that is not JSON at all, fails predictably at the boundary instead of
+ * throwing inside a property access. Every field is optional because only
+ * their presence is load-bearing, never their absence.
+ *
+ * `BackendState` and `Self.HostName` were not verified against a running
+ * tailscaled — see docs/TASKS.md.
+ */
+const TailscaleStatus = Schema.fromJsonString(
+  Schema.Struct({
+    BackendState: Schema.optionalKey(Schema.String),
+    Self: Schema.optionalKey(
+      Schema.Struct({ HostName: Schema.optionalKey(Schema.String) }),
+    ),
+  }),
+);
 
-      // Any failure here (tailscale not installed, not yet logged in, bad
-      // JSON) just means "not running" — never a reason to blow up the plan.
-      const isRunning = (session: ScopedPlanStatusSession) =>
-        Effect.gen(function* () {
-          const result = yield* executor.run({ command: "tailscale status --json" }, session);
-          const parsed = yield* Effect.try(() => JSON.parse(result.stdout) as TailscaleSelfStatus);
-          return parsed.BackendState === "Running";
-        }).pipe(Effect.orElseSucceed(() => false));
+const decodeStatus = Schema.decodeUnknownEffect(TailscaleStatus);
 
-      return TailscaleConnection.Provider.of({
-        list: () => Effect.succeed([]),
-        diff: Effect.fn(function* ({ news, output }) {
-          if (!isResolved(news)) return undefined;
-          if (!output || output.hostname !== news.hostname) {
-            return { action: "update" as const };
-          }
-        }),
-        reconcile: Effect.fn(function* ({ news, output, session }) {
-          const running = yield* isRunning(session);
-          if (!running) {
-            const authKey = yield* onePassword.read(news.authKeyOpRef, session);
-            const hostnameFlag = news.hostname ? ` --hostname="$TS_HOSTNAME"` : "";
-            yield* executor.run(
-              {
-                // The auth key never touches the command string or argv —
-                // it's passed via `env` as `Redacted` so alchemy's own
-                // command-error redaction can scrub it, and it's never
-                // visible to `ps`/other processes the way an interpolated
-                // `--authkey=<value>` argument would be.
-                command: `tailscale up --authkey="$TS_AUTHKEY"${hostnameFlag}`,
-                shell: true,
-                env: {
-                  TS_AUTHKEY: Redacted.make(authKey),
-                  ...(news.hostname ? { TS_HOSTNAME: news.hostname } : {}),
-                },
-                timeout: "2 minutes",
-              },
-              session,
-            );
-          } else if (output && output.hostname !== news.hostname) {
-            // Already connected, but the desired hostname changed — apply
-            // just that instead of silently claiming a change was made.
-            yield* executor.run(
-              {
-                command: news.hostname ? `tailscale set --hostname="$TS_HOSTNAME"` : "tailscale set --hostname=",
-                shell: true,
-                env: news.hostname ? { TS_HOSTNAME: news.hostname } : {},
-                timeout: "1 minute",
-              },
-              session,
-            );
-          }
-          return { hostname: news.hostname };
-        }),
-        // Never runs `tailscale down`/logs the device out on destroy.
-        delete: () => Effect.void,
-      });
+/**
+ * Best-effort sniff of a `CommandError` caused by a missing binary.
+ *
+ * Substring matching on OS error text is fragile — wording is not a stable
+ * API — so this only ever promotes an error to a more actionable one, and
+ * everything unmatched keeps its ordinary meaning.
+ */
+const isCommandNotFound = (error: CommandError): boolean => {
+  const message = error.message.toLowerCase();
+  return message.includes("command not found") || message.includes("enoent");
+};
+
+export const makeTailscaleConnectionReconciler: Effect.Effect<
+  Reconciler<
+    TailscaleConnectionProps,
+    TailscaleConnectionState,
+    TailscaleNotInstalled | SecretError
+  >
+> = Effect.succeed({
+  // One tailnet membership per machine, so every instance contends for the
+  // same daemon and applies are serialised against each other.
+  address: () => "tailscale:connection",
+
+  observe: (_props, ctx) =>
+    ctx.exec({ command: "tailscale status --json" }).pipe(
+      Effect.flatMap((result) => decodeStatus(result.stdout)),
+      Effect.map((status) =>
+        status.BackendState === "Running"
+          ? { ...(status.Self?.HostName !== undefined
+              ? { hostname: status.Self.HostName }
+              : {}) }
+          : undefined,
+      ),
+      Effect.catchTag("CommandError", (error) =>
+        isCommandNotFound(error)
+          ? Effect.fail(new TailscaleNotInstalled({ cause: error }))
+          : // A non-zero exit means the daemon is not up or not logged in,
+            // which is an ordinary state to converge from.
+            Effect.succeed(undefined),
+      ),
+      // Output that will not decode means the state cannot be confirmed, which
+      // is treated the same as not being connected.
+      Effect.catchTag("SchemaError", () => Effect.succeed(undefined)),
+    ),
+
+  desired: (props) =>
+    Effect.succeed(
+      props.hostname !== undefined ? { hostname: props.hostname } : {},
+    ),
+
+  // A recipe that does not pin a hostname is satisfied by whatever the tailnet
+  // already advertises, so only a stated hostname is compared.
+  matches: (observed, desired) =>
+    UndefinedOr.match(desired.hostname, {
+      onUndefined: () => true,
+      onDefined: (hostname) => observed.hostname === hostname,
     }),
-  );
+
+  apply: ({ props, observed, desired }, ctx) =>
+    Effect.gen(function* () {
+      const hostnameFlag = desired.hostname !== undefined ? ` --hostname="$TS_HOSTNAME"` : "";
+      // Typed as the record `CommandProps.env` expects, so a conditionally
+      // absent key stays absent rather than becoming an explicit `undefined`
+      // value the index signature rejects.
+      const hostnameEnv: Record<string, string | Redacted.Redacted<string>> =
+        desired.hostname !== undefined ? { TS_HOSTNAME: desired.hostname } : {};
+
+      if (observed === undefined) {
+        const source = props.authKeySource ?? "1password";
+        const authKey = yield* secretBackend(source).read(props.authKeyRef, ctx.exec);
+
+        yield* ctx.exec({
+          // The key reaches the process through `env` as a `Redacted`, never
+          // through the command string: an interpolated key is visible in `ps`
+          // output and in any `CommandError` message, while Alchemy's redactor
+          // scrubs values passed this way.
+          command: `tailscale up --authkey="$TS_AUTHKEY"${hostnameFlag}`,
+          shell: true,
+          env: { TS_AUTHKEY: authKey, ...hostnameEnv },
+          timeout: "2 minutes",
+        });
+        return desired;
+      }
+
+      // Already on the tailnet, so only the hostname needs moving.
+      yield* ctx.exec({
+        command:
+          desired.hostname !== undefined
+            ? `tailscale set --hostname="$TS_HOSTNAME"`
+            : Sh.sh("tailscale", "set", "--hostname="),
+        shell: true,
+        env: hostnameEnv,
+        timeout: "1 minute",
+      });
+      return desired;
+    }).pipe(
+      Effect.catchTag("CommandError", (error) =>
+        isCommandNotFound(error)
+          ? Effect.fail(new TailscaleNotInstalled({ cause: error }))
+          : Effect.die(error),
+      ),
+    ),
+});
+
+export const TailscaleConnectionProvider = () =>
+  toProvider(TailscaleConnection, makeTailscaleConnectionReconciler);

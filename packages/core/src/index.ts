@@ -1,2 +1,8 @@
-export * from "./backup.ts";
+export * from "./Command.ts";
+export * from "./Backups.ts";
+export * from "./FileLock.ts";
 export * from "./hash.ts";
+export * from "./Providers.ts";
+export * from "./Sessions.ts";
+export * from "./Paths.ts";
+export * as Sh from "./Sh.ts";

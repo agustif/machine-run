@@ -1,0 +1,277 @@
+import { Backups, FileLock, silentSession } from "@machine-run/core";
+import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
+import { CommandExecutor } from "alchemy/Command";
+import { isResolved } from "alchemy/Diff";
+import * as Provider from "alchemy/Provider";
+import { RemovalPolicy } from "alchemy/RemovalPolicy";
+import type { ResourceClassLike, ResourceLike } from "alchemy/Resource";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
+
+/**
+ * The parts of Alchemy's provider contract a {@link Reconciler} does not
+ * model, for the resources that genuinely need one.
+ *
+ * Named rather than an open bag, so what can be overridden is discoverable and
+ * a typo is a compile error. A resource needing substantially more than this
+ * should call `Provider.effect` directly instead of stretching this shape.
+ */
+export interface ProviderOverrides<Res extends ResourceLike, State> {
+  /** Provider version, for state migrations. */
+  readonly version?: number;
+  /** Attributes guaranteed not to change across an update. */
+  readonly stables?: Extract<keyof State, string>[];
+  /** Runs before creation, for resources whose identity must exist first. */
+  readonly precreate?: (input: {
+    id: string;
+    fqn: string;
+    news: Res["Props"];
+    instanceId: string;
+    session: ScopedPlanStatusSession;
+  }) => Effect.Effect<State, never, never>;
+}
+
+/**
+ * Builds the Alchemy provider for a {@link Reconciler}.
+ *
+ * Everything that is uniform across machine resources is decided here, once:
+ *
+ * - `diff` observes the machine and compares against desired state. Resources
+ *   cannot opt out, so none of them can be blind to changes made by anything
+ *   other than this tool.
+ * - `read` reports what is already present, which is what lets the engine adopt
+ *   a machine that is correct instead of treating it as empty.
+ * - `reconcile` serialises on the reconciler's address, snapshots when
+ *   requested, and re-observes immediately before applying.
+ * - `delete` leaves the machine alone **by default**. Retain, not "delete does
+ *   nothing", is the actual invariant — see below.
+ *
+ * The `session` split is the subtle one. Alchemy threads a status session into
+ * `reconcile` but not into `diff` or `read`, because planning has no apply
+ * session to report progress to. Rather than exposing that asymmetry to every
+ * resource, the observe context always carries a non-reporting session and the
+ * apply context carries the live one.
+ *
+ * ## `delete` and `RemovalPolicy`
+ *
+ * Every resource here used to hard-code `delete: () => Effect.void` — nothing
+ * ever reversed itself, and there was no way to back out of adopting a
+ * machine. Alchemy already models the choice a caller might want instead:
+ * `RemovalPolicy` (`"retain" | "destroy"`, scoped onto an effect with its
+ * `retain(...)`/`destroy(...)` helpers).
+ *
+ * The generated `delete` reads that policy itself, rather than trusting
+ * Alchemy's own gate:
+ *
+ * - **No explicit policy, or an explicit `"retain"`, is a no-op.** This is
+ *   the default read of `Effect.serviceOption(RemovalPolicy)` returning
+ *   `None` — deliberately the *opposite* of Alchemy's own fallback (`Resource`
+ *   defaults an unset policy to `"destroy"` unless a resource type opts into
+ *   `defaultRemovalPolicy: "retain"`, which nothing in this repo does).
+ *   Re-deciding the default here, rather than relying on every resource
+ *   author remembering to set that option, is what makes "retain" the actual
+ *   invariant machine-wide instead of an opt-in per resource type.
+ * - **An explicit `"destroy"` calls {@link Reconciler.unapply} — if the
+ *   reconciler has one.** No `unapply` is, again, a no-op: most resources
+ *   cannot honestly reverse themselves (see its doc comment), and a resource
+ *   silently doing nothing is the truthful outcome, not a bug to route
+ *   around.
+ * - **Alchemy's own `RemovalPolicy` gate is a separate, complementary check**
+ *   that happens *before* this ever runs: under a per-resource policy of
+ *   `"retain"`, Alchemy's `Apply.ts` skips calling any provider's `delete`
+ *   entirely and only clears its own bookkeeping (verified by reading
+ *   `Apply.ts` directly — it never threads `RemovalPolicy` into the `delete`
+ *   effect's context, so that check and this one are independent layers, not
+ *   duplicates). Whether `RemovalPolicy` context actually reaches this
+ *   `delete` body depends on *where* a recipe author wraps `retain()`/
+ *   `destroy()` — around one resource's registration only sets the field
+ *   Alchemy's own gate reads; wrapping the whole stack program is what also
+ *   reaches here. **This repo has never run an actual `alchemy destroy`
+ *   against a deployed stack, so the propagation path is reasoned from
+ *   Alchemy's source, not observed.** Either way the worst case if it does
+ *   not reach here is identical to today's behaviour: an unconditional
+ *   no-op — this can only ever add an opt-in destructive path, never remove
+ *   the safety of the current one.
+ *
+ * ### Why "restore from backup" is not built in here
+ *
+ * `@machine-run/core`'s `Backups` looks like the obvious answer to "undo an
+ * overwrite" — but its directory is stamped fresh every run
+ * (`~/.local/state/machine-run/backups/<this-run's-stamp>/...`), so a
+ * `destroy` invocation's own `Backups` service has no idea where a backup
+ * taken during some earlier `deploy` landed; that information does not
+ * survive between runs unless something persists it. The only thing that
+ * *does* survive between runs is a resource's own `State`, round-tripped
+ * through Alchemy's state file. So restoring from backup is something an
+ * individual reconciler can do — by calling {@link ApplyContext.snapshot}
+ * itself during `apply` and folding the returned path into its `State` for
+ * `unapply` to read back later — but it is not something this adapter can
+ * fabricate on a resource's behalf, and none of the resources in this repo do
+ * it yet (that is a per-resource change, owned by whoever writes that
+ * resource).
+ *
+ * ## Relationship to Alchemy
+ *
+ * This produces an ordinary Alchemy provider — the same `Layer<Provider<Res>>`
+ * a hand-written one produces — so Alchemy remains the engine for planning,
+ * state, ordering, apply and destroy. It is a constructor for providers, not a
+ * layer that resources talk to instead of Alchemy.
+ *
+ * A {@link Reconciler} deliberately cannot express everything a provider can:
+ * there is no `replace`, no `stables`, no `precreate`, and `delete` only ever
+ * calls {@link Reconciler.unapply}. Those are modelled through {@link
+ * overrides} when a resource needs one, and a resource that needs
+ * substantially more should call `Provider.effect` directly rather than bend
+ * this shape. Both kinds compose in the same stack, because both are just
+ * providers.
+ */
+export const toProvider = <Res extends ResourceLike, State, E, R>(
+  cls: ResourceClassLike<Res>,
+  /**
+   * An effect that builds the reconciler, so it can resolve the services it
+   * needs once — the same way a provider resolves its dependencies once,
+   * rather than per reconcile.
+   */
+  make: Effect.Effect<Reconciler<Res["Props"], State, E>, never, R>,
+  /**
+   * Provider members merged over the generated ones.
+   *
+   * The escape hatch for the parts of Alchemy's provider contract a
+   * reconciler does not model — `stables`, `version`, `precreate`. Notably
+   * absent: `delete`. A resource whose `delete` needs to undo something
+   * implements {@link Reconciler.unapply} instead, so it stays inside the
+   * generated `delete`'s `RemovalPolicy` gate rather than bypassing it; a
+   * resource that needs delete behaviour genuinely outside that model calls
+   * `Provider.effect` directly instead of stretching this shape. Anything
+   * passed here wins, so a resource can keep the generated `diff`/`reconcile`
+   * while replacing one member.
+   */
+  overrides?: ProviderOverrides<Res, State>,
+) =>
+  Provider.effect(
+    cls,
+    Effect.gen(function* () {
+      const reconciler = yield* make;
+      const executor = yield* CommandExecutor;
+      const backups = yield* Backups;
+      const locks = yield* FileLock;
+
+      const observeCtx: ObserveContext = {
+        exec: (props) => executor.run(props, silentSession),
+      };
+
+      const applyCtx = (session: ScopedPlanStatusSession): ApplyContext => ({
+        exec: (props) => executor.run(props, session),
+        snapshot: (path) => backups.snapshot(path),
+      });
+
+      return {
+        // Machine state is addressed, not enumerated: there is no registry to
+        // ask "what files does this tool manage". Adoption goes through `read`.
+        list: () => Effect.succeed([]),
+
+        read: Effect.fn(function* ({ olds }: { olds: Res["Props"] }) {
+          return yield* reconciler.observe(olds, observeCtx);
+        }),
+
+        diff: Effect.fn(function* ({ news }: { news: Res["Props"] }) {
+          // Props can still contain unresolved references to other resources'
+          // outputs during planning; there is nothing to compare until they
+          // resolve, and the engine will diff again once they do.
+          if (!isResolved(news)) return undefined;
+
+          const observed = yield* reconciler.observe(news, observeCtx);
+          if (observed === undefined) return { action: "update" as const };
+
+          const desired = yield* reconciler.desired(news);
+          return reconciler.matches(observed, desired)
+            ? undefined
+            : { action: "update" as const };
+        }),
+
+        reconcile: Effect.fn(function* ({
+          news,
+          olds,
+          output,
+          session,
+        }: {
+          news: Res["Props"];
+          olds: Res["Props"] | undefined;
+          output: State | undefined;
+          session: ScopedPlanStatusSession;
+        }) {
+          const ctx = applyCtx(session);
+          const address = reconciler.address(news);
+
+          // Whatever is at this address was not put there by a previous run of
+          // this resource in two cases: nothing has been recorded yet, or the
+          // engine adopted something it found. Both mean the current contents
+          // may be a person's own work, and are the only moments worth
+          // preserving — snapshotting on every apply would only ever archive
+          // this tool's own previous output.
+          const preexisting = output === undefined || olds === undefined;
+
+          return yield* locks.withLock(
+            address,
+            Effect.gen(function* () {
+              const observed = yield* reconciler.observe(news, ctx);
+              const desired = yield* reconciler.desired(news);
+
+              if (observed !== undefined && reconciler.matches(observed, desired)) {
+                return observed;
+              }
+
+              if (reconciler.snapshotBeforeApply && preexisting) {
+                yield* ctx.snapshot(address);
+              }
+
+              return yield* reconciler.apply({ props: news, observed, desired }, ctx);
+            }),
+          );
+        }),
+
+        delete: Effect.fn(function* ({
+          olds,
+          output,
+          session,
+        }: {
+          olds: Res["Props"];
+          output: State;
+          session: ScopedPlanStatusSession;
+        }) {
+          // `None` (no `retain()`/`destroy()` in scope) reads as `"retain"`
+          // here, not Alchemy's own `"destroy"` fallback — see this
+          // function's doc comment for why the default is re-decided rather
+          // than inherited.
+          const policy = yield* Effect.serviceOption(RemovalPolicy).pipe(
+            Effect.map(Option.getOrElse((): "retain" | "destroy" => "retain")),
+          );
+          const unapply = reconciler.unapply;
+          if (policy !== "destroy" || !unapply) return;
+
+          const address = reconciler.address(olds);
+          const ctx = applyCtx(session);
+
+          // Same mutual exclusion as `reconcile`: undoing is still a
+          // read-modify-write against a shared address. `observed` is
+          // re-read inside the lock rather than trusted from `output` alone,
+          // so a resource hand-edited or already cleaned up between `deploy`
+          // and `destroy` is undone from what is actually there — `output`
+          // is passed through too, only as `recorded`, for a reconciler that
+          // needs bookkeeping (like a captured backup path) that cannot be
+          // re-derived by observation.
+          yield* locks.withLock(
+            address,
+            Effect.gen(function* () {
+              const observed = yield* reconciler.observe(olds, ctx);
+              if (observed === undefined) return;
+              yield* unapply({ props: olds, observed, recorded: output }, ctx);
+            }),
+          );
+        }),
+
+        ...overrides,
+      } as never;
+    }),
+  );

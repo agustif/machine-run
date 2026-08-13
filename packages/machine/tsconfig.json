@@ -1,0 +1,46 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./lib",
+    "rootDir": "./src"
+  },
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../dotfiles"
+    },
+    {
+      "path": "../macos-defaults"
+    },
+    {
+      "path": "../secrets"
+    },
+    {
+      "path": "../system-packages"
+    },
+    {
+      "path": "../tailscale"
+    },
+    {
+      "path": "../git"
+    },
+    {
+      "path": "../ai"
+    },
+    {
+      "path": "../shell"
+    },
+    {
+      "path": "../runtimes"
+    },
+    {
+      "path": "../system-settings"
+    }
+  ],
+  "include": [
+    "src"
+  ]
+}

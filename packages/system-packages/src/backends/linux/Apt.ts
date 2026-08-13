@@ -1,0 +1,60 @@
+import { Sh } from "@machine-run/core";
+import * as Effect from "effect/Effect";
+import type { PackageManagerBackend } from "../../Backend.ts";
+import { lines } from "../../parse.ts";
+import { parseAllSources } from "./apt/sources.ts";
+
+/** Marks where one-line entries end and deb822 stanzas begin in one read. */
+const SEPARATOR = "###machine-run:deb822###";
+
+/**
+ * Debian and Ubuntu.
+ *
+ * `install` and `addRepo` run as root, so a server needs either machine-run
+ * running as root or passwordless sudo for these commands. A `sudo` that
+ * prompts will hang: nothing here provides a terminal or a password.
+ */
+export const makeAptBackend = (): PackageManagerBackend => ({
+  id: "apt",
+  list: (exec) =>
+    exec({ command: "dpkg-query -f '${binary:Package}\\n' -W", shell: true }).pipe(
+      Effect.map((result) => lines(result.stdout)),
+    ),
+  install: (name, exec) =>
+    exec({
+      command: Sh.sh("sudo", "apt-get", "install", "-y", name),
+      shell: true,
+      timeout: "10 minutes",
+    }).pipe(Effect.asVoid),
+  /**
+   * Reads the files apt is configured from, in both of its formats.
+   *
+   * The one-line entries and the deb822 stanzas are read in one command with a
+   * sentinel between them: they need different parsers, and concatenating them
+   * first would leave no way to tell where one format ends. Both globs are
+   * `2>/dev/null; true` guarded, because a machine legitimately has one of the
+   * two unpopulated and an empty repository set is an answer, not a failure.
+   */
+  listRepos: (exec) =>
+    exec({
+      command: [
+        "cat /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null",
+        `echo '${SEPARATOR}'`,
+        "cat /etc/apt/sources.list.d/*.sources 2>/dev/null",
+        "true",
+      ].join("; "),
+      shell: true,
+    }).pipe(
+      Effect.map((result) => {
+        const index = result.stdout.indexOf(SEPARATOR);
+        const oneLine = index === -1 ? result.stdout : result.stdout.slice(0, index);
+        const deb822 = index === -1 ? "" : result.stdout.slice(index + SEPARATOR.length);
+        return parseAllSources(oneLine, deb822);
+      }),
+    ),
+  addRepo: (repo, exec) =>
+    exec({
+      command: Sh.sh("sudo", "add-apt-repository", "-y", repo),
+      shell: true,
+    }).pipe(Effect.asVoid),
+});

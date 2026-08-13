@@ -5,6 +5,15 @@
     "outDir": "./lib",
     "rootDir": "./src"
   },
-  "references": [{ "path": "../core" }],
-  "include": ["src"]
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../engine"
+    }
+  ],
+  "include": [
+    "src"
+  ]
 }

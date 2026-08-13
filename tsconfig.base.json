@@ -1,7 +1,7 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "lib": ["ESNext", "DOM"],
+    "lib": ["ESNext"],
     "module": "Preserve",
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
@@ -14,8 +14,11 @@
     "resolveJsonModule": true,
     "declaration": true,
     "declarationMap": true,
-    "noUnusedLocals": false,
-    "noUnusedParameters": false,
-    "types": ["bun"]
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["node"]
   }
 }

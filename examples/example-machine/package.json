@@ -12,12 +12,14 @@
     "@machine-run/ai-tools": "*",
     "@machine-run/dotfiles": "*",
     "@machine-run/git-identity": "*",
+    "@machine-run/machine": "*",
     "@machine-run/macos-defaults": "*",
     "@machine-run/secrets": "*",
     "@machine-run/ssh": "*",
     "@machine-run/system-packages": "*",
     "@machine-run/tailscale": "*",
-    "alchemy": "2.0.0-beta.67",
-    "effect": "4.0.0-beta.102"
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.108",
+    "@machine-run/git": "*"
   }
 }

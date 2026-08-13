@@ -1,0 +1,67 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "./.tsbuild/tests",
+    "types": [
+      "node"
+    ],
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": false
+  },
+  "references": [
+    {
+      "path": "packages/ai"
+    },
+    {
+      "path": "packages/ai-tools"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/dotfiles"
+    },
+    {
+      "path": "packages/engine"
+    },
+    {
+      "path": "packages/git"
+    },
+    {
+      "path": "packages/git-identity"
+    },
+    {
+      "path": "packages/machine"
+    },
+    {
+      "path": "packages/macos-defaults"
+    },
+    {
+      "path": "packages/runtimes"
+    },
+    {
+      "path": "packages/secrets"
+    },
+    {
+      "path": "packages/shell"
+    },
+    {
+      "path": "packages/ssh"
+    },
+    {
+      "path": "packages/system-packages"
+    },
+    {
+      "path": "packages/system-settings"
+    },
+    {
+      "path": "packages/tailscale"
+    }
+  ],
+  "include": [
+    "packages/*/test/**/*.ts"
+  ]
+}

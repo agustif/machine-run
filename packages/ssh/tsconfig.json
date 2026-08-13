@@ -5,6 +5,15 @@
     "outDir": "./lib",
     "rootDir": "./src"
   },
-  "references": [{ "path": "../dotfiles" }],
-  "include": ["src"]
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../dotfiles"
+    }
+  ],
+  "include": [
+    "src"
+  ]
 }

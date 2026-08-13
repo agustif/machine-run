@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "jsPlugins": [
+    "oxlint-plugin-effect/plugin"
+  ],
+  "ignorePatterns": [
+    "**/lib/**",
+    "**/.tsbuild/**",
+    "**/node_modules/**"
+  ],
+  "rules": {
+    "effect/noAsyncFunction": "error",
+    "effect/noNewPromise": "error",
+    "effect/noTryCatch": "error",
+    "effect/noThrowStatement": "error",
+    "effect/noNewError": "error",
+    "effect/noGlobals": "error",
+    "effect/noDynamicImports": "error",
+    "effect/noEffectDo": "error",
+    "effect/noEffectBind": "error",
+    "effect/preferEffectFn": "error",
+    "effect/noTestLifecycleHooks": "error",
+    "effect/noShapeInSymbolNames": "error",
+    "effect/noChainedTypeAssertions": "error",
+    "effect/noWidenThenAssert": "error",
+    "effect/noObjectParameters": "error",
+    "effect/noUnsafeDictionaryType": "error",
+    "effect/noKnownValueWidening": "error",
+    "effect/noNullish": "warn",
+    "effect/noTernary": "warn",
+    "effect/noAs": "warn",
+    "effect/noRuntimeTypeof": "warn",
+    "effect/noConditionalEmptyObjectSpread": "warn",
+    "effect/noUnknownParameters": "warn",
+    "effect/noUnknownTypeAliases": "warn",
+    "effect/noNodeBuiltinImport": "warn"
+  },
+  "overrides": [
+    {
+      "files": [
+        "packages/*/test/**"
+      ],
+      "rules": {
+        "effect/noThrowStatement": "off",
+        "effect/noNewError": "off",
+        "effect/noGlobals": "off"
+      }
+    }
+  ]
+}

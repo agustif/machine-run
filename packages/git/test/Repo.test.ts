@@ -1,0 +1,278 @@
+import { MachinePathsLive } from "@machine-run/core";
+import { NodeServices } from "@effect/platform-node";
+import { expect, it } from "@effect/vitest";
+import { CommandError, UnexpectedExit } from "alchemy/Command";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
+import { GitRepoCommandFailed, GitRepoPathOccupied, makeGitRepoReconciler } from "../src/Repo.ts";
+
+const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+
+/** Fails the way real `git -C <path> rev-parse --show-toplevel` does when `path` is not inside any repository. */
+const notARepo = () =>
+  Effect.fail(
+    new CommandError({
+      command: "git rev-parse --show-toplevel",
+      reason: new UnexpectedExit({
+        exitCode: 128,
+        stderr: "fatal: not a git repository (or any of the parent directories): .git",
+      }),
+    }),
+  );
+
+/** A fake `Exec` for a repo whose toplevel is `root` and whose `origin` points at `remote` (or is unset). */
+const repoAt = (root: string, remote: string | undefined) => ({
+  exec: (props: { command: string }) => {
+    if (props.command.includes("show-toplevel")) {
+      return Effect.succeed({ exitCode: 0, stdout: `${root}\n`, stderr: "" });
+    }
+    if (props.command.includes("remote get-url origin")) {
+      return remote === undefined
+        ? Effect.fail(
+            new CommandError({
+              command: props.command,
+              reason: new UnexpectedExit({ exitCode: 2, stderr: "error: No such remote 'origin'" }),
+            }),
+          )
+        : Effect.succeed({ exitCode: 0, stdout: `${remote}\n`, stderr: "" });
+    }
+    return Effect.die(`unexpected command in test: ${props.command}`);
+  },
+});
+
+const notARepoExec = { exec: () => notARepo() };
+
+const applyCtx = (exec: ReturnType<typeof repoAt>["exec"]) => ({
+  exec,
+  snapshot: () => Effect.succeed(undefined),
+});
+
+it.effect("observe reports absent when nothing exists at the path yet", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "does-not-exist");
+
+    const observed = yield* reconciler.observe({ path: target, remote: "irrelevant" }, notARepoExec);
+    expect(observed).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("observe reports absent for an existing but empty directory — `git clone` accepts one", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "empty");
+    yield* fs.makeDirectory(target);
+
+    const observed = yield* reconciler.observe({ path: target, remote: "irrelevant" }, notARepoExec);
+    expect(observed).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "observe fails with GitRepoPathOccupied for a non-empty directory that is not a repository",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "occupied");
+      yield* fs.makeDirectory(target);
+      yield* fs.writeFileString(path.join(target, "README.md"), "hand-written");
+
+      const error = yield* reconciler
+        .observe({ path: target, remote: "irrelevant" }, notARepoExec)
+        .pipe(Effect.flip);
+      expect(error).toBeInstanceOf(GitRepoPathOccupied);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "observe fails with GitRepoPathOccupied for a directory nested inside a different repository",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const ancestorRoot = dir;
+      const nested = path.join(dir, "nested");
+      yield* fs.makeDirectory(nested);
+      yield* fs.writeFileString(path.join(nested, "file"), "content");
+
+      // `--show-toplevel` succeeds, but reports the *ancestor's* root, not
+      // `nested` itself — verified live that an empty subdirectory of an
+      // unrelated repository answers `--is-inside-work-tree` with `true`
+      // without ever having been `git init`'d itself.
+      const error = yield* reconciler
+        .observe(
+          { path: nested, remote: "irrelevant" },
+          { exec: () => Effect.succeed({ exitCode: 0, stdout: `${ancestorRoot}\n`, stderr: "" }) },
+        )
+        .pipe(Effect.flip);
+      expect(error).toBeInstanceOf(GitRepoPathOccupied);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("observe reports the configured remote when the path is its own repository root", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "repo");
+    yield* fs.makeDirectory(target);
+
+    const observed = yield* reconciler.observe(
+      { path: target, remote: "irrelevant" },
+      repoAt(target, "git@example.com:me/repo.git"),
+    );
+    expect(observed).toEqual({ path: target, remote: "git@example.com:me/repo.git" });
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("observe reports no `remote` field when the repository has no `origin` at all", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "repo");
+    yield* fs.makeDirectory(target);
+
+    const observed = yield* reconciler.observe(
+      { path: target, remote: "irrelevant" },
+      repoAt(target, undefined),
+    );
+    expect(observed).toEqual({ path: target });
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("observe surfaces a real command failure rather than treating it as absent", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "repo");
+    yield* fs.makeDirectory(target);
+
+    const error = yield* reconciler
+      .observe(
+        { path: target, remote: "irrelevant" },
+        {
+          exec: () =>
+            Effect.fail(
+              new CommandError({
+                command: "git rev-parse --show-toplevel",
+                reason: new UnexpectedExit({ exitCode: 128, stderr: "fatal: unknown corruption" }),
+              }),
+            ),
+        },
+      )
+      .pipe(Effect.flip);
+    expect(error).toBeInstanceOf(GitRepoCommandFailed);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("apply clones when nothing was observed, never pre-creating the target directory itself", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "fresh-clone");
+
+    const calls: string[] = [];
+    const props = { path: target, remote: "https://example.com/repo.git", branch: "main" };
+    const desired = yield* reconciler.desired(props);
+    const result = yield* reconciler.apply(
+      { props, observed: undefined, desired },
+      applyCtx((commandProps) => {
+        calls.push(commandProps.command);
+        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+      }),
+    );
+
+    expect(result).toEqual(desired);
+    expect(calls).toEqual([
+      `git clone --branch main --origin origin https://example.com/repo.git ${target}`,
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("apply adds `origin` when the repository exists but has none configured", () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const target = path.join("/tmp", "existing-repo");
+
+    const calls: string[] = [];
+    const props = { path: target, remote: "https://example.com/repo.git" };
+    const desired = yield* reconciler.desired(props);
+    const result = yield* reconciler.apply(
+      { props, observed: { path: target }, desired },
+      applyCtx((commandProps) => {
+        calls.push(commandProps.command);
+        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+      }),
+    );
+
+    expect(result).toEqual(desired);
+    expect(calls).toEqual([
+      `git -C ${target} remote add origin https://example.com/repo.git`,
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("apply fixes the remote with set-url — never checkout/reset/clean/pull — when it differs", () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const target = path.join("/tmp", "existing-repo");
+
+    const calls: string[] = [];
+    const props = { path: target, remote: "https://example.com/new.git" };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply(
+      { props, observed: { path: target, remote: "https://example.com/old.git" }, desired },
+      applyCtx((commandProps) => {
+        calls.push(commandProps.command);
+        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+      }),
+    );
+
+    expect(calls).toEqual([
+      `git -C ${target} remote set-url origin https://example.com/new.git`,
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("apply does nothing when the remote already matches", () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    const reconciler = yield* makeGitRepoReconciler;
+    const target = path.join("/tmp", "existing-repo");
+
+    const calls: string[] = [];
+    const props = { path: target, remote: "https://example.com/repo.git" };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply(
+      { props, observed: { path: target, remote: "https://example.com/repo.git" }, desired },
+      applyCtx((commandProps) => {
+        calls.push(commandProps.command);
+        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+      }),
+    );
+
+    expect(calls).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);

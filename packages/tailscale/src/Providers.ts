@@ -1,10 +1,11 @@
-import { OnePasswordLive } from "@machine-run/secrets";
-import { CommandExecutorLive } from "alchemy/Command";
 import * as Layer from "effect/Layer";
 import { TailscaleConnectionProvider } from "./Connection.ts";
 
-export const providers = () =>
-  Layer.mergeAll(TailscaleConnectionProvider()).pipe(
-    Layer.provide(OnePasswordLive()),
-    Layer.provide(CommandExecutorLive()),
-  );
+/**
+ * Registers `Tailscale.Connection`.
+ *
+ * No secret-store layer is provided or required: secret backends are plain
+ * values that receive a command runner when read, so this package depends on
+ * the registry as a module import rather than as a service.
+ */
+export const providers = () => Layer.mergeAll(TailscaleConnectionProvider());

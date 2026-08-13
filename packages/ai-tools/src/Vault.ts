@@ -1,79 +1,52 @@
-import * as Dotfiles from "@machine-run/dotfiles";
+import * as Ai from "@machine-run/ai";
 import * as Effect from "effect/Effect";
 
 /**
- * Almost every AI coding CLI on this machine (Claude, Codex, Cursor, Gemini,
- * Grok, Copilot, plus the `agents`/`crush`/`forge`/`goose`/`opencode`
- * families under `~/.config`) keeps a `skills/` directory and one or two
- * plain settings files — and also a pile of session/auth/cache state that
- * must NEVER be checked into a git repo.
- *
- * This package deliberately only symlinks the reviewed-safe subset via
- * {@link Dotfiles.Symlink}, which refuses to do anything unless a matching
- * file already exists under `vaultDir` — i.e. content only ever enters
- * version control because a human copied and reviewed it first, never
- * automatically. It never touches: `auth.json`, anything named
- * `*session*`/`*token*`/`*credential*`, `*.db`/`*.sqlite*`, `logs`, `cache`,
- * `*.lock`, or `history.jsonl` — those stay local-only, by design.
+ * `@machine-run/ai-tools` is being phased out in favour of `@machine-run/ai`,
+ * which replaced its two frozen arrays and a `for` loop with a real backend
+ * seam (`AiToolBackend`, one module per tool, dispatched by id — see
+ * `packages/ai/src/Backend.ts`) and added `Ai.McpServer`, which this package
+ * never had at all. This module is kept only so nothing importing
+ * `@machine-run/ai-tools` today breaks; it should be deleted before 1.0 —
+ * see docs/ai-notes.md. New code should depend on `@machine-run/ai` directly.
  */
 export interface AiToolsProps {
-  /** Absolute path to the user's home directory, e.g. "/Users/a". */
+  /** The user's home directory, e.g. "/Users/a" or "~". `~` is accepted — see `@machine-run/ai`'s `Ai.Skill`. */
   home: string;
-  /** Absolute path to this repo's vault directory, e.g. "/Users/a/machine-run/vault/ai-tools". */
+  /** This repo's vault directory, e.g. "/Users/a/machine-run/vault/ai". `~` is accepted — see `home`. */
   vaultDir: string;
 }
 
-/** Tools whose `skills/` directory is safe to track — no credentials live alongside it. */
-export const AI_TOOL_SKILLS_DIRS = [
-  { id: "claude", real: ".claude/skills" },
-  { id: "codex", real: ".codex/skills" },
-  { id: "cursor", real: ".cursor/skills" },
-  { id: "gemini", real: ".gemini/skills" },
-  { id: "grok", real: ".grok/skills" },
-  { id: "copilot", real: ".copilot/skills" },
-  { id: "agents", real: ".agents/skills" },
-  { id: "config-agents", real: ".config/agents/skills" },
-  { id: "config-crush", real: ".config/crush/skills" },
-  { id: "config-forge", real: ".config/forge/skills" },
-  { id: "config-goose", real: ".config/goose/skills" },
-  { id: "config-opencode", real: ".config/opencode/skills" },
-] as const;
+const ALL_TOOL_IDS = Object.keys(Ai.aiToolBackends) as ReadonlyArray<Ai.AiToolId>;
 
-/** Individually-reviewed plain settings/config files — never `auth.*`, `*session*`, or DB/cache files. */
-export const AI_TOOL_CONFIG_FILES = [
-  { id: "claude-settings", real: ".claude/settings.json" },
-  { id: "codex-config", real: ".codex/config.toml" },
-  { id: "codex-agents-md", real: ".codex/AGENTS.md" },
-  { id: "grok-config", real: ".grok/config.toml" },
-  { id: "copilot-config", real: ".copilot/config.json" },
-  { id: "forge-config", real: ".config/forge/config.json" },
-] as const;
+/** Every tool id's `skills/` directory, derived from `@machine-run/ai`'s registry rather than duplicated here. */
+export const AI_TOOL_SKILLS_DIRS = ALL_TOOL_IDS.map((id) => ({
+  id,
+  real: Ai.aiToolBackends[id].skillsDir,
+}));
 
 /**
- * Each tool keeps its own `skills/` directory separate under the vault
- * (`<vaultDir>/skills/<id>`) rather than assuming they're interchangeable
- * across tools — consolidate manually later if you actually want one shared
- * skills library across all of them.
+ * Every tool id's reviewed config files, flattened to one entry per file.
+ * `id` is derived (`<tool>` when a tool has exactly one reviewed file,
+ * `<tool>-<n>` when it has more, e.g. Codex's `config.toml` and
+ * `AGENTS.md`) rather than reproduced from the original hand-picked ids
+ * (`codex-config`, `codex-agents-md`, ...) — nothing in this repo reads
+ * those ids, so there is nothing to keep byte-identical, and generating them
+ * means this list can never drift from `AiToolBackend.reviewedConfigFiles`.
  */
+export const AI_TOOL_CONFIG_FILES = ALL_TOOL_IDS.flatMap((id) => {
+  const files = Ai.aiToolBackends[id].reviewedConfigFiles;
+  return files.map((real, index) => ({
+    id: files.length === 1 ? id : `${id}-${index}`,
+    real,
+  }));
+});
+
 export const aiToolSkills = (props: AiToolsProps) =>
-  Effect.gen(function* () {
-    for (const { id, real } of AI_TOOL_SKILLS_DIRS) {
-      yield* Dotfiles.Symlink(`ai-tools-skills-${id}`, {
-        path: `${props.home}/${real}`,
-        source: `${props.vaultDir}/skills/${id}`,
-      });
-    }
-  });
+  Ai.aiSkills({ home: props.home, vaultDir: props.vaultDir, tools: ALL_TOOL_IDS });
 
 export const aiToolConfigFiles = (props: AiToolsProps) =>
-  Effect.gen(function* () {
-    for (const { id, real } of AI_TOOL_CONFIG_FILES) {
-      yield* Dotfiles.Symlink(`ai-tools-config-${id}`, {
-        path: `${props.home}/${real}`,
-        source: `${props.vaultDir}/config/${id}`,
-      });
-    }
-  });
+  Ai.aiConfigs({ home: props.home, vaultDir: props.vaultDir, tools: ALL_TOOL_IDS });
 
 export const aiTools = (props: AiToolsProps) =>
   Effect.gen(function* () {

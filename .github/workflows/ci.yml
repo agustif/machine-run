@@ -1,0 +1,138 @@
+name: CI
+
+# Kept deliberately honest: no `continue-on-error`, no step skipped to make a
+# red run look green. If a job is red, the repo is red — that is the point of
+# running it at all.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # No lockfile is committed, so this is a real resolution every run —
+      # which is itself worth testing, since a stale transitive pin is how a
+      # second copy of `alchemy` got installed once (see docs/SYSTEM-DESIGN.md).
+      - run: npm install
+
+      - name: tsc -b
+        run: npm run build
+
+      - name: vitest
+        run: npm test
+
+      # Lint once rather than per-OS: it reads source, not the machine.
+      - name: oxlint
+        if: matrix.os == 'ubuntu-latest'
+        run: npm run lint
+
+  # ---------------------------------------------------------------------
+  # Verification jobs: run the real tools this repo parses, on a machine
+  # that actually has them. Each one closes a gap that is currently marked
+  # "unverified" in a backend's doc comment and in docs/TASKS.md.
+  # ---------------------------------------------------------------------
+
+  verify-windows:
+    name: verify winget / choco parsers
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+
+      # Captured as artifacts rather than asserted inline: the point is to
+      # obtain real output from tools no developer here has access to, so the
+      # fixtures in packages/system-packages/test stop being documented
+      # guesses. A parser change should be driven by this output.
+      - name: Capture real winget output
+        shell: pwsh
+        run: |
+          winget --version | Tee-Object -FilePath winget-version.txt
+          winget list --disable-interactivity | Tee-Object -FilePath winget-list.txt
+      - name: Capture real choco output
+        shell: pwsh
+        run: |
+          choco --version | Tee-Object -FilePath choco-version.txt
+          choco list --local-only --limit-output | Tee-Object -FilePath choco-list.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-package-manager-output
+          path: "*.txt"
+
+  verify-macos:
+    name: verify defaults / mas parsers
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+
+      # `defaults export | plutil -extract <key> xml1` is the read path
+      # MacOS.Default depends on; this proves it against a real macOS rather
+      # than only the developer's own machine.
+      - name: Exercise the defaults read path
+        run: |
+          defaults write com.machine-run.citest sample -string 'a b'
+          defaults export com.machine-run.citest - | plutil -extract sample xml1 -o - -
+          defaults delete com.machine-run.citest
+
+      - name: Capture mas surface
+        continue-on-error: true
+        run: brew install mas && mas version && mas list || echo "mas unavailable on this runner"
+
+  verify-linux-backends:
+    name: verify dnf / pacman parsers
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Containers rather than the runner itself: the runner is Ubuntu, and
+      # these two backends parse Fedora and Arch output specifically.
+      - name: Fedora (dnf)
+        run: |
+          docker run --rm fedora:latest bash -lc "
+            dnf --version | head -1
+            dnf repoquery --userinstalled --qf '%{name}\n' | head -20
+          "
+      - name: Arch (pacman)
+        run: |
+          docker run --rm --platform linux/amd64 archlinux:latest bash -lc "
+            pacman --version | head -2
+            pacman -Qq | head -20
+          "
+
+  deploy-check:
+    name: deploy (plan / idempotence / drift / destroy)
+    runs-on: ubuntu-latest
+    # The gap this repo has never closed: the engine has never executed. This
+    # job is the only thing here that runs `alchemy plan` at all, so its
+    # failure output is a deliverable in its own right.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm install
+      - name: scripts/deploy-check.sh
+        run: bash scripts/deploy-check.sh

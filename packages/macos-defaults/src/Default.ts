@@ -1,72 +1,142 @@
-import { CommandExecutor } from "alchemy/Command";
-import { isResolved } from "alchemy/Diff";
-import * as Provider from "alchemy/Provider";
+import { Sh } from "@machine-run/core";
+import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+import { canonicalXml, PlistDecodeError, PlistValueSchema, render } from "./Value.ts";
 
-export interface MacDefaultProps {
+export const MacDefaultProps = Schema.Struct({
   /** `defaults` domain, e.g. "com.apple.dock" or "NSGlobalDomain". */
-  domain: string;
-  key: string;
-  type: "bool" | "int" | "float" | "string";
-  /** Always the string form `defaults write` expects, e.g. "true", "35". */
-  value: string;
-  /** App to `killall` after a real write so the change takes visible effect, e.g. "Dock", "Finder". */
-  restartApp?: string;
-}
+  domain: Schema.String,
+  key: Schema.String,
+  /**
+   * The desired value, in the JSON-safe property-list representation.
+   * Booleans, numbers and strings are themselves; `<data>` and `<date>` use
+   * the tagged wrappers from `./Value.ts`.
+   */
+  value: PlistValueSchema,
+  /** App to `killall` after a real write so the change takes effect, e.g. "Dock". */
+  restartApp: Schema.optionalKey(Schema.String),
+});
+
+export type MacDefaultProps = typeof MacDefaultProps.Type;
 
 /**
- * One `defaults write <domain> <key> -<type> <value>` setting. Always writes
- * explicitly rather than only-if-different-from-factory-default: the point
- * is a value that's reproducible on any machine, not just "whatever this Mac
- * happened to have."
+ * One key in one `defaults` domain.
  *
- * diff compares against this resource's own last-recorded output rather than
- * re-reading `defaults read` live — a deliberate, cheap optimization (like
- * alchemy's own `Command.Exec` memoization) since nothing but machine-run is
- * expected to touch these keys once managed.
+ * The value is always written explicitly rather than only when it differs from
+ * the factory default, so the result is reproducible on any machine rather
+ * than dependent on what that machine happened to start with.
+ *
+ * Reads and writes both go through XML property lists rather than `defaults`'
+ * own scalar flags. The scalar flags cannot express an array, dictionary or
+ * data value at all, and `defaults`' shorthand list syntax silently coerces:
+ * writing `(alpha, 3)` stores `3` as a string, so the value read back never
+ * matches the value written and the key is rewritten on every apply.
  */
+/**
+ * The value is carried as canonical XML so two spellings of the same
+ * property-list value compare equal — see `canonicalXml`.
+ */
+export const MacDefaultState = Schema.Struct({
+  domain: Schema.String,
+  key: Schema.String,
+  xml: Schema.String,
+});
+
+export type MacDefaultState = typeof MacDefaultState.Type;
+
 export interface MacDefault
-  extends Resource<
-    "MacOS.Default",
-    MacDefaultProps,
-    { domain: string; key: string; value: string }
-  > {}
+  extends Resource<"MacOS.Default", MacDefaultProps, MacDefaultState> {}
 
 export const MacDefault = Resource<MacDefault>("MacOS.Default");
 
-export const MacDefaultProvider = () =>
-  Provider.effect(
-    MacDefault,
-    Effect.gen(function* () {
-      const executor = yield* CommandExecutor;
+export const makeMacDefaultReconciler: Effect.Effect<
+  Reconciler<MacDefaultProps, MacDefaultState, PlistDecodeError>
+> = Effect.succeed({
+  // `defaults` serialises per domain, and two keys in one domain are two
+  // read-modify-write cycles over the same plist, so applies are serialised
+  // per domain rather than per key.
+  address: (props) => `defaults:${props.domain}`,
 
-      return MacDefault.Provider.of({
-        list: () => Effect.succeed([]),
-        diff: Effect.fn(function* ({ news, output }) {
-          if (!isResolved(news)) return undefined;
-          if (!output || output.value !== news.value) {
-            return { action: "update" as const };
-          }
-        }),
-        reconcile: Effect.fn(function* ({ news, session }) {
-          yield* executor.run(
-            {
-              command: `defaults write ${news.domain} ${news.key} -${news.type} ${news.value}`,
-              shell: true,
-            },
-            session,
-          );
-          if (news.restartApp) {
-            // `killall` exits non-zero if the app isn't running — not an error.
-            yield* executor
-              .run({ command: `killall ${news.restartApp}`, shell: true }, session)
-              .pipe(Effect.catchTag("CommandError", () => Effect.void));
-          }
-          return { domain: news.domain, key: news.key, value: news.value };
-        }),
-        // Never reverts a system preference on `alchemy destroy`.
-        delete: () => Effect.void,
+  /**
+   * The live value of the key as canonical XML, or `undefined` when unset.
+   *
+   * These keys are routinely written by things other than this tool — System
+   * Settings, an OS update, another script — so a recorded value cannot stand
+   * in for the live one.
+   *
+   * The domain is exported and the single key extracted from it, rather than
+   * read directly, because `defaults read` prints the old-style plist format,
+   * which is ambiguous: it quotes strings only when necessary and has no
+   * distinct spelling for data or dates.
+   */
+  observe: (props, ctx) =>
+    ctx
+      .exec({
+        command: `${Sh.sh("defaults", "export", props.domain, "-")} | ${Sh.sh(
+          "plutil",
+          "-extract",
+          props.key,
+          "xml1",
+          "-o",
+          "-",
+          "-",
+        )}`,
+        shell: true,
+      })
+      .pipe(
+        // A non-zero exit means the domain or the key is absent, which is an
+        // ordinary state to converge from rather than a failure. `plutil`
+        // exits 1 for a missing key path; `defaults export` of an unknown
+        // domain succeeds with an empty dictionary, which then fails the
+        // extract the same way.
+        Effect.map((result) => result.stdout),
+        Effect.orElseSucceed(() => undefined),
+        Effect.flatMap((stdout) =>
+          stdout === undefined
+            ? Effect.succeed(undefined)
+            : // Output that will not parse is a real failure rather than
+              // "absent": `plutil` succeeded, so something is there, and
+              // silently treating it as missing would overwrite a value
+              // nobody could see.
+              Effect.fromResult(canonicalXml(stdout)).pipe(
+                Effect.map((xml) => ({ domain: props.domain, key: props.key, xml })),
+              ),
+        ),
+      ),
+
+  desired: (props) =>
+    Effect.fromResult(render(props.value)).pipe(
+      Effect.map((xml) => ({ domain: props.domain, key: props.key, xml })),
+    ),
+
+  matches: (observed, desired) =>
+    observed.domain === desired.domain &&
+    observed.key === desired.key &&
+    observed.xml === desired.xml,
+
+  apply: ({ props, desired }, ctx) =>
+    Effect.gen(function* () {
+      yield* ctx.exec({
+        // Every fragment is quoted. Under `shell: true` an unquoted value
+        // containing a space becomes several arguments, and one containing
+        // `;` or `$(...)` becomes a second command — and an XML document is
+        // full of characters a shell would otherwise interpret.
+        command: Sh.sh("defaults", "write", props.domain, props.key, desired.xml),
+        shell: true,
       });
-    }),
-  );
+
+      if (props.restartApp !== undefined) {
+        yield* ctx
+          .exec({ command: Sh.sh("killall", props.restartApp), shell: true })
+          // `killall` exits non-zero when the app is not running, which is not
+          // a failure to restart it.
+          .pipe(Effect.catchTag("CommandError", () => Effect.void));
+      }
+
+      return desired;
+    }).pipe(Effect.catchTag("CommandError", (error) => Effect.die(error))),
+});
+
+export const MacDefaultProvider = () => toProvider(MacDefault, makeMacDefaultReconciler);

@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": ".",
+    "outDir": "./.tsbuild/tests",
+    "types": ["node"],
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "rewriteRelativeImportExtensions": false
+  },
+  "references": [
+    { "path": "../core" },
+    { "path": "../dotfiles" },
+    { "path": "../engine" },
+    { "path": "../shell" }
+  ],
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

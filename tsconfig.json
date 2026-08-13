@@ -1,15 +1,59 @@
 {
   "files": [],
   "references": [
-    { "path": "packages/core" },
-    { "path": "packages/dotfiles" },
-    { "path": "packages/git-identity" },
-    { "path": "packages/secrets" },
-    { "path": "packages/ai-tools" },
-    { "path": "packages/macos-defaults" },
-    { "path": "packages/ssh" },
-    { "path": "packages/system-packages" },
-    { "path": "packages/tailscale" },
-    { "path": "examples/example-machine" }
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "packages/engine"
+    },
+    {
+      "path": "packages/dotfiles"
+    },
+    {
+      "path": "packages/git-identity"
+    },
+    {
+      "path": "packages/secrets"
+    },
+    {
+      "path": "packages/ai-tools"
+    },
+    {
+      "path": "packages/macos-defaults"
+    },
+    {
+      "path": "packages/ssh"
+    },
+    {
+      "path": "packages/system-packages"
+    },
+    {
+      "path": "packages/system-settings"
+    },
+    {
+      "path": "packages/tailscale"
+    },
+    {
+      "path": "packages/machine"
+    },
+    {
+      "path": "examples/example-machine"
+    },
+    {
+      "path": "tsconfig.tests.json"
+    },
+    {
+      "path": "packages/git"
+    },
+    {
+      "path": "packages/ai"
+    },
+    {
+      "path": "packages/shell"
+    },
+    {
+      "path": "packages/runtimes"
+    }
   ]
 }

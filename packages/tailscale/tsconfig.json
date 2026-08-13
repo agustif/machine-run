@@ -5,6 +5,18 @@
     "outDir": "./lib",
     "rootDir": "./src"
   },
-  "references": [{ "path": "../secrets" }],
-  "include": ["src"]
+  "references": [
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../engine"
+    },
+    {
+      "path": "../secrets"
+    }
+  ],
+  "include": [
+    "src"
+  ]
 }

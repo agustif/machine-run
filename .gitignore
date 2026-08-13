@@ -11,3 +11,6 @@ lib
 # Test-run logs only — .alchemy/state/ (the actual reconciled state) IS meant
 # to be committed.
 .alchemy/log/
+
+# Type-check-only output for the tests project (tsconfig.tests.json).
+.tsbuild/

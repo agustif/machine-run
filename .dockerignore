@@ -1,0 +1,20 @@
+# Used by docker/Dockerfile (see scripts/deploy-check.sh).
+#
+# `node_modules` IS excluded (rebuilt fresh inside the Linux container, where
+# `npm install` resolves Linux binaries rather than the macOS/ARM host's).
+#
+# `lib/` is deliberately NOT excluded, unlike a typical Docker setup: it is
+# built once on the host, before `docker build` runs, via
+# `npx tsc -b examples/example-machine` (see scripts/deploy-check.sh) — that
+# project stays green on its own; the whole workspace's `tsc -b` does not,
+# while other agents' packages are mid-flight in this same session (see
+# docs/deploy-notes.md). Building only what this example needs, once, on the
+# host, and shipping the result in, decouples this image from that
+# instability. Revisit once the workspace's own `tsc -b` is reliably green
+# from a clean checkout.
+**/node_modules
+**/.tsbuild
+**/*.tsbuildinfo
+**/.alchemy
+.git
+.DS_Store

@@ -1,0 +1,28 @@
+{
+  "extends": [
+    "../../.oxlintrc.json"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "test/**"
+      ],
+      "rules": {
+        "effect/noThrowStatement": "off",
+        "effect/noNewError": "off",
+        "effect/noGlobals": "off",
+        "effect/noChainedTypeAssertions": "off"
+      }
+    },
+    {
+      "files": [
+        "src/backends/Claude.ts",
+        "src/backends/OpenCode.ts"
+      ],
+      "rules": {
+        "effect/noGlobals": "off",
+        "effect/noUnsafeDictionaryType": "off"
+      }
+    }
+  ]
+}

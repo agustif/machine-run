@@ -7,22 +7,32 @@
   "engines": {
     "node": ">=22"
   },
-  "workspaces": ["packages/*", "examples/*"],
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
   "scripts": {
     "format": "oxfmt packages examples",
     "format:check": "oxfmt --check packages examples",
-    "check": "tsc -b",
+    "check": "tsc -b && oxlint",
     "build": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "oxlint"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-beta.102",
-    "@effect/vitest": "4.0.0-beta.102",
-    "@types/node": "latest",
-    "alchemy": "2.0.0-beta.67",
-    "effect": "4.0.0-beta.102",
+    "@effect/platform-node": "4.0.0-rc.108",
+    "@effect/vitest": "4.0.0-rc.108",
+    "@types/node": "^24.0.0",
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.108",
     "oxfmt": "^0.36.0",
+    "oxlint": "^1.78.0",
+    "oxlint-plugin-effect": "^0.8.2",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10"
+  },
+  "overrides": {
+    "effect": "4.0.0-rc.108",
+    "alchemy": "2.0.0-beta.72"
   }
 }
