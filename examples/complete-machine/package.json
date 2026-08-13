@@ -8,6 +8,7 @@
   },
   "dependencies": {
     "@machine-run/ai": "*",
+    "@machine-run/core": "*",
     "@machine-run/dotfiles": "*",
     "@machine-run/git": "*",
     "@machine-run/machine": "*",
@@ -17,6 +18,7 @@
     "@machine-run/shell": "*",
     "@machine-run/ssh": "*",
     "@machine-run/system-packages": "*",
+    "@machine-run/system-services": "*",
     "@machine-run/system-settings": "*",
     "@machine-run/tailscale": "*",
     "alchemy": "2.0.0-beta.72",

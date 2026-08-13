@@ -13,7 +13,7 @@ Legend, used consistently below:
 | `✗` | Planned. Does not exist. |
 | `!` | Implemented and known to be **wrong or incomplete** somewhere |
 
-The distinction between `✓` and `~` is the whole point of this file. 17 resource
+The distinction between `✓` and `~` is the whole point of this file. 18 resource
 kinds exist and **none of them has ever been run by the Alchemy engine** —
 `alchemy plan` cannot complete (see [V2-PLAN](./V2-PLAN.md#the-blocker)). So
 `✓` means "this command's output was captured from a real system and our parser
@@ -33,7 +33,7 @@ was checked against it", never "this resource has been deployed".
    ┌──────────────────────────────────────┴──────────────────────────────────┐
    │                          examples/                                      │
    │  example-machine ─── a recipe meant to run (6 resource kinds)            │
-   │  complete-machine ── all 17 kinds as compiled reference code             │
+   │  complete-machine ── all 18 kinds as compiled reference code             │
    │                      enforced by machine/test/ExampleCoverage.test.ts    │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │ Machine.providers()
@@ -41,12 +41,13 @@ was checked against it", never "this resource has been deployed".
    │  @machine-run/machine — ONE aggregate layer, so a recipe cannot forget   │
    │  a package's providers(). Missing one is a *runtime* "service not        │
    │  found" at deploy time, not a tsc error, which is why this exists.       │
+   │  NOT YET AGGREGATED: system-services — see docs/TASKS.md.               │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │
    ┌──────────────────────────────────────┴──────────────────────────────────┐
-   │  RESOURCE PACKAGES — 11 of them, 17 resource kinds, 6 backend seams     │
-   │  dotfiles  secrets  system-packages  system-settings  macos-defaults    │
-   │  runtimes  shell  git  ai  tailscale  ssh                               │
+   │  RESOURCE PACKAGES — 12 of them, 18 resource kinds, 7 backend seams     │
+   │  dotfiles  secrets  system-packages  system-services  system-settings   │
+   │  macos-defaults  runtimes  shell  git  ai  tailscale  ssh               │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │ toProvider(cls, makeReconciler)
    ┌──────────────────────────────────────┴──────────────────────────────────┐
@@ -96,7 +97,8 @@ core ─┬───────────────────────
                  ├─ macos-defaults      │   and secrets branches meet here
                  ├─ system-settings     │
                  ├─ system-packages     │
-                 └─ runtimes            │
+                 ├─ system-services     │   not yet in `machine` below —
+                 └─ runtimes            │   see docs/TASKS.md
                                         │
    machine ─── aggregates ──────────────┴── ai, dotfiles, git, macos-defaults,
                                             runtimes, secrets, shell,
@@ -110,7 +112,7 @@ it becomes a real hole the moment `ssh` grows `Ssh.Key`.
 
 ---
 
-## 3. The 17 resource kinds
+## 3. The 18 resource kinds
 
 | Resource | Package | Reconciles | State |
 |---|---|---|---|
@@ -123,6 +125,7 @@ it becomes a real hole the moment `ssh` grows `Ssh.Key`.
 | `Machine.SecretFile` | secrets | a secret materialised from a vault | value hash, mode |
 | `System.Package` | system-packages | one installed package | presence, version |
 | `System.Repo` | system-packages | one tap/PPA/COPR | presence |
+| `System.Service` | system-services | one user-level service's installed/enabled/running state | installed, enabled, running |
 | `System.Setting` | system-settings | one gsettings/dconf key | GVariant text |
 | `MacOS.Default` | macos-defaults | one `defaults` key, full plist values | plist value |
 | `Runtime.Tool` | runtimes | one toolchain version, installed vs active | installed, active |
@@ -132,10 +135,14 @@ it becomes a real hole the moment `ssh` grows `Ssh.Key`.
 | `Ai.McpServer` | ai | one MCP server in one tool's config | server entry |
 | `Tailscale.Connection` | tailscale | tailnet membership | connected, hostname |
 
-**Eight naming conventions for 17 kinds** (`Machine.*`, `System.*`, `MacOS.*`,
+**Eight naming conventions for 18 kinds** (`Machine.*`, `System.*`, `MacOS.*`,
 `Runtime.*`, `Shell.*`, `Git.*`, `Ai.*`, `Tailscale.*`). The `Machine`/`System`
 split stopped meaning anything once both became reconcilers. Renaming breaks the
 state schema, so it has to happen before anything ships — TASKS.md P1.
+
+`System.Service` keeps its three facts — `installed`, `enabled`, `running` —
+separate rather than one status, the same lesson `Runtime.Tool` already
+learned for `installed`/`active`. See `packages/system-services/src/Service.ts`.
 
 ### Compositions (functions, not resources)
 
@@ -153,7 +160,7 @@ system-packages  packages(manager, names) → N independent System.Package
 
 ---
 
-## 4. The six backend seams
+## 4. The seven backend seams
 
 One interface, one module per implementation, dispatched by id from inside one
 generic resource. Adding support for a tool is a new module plus an id — never a
@@ -204,6 +211,21 @@ the least-verified seam in the repo, and it is the one that writes files with
 
 Verified in a container, including the finding that `gsettings set` **exits 0
 while doing nothing** with no session D-Bus.
+
+### `ServiceBackend` — 3 ids, `system-services`
+
+```
+✓ launchd        ✓ brew-services       ~ systemd-user
+```
+
+User-level services only — see `packages/system-services/src/Backend.ts`.
+`launchd` and `brew-services` verified read-only against real state on this
+machine (`launchctl list`, `brew services info --json`); `systemd-user` was
+verified against a genuinely booted `systemd --user` instance in a container
+(not just documentation — the initial plan to mark it uncheckable turned out
+to be wrong, a systemd-booted container works), except `enable`/`disable`
+themselves, blocked by an unrelated sandbox restriction on this session — see
+`backends/linux/SystemdUser.ts`'s doc comment for the transcript.
 
 ### `ShellBackend` — 5 ids, `shell`
 
@@ -310,7 +332,7 @@ Provider.delete({olds, output, session})
 ```
 
 **Exactly one resource implements `unapply`** — `Shell.Login`, which can put
-back the shell it recorded. Which of the other 16 can honestly reverse
+back the shell it recorded. Which of the other 17 can honestly reverse
 themselves is still open, and mostly the answer is "not obviously": uninstalling
 a package someone may now depend on, or deleting a secret file, is not clearly
 the right response to a line being removed from a recipe. This is why the
@@ -324,7 +346,7 @@ Nothing in this section exists. Ordered by what blocks the most.
 
 Every item here is a tracked task: cross-cutting ones in
 [TASKS.md](./TASKS.md), package-local ones in that package's own `TASKS.md`
-(all fourteen have one). This section is the summary; those files carry the
+(all fifteen have one). This section is the summary; those files carry the
 reasoning and the judgement calls.
 
 ```
@@ -347,8 +369,11 @@ reasoning and the judgement calls.
       BUG, not a platform difference. Adopting an existing file may overwrite
       it with no backup.
 
-✗ P2  System.Service + ServiceBackend — launchd / systemd --user /
-      brew services. The last major machine surface with no coverage at all.
+✓ P2  System.Service + ServiceBackend — launchd / brew-services / systemd-user,
+      user-level only (`@machine-run/system-services`). System-level services
+      (root, `sudo brew services`, plain `systemctl`) are a separate, explicit
+      non-goal, not an oversight. Not yet folded into `machine`'s aggregate
+      `providers()` — see TASKS.md.
 ✗ P2  Manifest layer — Brew.Bundle, Mise.Toml, Asdf.ToolVersions, Nix.Flake.
       Complementary to the atomic layer, but a manifest resource must refuse
       to co-manage a manager the atomic layer also manages.
@@ -360,7 +385,7 @@ reasoning and the judgement calls.
 
 ✗ P3  Doctor / drift report — "what no longer matches", without applying
 ✗ P3  Import an existing machine — `list` on System.Package
-✗ P3  Finish the unmanage story (15 of 17 kinds have no unapply)
+✗ P3  Finish the unmanage story (16 of 18 kinds have no unapply)
 ✗ P3  LICENSE. `UNLICENSED` with no file blocks any release.
 ✗ P3  Validate the exports maps for a real non-workspace consumer — only ever
       exercised inside this workspace
@@ -387,14 +412,14 @@ reasoning and the judgement calls.
 What actually proves anything, and where.
 
 ```
-tsc -b            14 packages + 2 examples + tsconfig.tests.json
+tsc -b            15 packages + 2 examples + tsconfig.tests.json
                   (tests were silently unchecked until tsconfig.tests.json;
                    its `references` are what make that work)
-vitest            38 files · 312 tests (310 pass, 2 skip without CI env vars)
+vitest            40 files · 337 tests (335 pass, 2 skip without CI env vars)
 oxlint            25 oxlint-plugin-effect rules, ALL enabled
-                  0 errors · 671 warnings:
-                    noNullish 342 · noTernary 151
-                    noConditionalEmptyObjectSpread 56 · noAs 49
+                  0 errors · 712 warnings:
+                    noNullish 410 · noTernary 164
+                    noConditionalEmptyObjectSpread 56 · noAs 60
                     noRuntimeTypeof 11 · noNodeBuiltinImport 6
                     noUnknownParameters 4
 
@@ -412,7 +437,13 @@ CI                check (ubuntu)          build + test + lint     ✓ green
 
 containers        ubuntu:24.04 · fedora:latest · archlinux:latest — used to
                   verify apt/dnf/pacman/yay/flatpak/gsettings/dconf/shells
-                  rather than documenting a gap
+                  rather than documenting a gap. A fourth, one-off use: an
+                  ubuntu:24.04 image with systemd actually installed and
+                  booted as PID 1 (`--privileged --cgroupns=host`, real
+                  `systemd --user` session via `loginctl enable-linger`),
+                  to verify `system-services`' `systemd-user` backend rather
+                  than assuming a bare container's "not booted with systemd"
+                  refusal was the final word.
 ```
 
 `deploy-check` is the only job that runs `alchemy plan`, and its failure output
