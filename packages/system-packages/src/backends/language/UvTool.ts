@@ -22,6 +22,21 @@ import { firstTokens, lines } from "../../parse.ts";
  * cowsay v6.1
  * - cowsay
  * ```
+ *
+ * Independently reverified against `docker run --rm python:3.12`
+ * (`python -m pip install uv`, uv 0.12.4): the empty-state message is
+ * byte-identical, and after `uv tool install cowsay` followed by
+ * `uv tool install yt-dlp`, `uv tool list` printed two full header+sub-line
+ * pairs back to back —
+ * ```
+ * cowsay v6.1
+ * - cowsay
+ * yt-dlp v2026.7.4
+ * - yt-dlp
+ * ```
+ * — the first real multi-tool listing this parser has been checked against,
+ * confirming the `v\d` header regex doesn't false-match a second tool's own
+ * sub-line (fixtures: `test/fixtures/uv-tool-list{,-empty}.txt`).
  */
 export const parseUvToolList = (stdout: string): string[] =>
   firstTokens(lines(stdout).filter((line) => /^\S+\s+v\d/.test(line)));

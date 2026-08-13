@@ -1,0 +1,21 @@
+{
+  "name": "lib",
+  "dependencies": {
+    "corepack": {
+      "version": "0.34.6",
+      "overridden": false
+    },
+    "cowsay": {
+      "version": "1.6.0",
+      "overridden": false
+    },
+    "npm": {
+      "version": "10.9.8",
+      "overridden": false
+    },
+    "typescript": {
+      "version": "7.0.2",
+      "overridden": false
+    }
+  }
+}

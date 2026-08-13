@@ -3,19 +3,26 @@
 `Machine.SecretFile` over a `SecretBackend` seam. Backends are plain values
 that receive a command runner; nothing here needs a service.
 
-- [ ] **Nothing in this seam has ever read a real secret.** All five backends
-      are `~` in [docs/MAP.md](../../docs/MAP.md) — Doppler's evidence is
-      `doppler secrets get --help` output, which confirms the CLI's contract and
-      nothing about its behaviour. This is the least-verified seam in the repo,
-      and it is the one writing `0o600` files on the strength of being right.
-      `pass` is installable in a container and needs only a generated GPG key, so
-      it is the cheapest one to convert from `~` to `✓` and should go first.
+- [x] **`pass` now reads a real secret.** Verified against `docker run --rm
+      debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
+      `pass show` reading both a single-line and a multi-line entry back
+      correctly — see `docs/notes/secrets-pass-notes.md` and
+      `src/backends/Pass.ts`'s doc comment. `pass` is now `✓` in
+      [docs/MAP.md](../../docs/MAP.md); the other four backends
+      (`1password`, `doppler`, `keychain`, `env`) are still `~` — each needs
+      either a real authenticated account (which this repo deliberately never
+      automates creating, `AGENTS.md` rule 8) or a real macOS login keychain,
+      neither of which a disposable container can supply. This remains the
+      least-verified seam in the repo, and it is the one writing `0o600`
+      files on the strength of being right.
 - [ ] **Verify `op read`'s output shape against a real `op` CLI.** Not installed
       on the development machine, so no output-shaping flag is used and bytes
       are returned verbatim. Confirm whether `op read` appends a newline, then
       document the right `trailingNewline` default per secret kind.
-- [ ] **Fixture-based classifier tests** using real captured stderr. `pass` and
-      `doppler` are installable in a container; `op` and `bw` are not.
+- [ ] **Fixture-based classifier tests for the remaining backends** using real
+      captured stderr. `doppler` is installable in a container (no account
+      needed just to observe its CLI's own error text for a bad ref); `op` and
+      `bw` are not.
 - [ ] **`bitwarden` backend.** Deliberately absent from `SecretBackendId` until
       implemented — an id that can be named but not constructed is worse than a
       missing one.

@@ -31,16 +31,27 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       Windows package. Only the `list` path has been exercised.
 - [ ] **MacPorts against a real `port`.** Not installed here; verify the
       `port installed` header and column shape.
-- [ ] **The six language backends** — `cargo`, `npm`, `pipx`, `uv-tool`, `gem`,
-      `go-install`. All `~` in [MAP.md](../../docs/MAP.md): implemented, never run
-      against the real tool. These are the cheapest conversions in the repo,
-      because every one of them installs in a container without root and without
-      an account. `go-install` is the one most likely to be wrong — it has no
-      real "list installed" command, so whatever the backend does there is an
-      inference.
-- [ ] **`paru`.** `yay` was genuinely built from the AUR and run; `paru` is the
-      same commands pointed at the other binary, on the strength of its docs
-      claiming pacman/yay compatibility. One container run would settle it.
+- [x] **The six language backends** — `cargo`, `npm`, `pipx`, `uv-tool`, `gem`,
+      `go-install`. Now `✓` in [MAP.md](../../docs/MAP.md): each installed a real
+      package and ran its real `list` command in a container (`rust:latest`,
+      `node:22`, `python:3.12`, `ruby:3.3`, `golang:1.23`), with the captured
+      output committed as `test/fixtures/*` and pinned by
+      `test/languageBackends.test.ts` — see
+      `docs/notes/system-packages-notes.md` for the per-backend detail. All six
+      parsers matched on the first try, including `go-install`, the one
+      expected to be most likely wrong for having no real "list installed"
+      command of its own.
+- [ ] **`paru`.** Still `~`, but no longer untried: `paru-bin` built and
+      installed cleanly in a fresh `archlinux:latest` container, then failed
+      to *run* (`libalpm.so.15` missing — an ABI mismatch this container's
+      un-upgraded pacman genuinely has, unlike `yay-bin`'s successful run in
+      the same kind of container). Building plain `paru` from source instead
+      compiled cleanly through its whole ~140-crate dependency tree but did
+      not finish its final release-mode LTO link inside this session's time
+      budget (see `Aur.ts`'s doc comment and
+      `docs/notes/system-packages-notes.md`). A future session with a longer
+      budget (or a faster host than this sandbox's QEMU amd64 emulation) can
+      pick the from-source build back up and finish the `-S`/`-Qmq` checks.
 - [ ] **`brew-cask` separately from `brew`.** Verified as one backend, but casks
       differ where it matters: `brew list --cask` output, and the fact that a
       cask install can require a GUI prompt or admin password.

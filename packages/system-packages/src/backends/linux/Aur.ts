@@ -38,10 +38,41 @@ import { lines } from "../../parse.ts";
  * something observed to be wrong with the command itself.
  *
  * `paru`'s own CLI is documented as pacman/yay-compatible for `-S`/
- * `--noconfirm`, but it was not itself built and run here (yay already
- * demonstrated the AUR-build bootstrap and the `-Qmq` behaviour this backend
- * depends on); its `install` below is the same verified shape applied to the
- * other binary, not independently confirmed.
+ * `--noconfirm`. Getting a real `paru` binary running to check that claim
+ * turned out to be its own story, still unresolved as of this session:
+ *
+ * - `paru-bin` (the binary AUR package, the direct analogue of `yay-bin`
+ *   above) built and installed cleanly with `makepkg -si --noconfirm` on a
+ *   freshly-synced `archlinux:latest` — but the resulting binary failed to
+ *   even run: `paru --version` died with `error while loading shared
+ *   libraries: libalpm.so.15: cannot open shared object file`. `paru-bin` is
+ *   compiled against whatever libalpm the AUR build server had; a container
+ *   that only ran `pacman -Sy` (sync the database, matching `yay`'s own
+ *   verification above) rather than a full `pacman -Syu` never installed a
+ *   matching one. This is a real, reproducible finding about `paru-bin`
+ *   specifically — `yay-bin`'s successful run in the same kind of container
+ *   was not evidence that every AUR `-bin` package is this forgiving.
+ * - Building plain `paru` from source (`git clone
+ *   https://aur.archlinux.org/paru.git && makepkg -si --noconfirm`, pulling
+ *   `rust`/`base-devel` first) sidesteps that ABI mismatch by linking
+ *   against whatever libalpm is actually installed, and did progress
+ *   cleanly through its entire dependency tree (`alpm`, `alpm-utils`,
+ *   `reqwest`, `scraper`, `html5ever`, `tokio`, ~140 crates in total) to the
+ *   final release-mode link of the `paru` binary itself — no compile error
+ *   anywhere. That final link (`-C lto`, `codegen-units=1`) did not finish
+ *   inside this session's time budget: still visibly progressing (steady
+ *   CPU, growing memory, no crash) rather than stalled when verification
+ *   work here concluded, which is a QEMU-emulation cost of a single-threaded
+ *   LTO link for a ~140-crate binary, not a sign anything is wrong.
+ *
+ * Net effect: `paru` stays `~`, same as before this session, but the two
+ * findings above are new and worth keeping — `paru-bin` is not a safe
+ * drop-in the way `yay-bin` was without a preceding full system upgrade, and
+ * a from-source build is a known-working (if very slow under emulation)
+ * path that a future session with more time can pick back up to finish the
+ * `-S`/`-Qmq` behavioural checks this file's `yay` section already has. Its
+ * `install` below remains the same verified shape applied to the other
+ * binary, not independently confirmed end to end.
  */
 const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
   id: bin,

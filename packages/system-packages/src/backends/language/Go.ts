@@ -35,6 +35,25 @@ import type { PackageManagerBackend } from "../../Backend.ts";
  * expand and `go version -m` fails on the literal `*` — `2>/dev/null; true`
  * discards that stderr and forces exit 0 (verified: empty stdout, exit 0),
  * the same idiom `Apt.ts`'s `listRepos` uses for its own optional globs.
+ *
+ * Independently reverified against `docker run --rm golang:1.23` (go
+ * 1.23.12, linux/arm64): the exact `list` command above printed nothing
+ * against an empty `$GOPATH/bin` (confirming the `2>/dev/null; true` empty
+ * case, not just the "verified locally" claim above), and after installing
+ * two binaries printed both `path`/`mod`/`dep` blocks back to back —
+ * `parseGoVersionM` correctly pulled just the two import paths out of a
+ * multi-binary block (fixture: `test/fixtures/go-version-m.txt`).
+ *
+ * This container also surfaced a real, if incidental, finding about
+ * `install`'s `@latest`: `go install golang.org/x/tools/cmd/goimports@latest`
+ * failed outright against go1.23.12 with `golang.org/x/tools@v0.49.0
+ * requires go >= 1.25.0 (running go 1.23.12; GOTOOLCHAIN=local)` — a
+ * dependency's own floor, not a missing-binary error, and not something
+ * `parseGoVersionM` or `list` can do anything about. A machine whose Go is
+ * older than whatever `@latest` currently requires will see `install` fail
+ * this way; there is no fix here beyond noting it, since pinning a version
+ * would require the `version` field `PackageProps` doesn't have yet (see
+ * the gap noted on `install` below).
  */
 export const parseGoVersionM = (stdout: string): string[] => {
   const paths: string[] = [];
