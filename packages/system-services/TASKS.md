@@ -24,7 +24,7 @@ rather than an incidental widening here.
       `enabled` here means "currently loaded" (`launchctl list <label>`
       succeeds), not launchd's own persistent override
       (`launchctl enable`/`disable`, inspectable with `launchctl
-  print-disabled`), which survives unload/reboot and can make a future
+print-disabled`), which survives unload/reboot and can make a future
       `load` fail outright. Real example from this machine:
       `launchctl print-disabled gui/501` lists several real services with
       that override set. A `System.Service` recipe that asks for
@@ -76,7 +76,7 @@ rather than an incidental widening here.
       right response to a recipe line being removed. Worth revisiting
       alongside `system-settings`' `gsettings reset`/`dconf reset` idea,
       since `brew services stop`/`launchctl unload`/`systemctl --user
-  disable` are all real, honest reversals a future `unapply` could use.
+disable` are all real, honest reversals a future `unapply` could use.
 
 ## Smaller, lower-priority
 
