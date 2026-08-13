@@ -267,13 +267,19 @@ implementation, dispatched from inside one generic resource.
       invariant is right; the fixture cannot express it on Windows. Affects
       `File`, `SecretFile`, `Symlink`.
 
-      *Suspected real bug, not a platform truth.* `packages/engine/test/unapply.test.ts`
-      → "unapply restores the pre-existing content it backed up on adoption"
-      fails because `output.backupPath` is `undefined`: `snapshotBeforeApply`
-      produced no backup at all on Windows. If that reproduces outside the
-      test, adopting an existing file on Windows overwrites it with no backup,
-      which is the one failure mode the snapshot exists to prevent. Diagnose
-      this one before the two above.
+      *Was a real bug — **fixed**.* `packages/engine/test/unapply.test.ts` →
+      "unapply restores the pre-existing content it backed up on adoption"
+      failed because `output.backupPath` was `undefined`. Root cause found by
+      reading `Backups.ts` rather than by reproducing on Windows: the backup
+      destination mirrored the source path verbatim, so a Windows path became a
+      directory segment literally named `C:`. `:` is forbidden in a Windows path
+      segment, so `makeDirectory` failed, the failure was logged rather than
+      raised (correct — a backup must not abort a deploy), and the overwrite
+      proceeded **with no backup**: the one outcome the service exists to
+      prevent, arrived at silently. `mirrorSegments` now rewrites the drive as
+      an ordinary segment (`C:\Users\me` → `C/Users/me`) and prefixes UNC paths
+      with `UNC` so `\\server\share` cannot collide with a local
+      `server/share`. Pinned by `packages/core/test/Backups.test.ts`.
 
       *Also unverified on Windows:* `git clone`/`remote` behaviour — three
       `Git.Repo` `apply` tests fail and the cause has not been read yet.

@@ -52,6 +52,36 @@ export class Backups extends Context.Service<
 const stampFor = (millis: number): string =>
   DateTime.formatIso(DateTime.makeUnsafe(millis)).replaceAll(/[:.]/g, "-");
 
+const splitSegments = (value: string): readonly string[] =>
+  value.split(/[/\\]+/).filter((segment) => segment.length > 0);
+
+/**
+ * The source path, rewritten into segments that can nest under the backup
+ * root on any platform.
+ *
+ * A Windows absolute path carries its drive as `C:`, and `:` is one of the
+ * characters Windows forbids in a path segment. Mirroring such a path verbatim
+ * asks for a directory literally named `C:`, which cannot be created — so
+ * `makeDirectory` fails, the failure is logged rather than raised (a backup
+ * must never abort a deploy), and the caller receives no backup path. The
+ * overwrite then proceeds with no safety net, which is the single outcome this
+ * service exists to prevent. The drive keeps its letter as an ordinary
+ * segment: `C:\Users\me\.zshrc` mirrors to `C/Users/me/.zshrc`.
+ *
+ * A UNC path (`\\server\share\file`) is prefixed with `UNC` so its host and
+ * share cannot collide with a local directory that happens to be called
+ * `server/share`.
+ */
+export const mirrorSegments = (absolute: string): readonly string[] => {
+  const unc = /^[/\\]{2}([^/\\]+)[/\\]+(.*)$/.exec(absolute);
+  if (unc !== null) return ["UNC", unc[1] ?? "", ...splitSegments(unc[2] ?? "")];
+
+  const drive = /^([A-Za-z]):(.*)$/.exec(absolute);
+  if (drive !== null) return [drive[1] ?? "", ...splitSegments(drive[2] ?? "")];
+
+  return splitSegments(absolute);
+};
+
 export const BackupsLive = () =>
   Layer.effect(
     Backups,
@@ -75,7 +105,7 @@ export const BackupsLive = () =>
 
             // Mirror the full source path under the run directory so two
             // files sharing a basename can't clobber each other's backup.
-            const destination = path.join(root, absolute.replace(/^[/\\]+/, ""));
+            const destination = path.join(root, ...mirrorSegments(absolute));
             yield* fs.makeDirectory(path.dirname(destination), {
               recursive: true,
             });

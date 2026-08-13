@@ -343,9 +343,10 @@ reasoning and the judgement calls.
       kinds; the layer needs the same.
 ✗ P1  A README per package (source comments already reference ones that
       do not exist)
-✗ P1  snapshotBeforeApply produces no backupPath on Windows — SUSPECTED REAL
-      BUG, not a platform difference. Adopting an existing file may overwrite
-      it with no backup.
+✓ P1  snapshotBeforeApply produced no backupPath on Windows — was a real bug,
+      now fixed. The backup path mirrored the source verbatim, so a Windows
+      drive became a segment named `C:`, which cannot be created. See
+      core/src/Backups.ts `mirrorSegments`.
 
 ✗ P2  System.Service + ServiceBackend — launchd / systemd --user /
       brew services. The last major machine surface with no coverage at all.
