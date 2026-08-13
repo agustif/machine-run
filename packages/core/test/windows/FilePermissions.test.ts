@@ -52,7 +52,10 @@ it("grants nothing to group or other for 0o600 (SecretFile's documented default)
   const plan = toWindowsAclPlan(fromPosixMode(0o600, "file"));
   expect(plan.resetInheritance).toBe(true);
   expect(plan.grants).toEqual([
-    { principal: WELL_KNOWN_PRINCIPALS.owner, rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"] },
+    {
+      principal: WELL_KNOWN_PRINCIPALS.owner,
+      rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"],
+    },
   ]);
 });
 

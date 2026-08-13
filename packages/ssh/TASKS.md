@@ -27,7 +27,7 @@ instead of resolving itself either way).
       `parsePublicKey`, `parseFingerprint`) are tested without any I/O.
 - [x] **Verify against real `ssh -G`** — partially. Ran
       `ssh -F <fixture> -G exe.dev` against a fixture with a specific `Host
-  exe.dev` block placed _before_ a catch-all `Host *`, both setting
+exe.dev` block placed _before_ a catch-all `Host *`, both setting
       `ForwardAgent` to different values. Confirmed real ssh: resolves
       `forwardagent` to the _specific_ block's value (first match for that
       keyword), while `identitiesonly` (unset by the specific block) still

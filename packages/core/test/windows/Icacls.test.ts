@@ -22,16 +22,36 @@ it("parses a root drive's ACL: multiple ACEs per principal, and a Mandatory Labe
 
   expect(result.success.path).toBe("C:\\");
   expect(result.success.aces).toEqual([
-    { principal: "BUILTIN\\Administrators", inherited: false, inheritanceFlags: ["OI", "CI"], rights: ["F"] },
-    { principal: "NT AUTHORITY\\SYSTEM", inherited: false, inheritanceFlags: ["OI", "CI"], rights: ["F"] },
-    { principal: "BUILTIN\\Users", inherited: false, inheritanceFlags: ["OI", "CI"], rights: ["RX"] },
+    {
+      principal: "BUILTIN\\Administrators",
+      inherited: false,
+      inheritanceFlags: ["OI", "CI"],
+      rights: ["F"],
+    },
+    {
+      principal: "NT AUTHORITY\\SYSTEM",
+      inherited: false,
+      inheritanceFlags: ["OI", "CI"],
+      rights: ["F"],
+    },
+    {
+      principal: "BUILTIN\\Users",
+      inherited: false,
+      inheritanceFlags: ["OI", "CI"],
+      rights: ["RX"],
+    },
     {
       principal: "NT AUTHORITY\\Authenticated Users",
       inherited: false,
       inheritanceFlags: ["OI", "CI", "IO"],
       rights: ["M"],
     },
-    { principal: "NT AUTHORITY\\Authenticated Users", inherited: false, inheritanceFlags: [], rights: ["AD"] },
+    {
+      principal: "NT AUTHORITY\\Authenticated Users",
+      inherited: false,
+      inheritanceFlags: [],
+      rights: ["AD"],
+    },
     // Not a DACL grant at all — this is the SACL integrity-label entry
     // `icacls` prints inline with the DACL. `NW` ("No Write Up") is not in
     // FilePermissions.ts's IcaclsRight set and is not expected to be: this
@@ -79,16 +99,18 @@ it("fails loudly, rather than guessing, when the requested path isn't the line's
   expect(Result.isFailure(result)).toBe(true);
 });
 
-it("fails loudly on a line that isn't \"<principal>:(<rights>)\"", () => {
+it('fails loudly on a line that isn\'t "<principal>:(<rights>)"', () => {
   // Deliberately synthetic — this asserts the error path, not a claim about
   // real icacls output (which the two fixtures above already pin).
-  const stdout = "C:\\weird not-an-ace-line at all\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+  const stdout =
+    "C:\\weird not-an-ace-line at all\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
   const result = parseIcacls(stdout, "C:\\weird");
   expect(Result.isFailure(result)).toBe(true);
 });
 
 it("fails loudly when icacls itself reports a failed file", () => {
-  const stdout = "C:\\gone BUILTIN\\Users:(F)\n\nSuccessfully processed 0 files; Failed processing 1 files\n";
+  const stdout =
+    "C:\\gone BUILTIN\\Users:(F)\n\nSuccessfully processed 0 files; Failed processing 1 files\n";
   const result = parseIcacls(stdout, "C:\\gone");
   expect(Result.isFailure(result)).toBe(true);
 });

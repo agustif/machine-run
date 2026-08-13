@@ -107,7 +107,8 @@ const tokensIn = (group: string): readonly string[] =>
  */
 const parseAceLine = (line: string): Result.Result<IcaclsAce, string> => {
   const match = /^(.+?):((?:\([^()]*\))+)$/.exec(line.trim());
-  if (match === null) return Result.fail(`line does not look like "<principal>:(<rights>)": ${line}`);
+  if (match === null)
+    return Result.fail(`line does not look like "<principal>:(<rights>)": ${line}`);
   const [, principal, groupsBlob] = match;
   if (principal === undefined || groupsBlob === undefined) {
     return Result.fail(`line does not look like "<principal>:(<rights>)": ${line}`);
@@ -139,12 +140,15 @@ const parseAceLine = (line: string): Result.Result<IcaclsAce, string> => {
  * by looking at whitespace alone. The caller always already knows `path`: it
  * is the same string used to build the command.
  */
-export const parseIcacls = (stdout: string, path: string): Result.Result<IcaclsListing, IcaclsParseError> => {
+export const parseIcacls = (
+  stdout: string,
+  path: string,
+): Result.Result<IcaclsListing, IcaclsParseError> => {
   const lines = stdout.split(/\r?\n/);
   const summaryIndex = lines.findIndex((line) => SUMMARY_LINE.test(line.trim()));
   if (summaryIndex === -1) {
     return Result.fail(
-      new IcaclsParseError({ path, reason: "no \"Successfully processed\" summary line found" }),
+      new IcaclsParseError({ path, reason: 'no "Successfully processed" summary line found' }),
     );
   }
 
@@ -162,11 +166,16 @@ export const parseIcacls = (stdout: string, path: string): Result.Result<IcaclsL
   const aceLines = lines.slice(0, summaryIndex).filter((line) => line.trim().length > 0);
   const [firstLine, ...restLines] = aceLines;
   if (firstLine === undefined) {
-    return Result.fail(new IcaclsParseError({ path, reason: "no ACE lines before the summary line" }));
+    return Result.fail(
+      new IcaclsParseError({ path, reason: "no ACE lines before the summary line" }),
+    );
   }
   if (!firstLine.startsWith(`${path} `)) {
     return Result.fail(
-      new IcaclsParseError({ path, reason: `first line does not start with "${path} ": ${firstLine}` }),
+      new IcaclsParseError({
+        path,
+        reason: `first line does not start with "${path} ": ${firstLine}`,
+      }),
     );
   }
 
@@ -174,7 +183,8 @@ export const parseIcacls = (stdout: string, path: string): Result.Result<IcaclsL
   const aces: IcaclsAce[] = [];
   for (const fragment of fragments) {
     const parsed = parseAceLine(fragment);
-    if (Result.isFailure(parsed)) return Result.fail(new IcaclsParseError({ path, reason: parsed.failure }));
+    if (Result.isFailure(parsed))
+      return Result.fail(new IcaclsParseError({ path, reason: parsed.failure }));
     aces.push(parsed.success);
   }
 
@@ -190,11 +200,7 @@ export const parseIcacls = (stdout: string, path: string): Result.Result<IcaclsL
  * do to this object itself" wants the union, not just the first match.
  */
 export const grantedRights = (listing: IcaclsListing, principal: string): ReadonlySet<string> =>
-  new Set(
-    listing.aces
-      .filter((ace) => ace.principal === principal)
-      .flatMap((ace) => ace.rights),
-  );
+  new Set(listing.aces.filter((ace) => ace.principal === principal).flatMap((ace) => ace.rights));
 
 /**
  * `matches`'s Windows-specific question, per the design in

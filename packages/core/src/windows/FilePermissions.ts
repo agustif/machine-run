@@ -79,7 +79,8 @@ const classFromDigit = (digit: number): PermissionClass => ({
 });
 
 const digitFromClass = (permissionClass: PermissionClass): number =>
-  (Number(permissionClass.read) << 2) | (Number(permissionClass.write) << 1) |
+  (Number(permissionClass.read) << 2) |
+  (Number(permissionClass.write) << 1) |
   Number(permissionClass.execute);
 
 /** Decomposes a POSIX mode (e.g. `0o600`) into its owner/group/other intent. */
@@ -97,7 +98,8 @@ export const fromPosixMode = (mode: number, target: PermissionsTarget): FilePerm
  * The lossy direction is {@link toWindowsAclPlan}, not this one.
  */
 export const toPosixMode = (permissions: FilePermissions): number =>
-  (digitFromClass(permissions.owner) << 6) | (digitFromClass(permissions.group) << 3) |
+  (digitFromClass(permissions.owner) << 6) |
+  (digitFromClass(permissions.group) << 3) |
   digitFromClass(permissions.other);
 
 /**
@@ -253,8 +255,5 @@ export const toIcaclsArgv = (path: string, plan: WindowsAclPlan): readonly strin
   "icacls",
   path,
   "/inheritance:r",
-  ...plan.grants.flatMap((grant) => [
-    "/grant:r",
-    `${grant.principal}:(${grant.rights.join(",")})`,
-  ]),
+  ...plan.grants.flatMap((grant) => ["/grant:r", `${grant.principal}:(${grant.rights.join(",")})`]),
 ];

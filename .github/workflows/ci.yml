@@ -47,11 +47,13 @@ jobs:
 
   # Windows gets its own job because it verifies strictly less, and the job
   # name should say so rather than a green `check (windows-latest)` implying
-  # the suite passes there. It does not: 16 tests fail on Windows for three
-  # distinct reasons, enumerated in docs/TASKS.md under "Windows". Two are
-  # platform truths (POSIX modes are not representable; `chmod 0o000` does not
-  # make a directory unreadable), and one — `snapshotBeforeApply` producing no
-  # `backupPath` — is a suspected real bug.
+  # the suite passes there. It does not: tests still fail on Windows for two
+  # remaining reasons, enumerated in docs/TASKS.md under "Windows" — POSIX modes
+  # are not representable, and `chmod 0o000` does not make a directory
+  # unreadable, so three fixtures cannot express an invariant that is itself
+  # correct. A third cause, `snapshotBeforeApply` silently taking no backup at
+  # all, turned out to be a real bug and is fixed (see `mirrorSegments` in
+  # core/src/Backups.ts).
   #
   # Type-checking on Windows is still worth a runner of its own: it is
   # platform-independent, and it is what caught a second copy of `effect`

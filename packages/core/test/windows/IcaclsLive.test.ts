@@ -44,8 +44,8 @@ it.skipIf(listingFile === undefined || listingPath === undefined)(
     // pinning, but every real Windows object has *some* ACL.
     expect(result.success.aces.length).toBeGreaterThan(0);
     expect(result.success.aces.every((ace) => ace.principal.length > 0)).toBe(true);
-    expect(result.success.aces.every((ace) => ace.rights.length > 0 || ace.inheritanceFlags.length > 0)).toBe(
-      true,
-    );
+    expect(
+      result.success.aces.every((ace) => ace.rights.length > 0 || ace.inheritanceFlags.length > 0),
+    ).toBe(true);
   },
 );
