@@ -70,11 +70,10 @@ Fourteen packages arrived faster than the invariants tying them together.
       list. Largest single contributor to a lint backlog now at 671 warnings.
 - [ ] **Two ways to express a directory** — `directoryMode` props on `File`,
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
-- [ ] **The aggregate layer has no completeness test.** It proves the layer
-      resolves; it cannot notice a package was never added — precisely the
-      failure it exists to prevent. `ExampleCoverage.test.ts` now does the
-      equivalent job for resource kinds against `examples/complete-machine`;
-      the layer needs the same treatment.
+- [x] **The aggregate layer has no completeness test.** Closed by
+      `packages/machine/test/AggregateCompleteness.test.ts`, which enumerates
+      every resource-defining package and fails, naming it, if one is missing
+      from the merge. Verified to fail when `Tailscale.providers()` is removed.
 - [ ] **A README per package.** Source comments already reference ones that do
       not exist.
 
