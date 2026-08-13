@@ -103,7 +103,4 @@ export const providers = () =>
     SystemPackages.providers(),
     SystemSettings.providers(),
     Tailscale.providers(),
-  ).pipe(
-    Layer.provideMerge(coreServices()),
-    Layer.provide(CommandExecutorLive()),
-  );
+  ).pipe(Layer.provideMerge(coreServices()), Layer.provide(CommandExecutorLive()));

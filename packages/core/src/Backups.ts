@@ -36,9 +36,7 @@ export class Backups extends Context.Service<
      * adopting something already present. Snapshotting on every apply would
      * only ever archive this tool's own previous output.
      */
-    readonly snapshot: (
-      target: string,
-    ) => Effect.Effect<string | undefined, never, never>;
+    readonly snapshot: (target: string) => Effect.Effect<string | undefined, never, never>;
     /** Absolute path of this run's backup directory, for error messages. */
     readonly root: string;
   }
@@ -66,14 +64,7 @@ export const BackupsLive = () =>
       const stamp = stampFor(yield* Clock.currentTimeMillis);
       // XDG-ish state location: this is recoverable scratch, not config the
       // user edits and not a cache that's safe to evict mid-run.
-      const root = path.join(
-        paths.home,
-        ".local",
-        "state",
-        "machine-run",
-        "backups",
-        stamp,
-      );
+      const root = path.join(paths.home, ".local", "state", "machine-run", "backups", stamp);
 
       return {
         root,
@@ -84,10 +75,7 @@ export const BackupsLive = () =>
 
             // Mirror the full source path under the run directory so two
             // files sharing a basename can't clobber each other's backup.
-            const destination = path.join(
-              root,
-              absolute.replace(/^[/\\]+/, ""),
-            );
+            const destination = path.join(root, absolute.replace(/^[/\\]+/, ""));
             yield* fs.makeDirectory(path.dirname(destination), {
               recursive: true,
             });

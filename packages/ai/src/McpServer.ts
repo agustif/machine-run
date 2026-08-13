@@ -89,8 +89,7 @@ export const McpServerState = Schema.Struct({
 
 export type McpServerState = typeof McpServerState.Type;
 
-export interface McpServer
-  extends Resource<"Ai.McpServer", McpServerProps, McpServerState> {}
+export interface McpServer extends Resource<"Ai.McpServer", McpServerProps, McpServerState> {}
 
 export const McpServer = Resource<McpServer>("Ai.McpServer");
 
@@ -134,7 +133,10 @@ const observedKeysAndLiteral = (
   };
 };
 
-const arraysEqual = (a: readonly string[] | undefined, b: readonly string[] | undefined): boolean => {
+const arraysEqual = (
+  a: readonly string[] | undefined,
+  b: readonly string[] | undefined,
+): boolean => {
   if (a === undefined || b === undefined) return a === undefined && b === undefined;
   return a.length === b.length && a.every((value, index) => value === b[index]);
 };

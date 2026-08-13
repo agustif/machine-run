@@ -44,11 +44,7 @@ export const aiSkill = (props: AiSkillProps) => {
  * only saves writing the loop at every call site, the same way
  * `system-packages/src/bulk.ts`'s `packages` does for `System.Package`.
  */
-export const aiSkills = (props: {
-  home: string;
-  vaultDir: string;
-  tools: readonly AiToolId[];
-}) =>
+export const aiSkills = (props: { home: string; vaultDir: string; tools: readonly AiToolId[] }) =>
   Effect.gen(function* () {
     for (const tool of props.tools) {
       yield* aiSkill({ home: props.home, vaultDir: props.vaultDir, tool });

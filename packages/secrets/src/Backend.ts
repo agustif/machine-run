@@ -5,7 +5,6 @@ import type * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
 import type { Exec } from "@machine-run/engine";
 
-
 /**
  * Every secret store this repo knows how to read from.
  *
@@ -14,13 +13,7 @@ import type { Exec } from "@machine-run/engine";
  * `Machine.SecretFile` names a store by id and never depends on a particular
  * one, so a store can be added without touching the resource.
  */
-export const SecretBackendId = Schema.Literals([
-  "1password",
-  "doppler",
-  "keychain",
-  "pass",
-  "env",
-]);
+export const SecretBackendId = Schema.Literals(["1password", "doppler", "keychain", "pass", "env"]);
 
 export type SecretBackendId = typeof SecretBackendId.Type;
 
@@ -106,8 +99,5 @@ export interface SecretBackend {
    * newline — so trimming is a decision only the consumer can make, and
    * `Machine.SecretFile` exposes it as an explicit policy.
    */
-  readonly read: (
-    ref: string,
-    exec: Exec,
-  ) => Effect.Effect<Redacted.Redacted<string>, SecretError>;
+  readonly read: (ref: string, exec: Exec) => Effect.Effect<Redacted.Redacted<string>, SecretError>;
 }

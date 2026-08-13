@@ -91,10 +91,7 @@ it.effect("changing a literal env value is real drift, caught by matches and fix
     const observed = yield* reconciler.observe(props, observeCtx);
     expect(reconciler.matches(observed!, changedDesired)).toBe(false);
 
-    yield* reconciler.apply(
-      { props: changedProps, observed, desired: changedDesired },
-      applyCtx,
-    );
+    yield* reconciler.apply({ props: changedProps, observed, desired: changedDesired }, applyCtx);
     const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
     expect(written.mcpServers["my-server"].env).toEqual({ LOG_LEVEL: "trace" });
   }).pipe(Effect.provide(layer)),
@@ -174,29 +171,31 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("adding a new env key, secret or literal, is drift even when every existing key still matches", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const home = yield* fs.makeTempDirectoryScoped();
-    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+it.effect(
+  "adding a new env key, secret or literal, is drift even when every existing key still matches",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
 
-    const props: McpServerProps = {
-      tool: "claude",
-      name: "my-server",
-      command: "npx",
-      env: { LOG_LEVEL: "debug" },
-    };
-    const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
-    const observed = yield* reconciler.observe(props, observeCtx);
+      const props: McpServerProps = {
+        tool: "claude",
+        name: "my-server",
+        command: "npx",
+        env: { LOG_LEVEL: "debug" },
+      };
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+      const observed = yield* reconciler.observe(props, observeCtx);
 
-    const withExtra: McpServerProps = {
-      ...props,
-      env: { LOG_LEVEL: "debug", NODE_ENV: "production" },
-    };
-    const desiredWithExtra = yield* reconciler.desired(withExtra);
-    expect(reconciler.matches(observed!, desiredWithExtra)).toBe(false);
-  }).pipe(Effect.provide(layer)),
+      const withExtra: McpServerProps = {
+        ...props,
+        env: { LOG_LEVEL: "debug", NODE_ENV: "production" },
+      };
+      const desiredWithExtra = yield* reconciler.desired(withExtra);
+      expect(reconciler.matches(observed!, desiredWithExtra)).toBe(false);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("observe reports absent for a server that was never registered", () =>

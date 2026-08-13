@@ -35,6 +35,9 @@
       "path": "examples/example-machine"
     },
     {
+      "path": "examples/complete-machine"
+    },
+    {
       "path": "tsconfig.tests.json"
     },
     {

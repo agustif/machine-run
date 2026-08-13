@@ -164,9 +164,7 @@ it.effect("mise backend: activate at Directory scope sets cwd, no `--global`", (
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
     yield* backend.activate("node", "22", dir("/home/test/proj"), capturingExec("", calls));
-    expect(calls).toEqual([
-      { command: "mise use --pin -y node@22", cwd: "/home/test/proj" },
-    ]);
+    expect(calls).toEqual([{ command: "mise use --pin -y node@22", cwd: "/home/test/proj" }]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -188,7 +186,11 @@ it.effect("mise backend: configPath honours a resolved MISE_GLOBAL_CONFIG_FILE o
     // `effect/Config`, and hands the already-resolved value to this factory
     // — this backend never reads `process.env` directly (see `Mise.ts`'s
     // doc comment for `globalConfigOverride`).
-    const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: "/elsewhere/config.toml" });
+    const backend = makeMiseBackend({
+      home: HOME,
+      path,
+      globalConfigOverride: "/elsewhere/config.toml",
+    });
     expect(backend.configPath(GLOBAL)).toBe("/elsewhere/config.toml");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -237,7 +239,11 @@ it.effect(
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
-      const observation = yield* backend.observe("rust", GLOBAL, fakeExec(RUSTUP_SHOW_DEFAULT_ACTIVE));
+      const observation = yield* backend.observe(
+        "rust",
+        GLOBAL,
+        fakeExec(RUSTUP_SHOW_DEFAULT_ACTIVE),
+      );
       expect(observation).toEqual({
         installed: ["stable", "nightly", "1.97.1"],
         active: "1.97.1",
@@ -279,7 +285,7 @@ it.effect("rustup backend: install/activate shell to the right subcommands", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("rustup backend: fixedTool is \"rust\", and configPath ignores scope", () =>
+it.effect('rustup backend: fixedTool is "rust", and configPath ignores scope', () =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
     const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
@@ -296,20 +302,26 @@ it.effect("rustup backend: fixedTool is \"rust\", and configPath ignores scope",
 // asdf
 // ---------------------------------------------------------------------------
 
-it.effect("asdf backend: observe is empty, and issues one command, when the plugin was never added", () =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
-    const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    // Real captured output (`asdf 0.20.0`): a fresh asdf reports this,
-    // exit 0, when nothing has ever been added.
-    const observation = yield* backend.observe("nodejs", GLOBAL, capturingExec("No plugins installed", calls));
-    expect(observation).toEqual({ installed: [], active: undefined });
-    // `asdf list`/`asdf current` are never reached — both fail outright
-    // against a plugin that was never added, and `observe` must stay
-    // read-only (it cannot call `asdf plugin add` to fix that itself).
-    expect(calls).toHaveLength(1);
-  }).pipe(Effect.provide(NodeServices.layer)),
+it.effect(
+  "asdf backend: observe is empty, and issues one command, when the plugin was never added",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
+      const calls: Array<{ command: string; cwd: string | undefined }> = [];
+      // Real captured output (`asdf 0.20.0`): a fresh asdf reports this,
+      // exit 0, when nothing has ever been added.
+      const observation = yield* backend.observe(
+        "nodejs",
+        GLOBAL,
+        capturingExec("No plugins installed", calls),
+      );
+      expect(observation).toEqual({ installed: [], active: undefined });
+      // `asdf list`/`asdf current` are never reached — both fail outright
+      // against a plugin that was never added, and `observe` must stay
+      // read-only (it cannot call `asdf plugin add` to fix that itself).
+      expect(calls).toHaveLength(1);
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("asdf backend: observe is empty when the plugin exists but nothing is installed", () =>
@@ -368,13 +380,15 @@ it.effect("asdf backend: activate uses `set -u` for Global and `set` with cwd fo
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("asdf backend: configPath is <home>/.tool-versions for Global, <dir>/.tool-versions for Directory", () =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
-    expect(backend.configPath(GLOBAL)).toBe(p(HOME, ".tool-versions"));
-    expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".tool-versions"));
-  }).pipe(Effect.provide(NodeServices.layer)),
+it.effect(
+  "asdf backend: configPath is <home>/.tool-versions for Global, <dir>/.tool-versions for Directory",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
+      expect(backend.configPath(GLOBAL)).toBe(p(HOME, ".tool-versions"));
+      expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".tool-versions"));
+    }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 // ---------------------------------------------------------------------------
@@ -407,7 +421,12 @@ const UV_PYTHON_LIST_ONLY_INSTALLED = JSON.stringify([
     path: "/Users/a/.local/share/uv/python/cpython-3.11-macos-aarch64-none/bin/python3.11",
     symlink: null,
   },
-  { key: "cpython-3.9.6-macos-aarch64-none", version: "3.9.6", path: "/usr/bin/python3", symlink: null },
+  {
+    key: "cpython-3.9.6-macos-aarch64-none",
+    version: "3.9.6",
+    path: "/usr/bin/python3",
+    symlink: null,
+  },
 ]);
 
 it.effect("uv backend: observe de-duplicates versions reported through more than one path", () =>
@@ -415,7 +434,11 @@ it.effect("uv backend: observe de-duplicates versions reported through more than
     const path = yield* Path.Path;
     const fs = yield* FileSystem.FileSystem;
     const backend = makeUvBackend({ home: HOME, path, fs, configDirOverride: undefined });
-    const observation = yield* backend.observe("python", GLOBAL, fakeExec(UV_PYTHON_LIST_ONLY_INSTALLED));
+    const observation = yield* backend.observe(
+      "python",
+      GLOBAL,
+      fakeExec(UV_PYTHON_LIST_ONLY_INSTALLED),
+    );
     expect([...observation.installed].sort()).toEqual(["3.11.15", "3.14.6", "3.9.6"]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -465,12 +488,19 @@ it.effect("uv backend: install/activate shell to `uv python install`/`pin`", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("uv backend: fixedTool is \"python\", configPath is <dir>/.python-version for Directory", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const pathSvc = yield* Path.Path;
-    const backend = makeUvBackend({ home: HOME, path: pathSvc, fs, configDirOverride: undefined });
-    expect(backend.fixedTool).toBe("python");
-    expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".python-version"));
-  }).pipe(Effect.provide(NodeServices.layer)),
+it.effect(
+  'uv backend: fixedTool is "python", configPath is <dir>/.python-version for Directory',
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const pathSvc = yield* Path.Path;
+      const backend = makeUvBackend({
+        home: HOME,
+        path: pathSvc,
+        fs,
+        configDirOverride: undefined,
+      });
+      expect(backend.fixedTool).toBe("python");
+      expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".python-version"));
+    }).pipe(Effect.provide(NodeServices.layer)),
 );

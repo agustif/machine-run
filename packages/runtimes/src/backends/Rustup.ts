@@ -1,11 +1,7 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
-import {
-  BackendParseError,
-  type RuntimeBackend,
-  type RuntimeObservation,
-} from "../Backend.ts";
+import { BackendParseError, type RuntimeBackend, type RuntimeObservation } from "../Backend.ts";
 
 /**
  * `rustup show` in one call gives everything {@link RuntimeObservation}
@@ -59,7 +55,8 @@ const parseRustupShow = (
   // triple-qualified name, since only the default host's suffix is stripped
   // — an intentional, narrower scope: cross toolchains are out of scope for
   // this backend, and a recipe wanting one has to spell it out in full.
-  const bareName = (name: string) => (name.endsWith(`-${host}`) ? name.slice(0, -(host.length + 1)) : name);
+  const bareName = (name: string) =>
+    name.endsWith(`-${host}`) ? name.slice(0, -(host.length + 1)) : name;
 
   const installedSection = /installed toolchains\n-+\n([\s\S]*?)\n\n/.exec(stdout);
   const installed = installedSection?.[1]
@@ -108,7 +105,10 @@ export const makeRustupBackend = (deps: {
       const parsed = parseRustupShow(result.stdout);
       if (parsed === undefined) {
         return yield* Effect.fail(
-          new BackendParseError({ manager: "rustup", cause: "no \"Default host:\" line in `rustup show`" }),
+          new BackendParseError({
+            manager: "rustup",
+            cause: 'no "Default host:" line in `rustup show`',
+          }),
         );
       }
       return parsed satisfies RuntimeObservation;
@@ -127,9 +127,11 @@ export const makeRustupBackend = (deps: {
 
   const activate: RuntimeBackend["activate"] = (_tool, version, scope, exec) =>
     scope._tag === "Global"
-      ? exec({ command: Sh.sh("rustup", "default", version), shell: true, timeout: "15 minutes" }).pipe(
-          Effect.asVoid,
-        )
+      ? exec({
+          command: Sh.sh("rustup", "default", version),
+          shell: true,
+          timeout: "15 minutes",
+        }).pipe(Effect.asVoid)
       : exec({
           command: Sh.sh("rustup", "override", "set", version),
           shell: true,

@@ -7,6 +7,7 @@
   },
   "references": [
     { "path": "../../packages/dotfiles" },
+    { "path": "../../packages/git" },
     { "path": "../../packages/machine" },
     { "path": "../../packages/macos-defaults" },
     { "path": "../../packages/secrets" },

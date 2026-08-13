@@ -61,7 +61,9 @@ Sixteen packages arrived faster than the invariants tying them together.
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
       resolves; it cannot notice a package was never added — precisely the
-      failure it exists to prevent.
+      failure it exists to prevent. `ExampleCoverage.test.ts` now does the
+      equivalent job for resource kinds against `examples/complete-machine`;
+      the layer needs the same treatment.
 - [ ] **A README per package.** Source comments already reference ones that do
       not exist.
 

@@ -77,8 +77,7 @@ export const DirectoryState = Schema.Struct({
 
 export type DirectoryState = typeof DirectoryState.Type;
 
-export interface Directory
-  extends Resource<"Machine.Directory", DirectoryProps, DirectoryState> {}
+export interface Directory extends Resource<"Machine.Directory", DirectoryProps, DirectoryState> {}
 
 export const Directory = Resource<Directory>("Machine.Directory");
 
@@ -103,13 +102,15 @@ export const makeDirectoryReconciler: Effect.Effect<
     observe: (props) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
-        const info = yield* fs.stat(target).pipe(
-          Effect.catchTag("PlatformError", (cause) =>
-            isNotFound(cause)
-              ? Effect.succeed(undefined)
-              : Effect.fail(new DirectoryPathUnreadable({ path: target, cause })),
-          ),
-        );
+        const info = yield* fs
+          .stat(target)
+          .pipe(
+            Effect.catchTag("PlatformError", (cause) =>
+              isNotFound(cause)
+                ? Effect.succeed(undefined)
+                : Effect.fail(new DirectoryPathUnreadable({ path: target, cause })),
+            ),
+          );
         if (info === undefined) return undefined;
         if (info.type !== "Directory") {
           return yield* Effect.fail(new DirectoryPathIsFile({ path: target }));

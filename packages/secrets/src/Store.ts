@@ -30,5 +30,4 @@ export const secretBackends = {
   env: EnvBackend,
 } satisfies Record<SecretBackendId, SecretBackend>;
 
-export const secretBackend = (id: SecretBackendId): SecretBackend =>
-  secretBackends[id];
+export const secretBackend = (id: SecretBackendId): SecretBackend => secretBackends[id];

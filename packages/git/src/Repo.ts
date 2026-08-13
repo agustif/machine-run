@@ -246,8 +246,7 @@ export const makeGitRepoReconciler: Effect.Effect<
         );
       }),
 
-    desired: (props) =>
-      Effect.succeed({ path: paths.expand(props.path), remote: props.remote }),
+    desired: (props) => Effect.succeed({ path: paths.expand(props.path), remote: props.remote }),
 
     matches: (observed, desired) =>
       observed.path === desired.path && observed.remote === desired.remote,

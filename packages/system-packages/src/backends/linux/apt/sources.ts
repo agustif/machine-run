@@ -67,7 +67,10 @@ export const parseDeb822Sources = (content: string): string[] => {
     if (line.slice(0, separator).trim().toLowerCase() !== "uris") continue;
 
     // `URIs:` may list several space-separated mirrors for one repository.
-    for (const uri of line.slice(separator + 1).trim().split(/\s+/)) {
+    for (const uri of line
+      .slice(separator + 1)
+      .trim()
+      .split(/\s+/)) {
       if (uri.length === 0) continue;
       const ppa = PPA_URI.exec(uri);
       if (ppa) repos.push(`ppa:${ppa[1]}/${ppa[2]}`);

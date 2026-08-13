@@ -171,7 +171,11 @@ const scopeEquals = (a: RuntimeScope, b: RuntimeScope): boolean => {
 };
 
 export const makeRuntimeToolReconciler: Effect.Effect<
-  Reconciler<RuntimeToolProps, RuntimeToolState, BackendError | RuntimeToolMismatch | RuntimeNotConverged>,
+  Reconciler<
+    RuntimeToolProps,
+    RuntimeToolState,
+    BackendError | RuntimeToolMismatch | RuntimeNotConverged
+  >,
   never,
   MachinePaths | FileSystem.FileSystem | Path.Path
 > = Effect.gen(function* () {
@@ -185,7 +189,11 @@ export const makeRuntimeToolReconciler: Effect.Effect<
   const uvConfigDirOverride = yield* optionalEnv("XDG_CONFIG_HOME");
 
   const backends = {
-    mise: makeMiseBackend({ home: paths.home, path, globalConfigOverride: miseGlobalConfigOverride }),
+    mise: makeMiseBackend({
+      home: paths.home,
+      path,
+      globalConfigOverride: miseGlobalConfigOverride,
+    }),
     asdf: makeAsdfBackend({ home: paths.home, path, filenameOverride: asdfFilenameOverride }),
     rustup: makeRustupBackend({ home: paths.home, path, rustupHomeOverride }),
     uv: makeUvBackend({ home: paths.home, path, fs, configDirOverride: uvConfigDirOverride }),
@@ -219,7 +227,9 @@ export const makeRuntimeToolReconciler: Effect.Effect<
       // do — reporting a different (older or newer) installed version here
       // would make `matches` reject an already-satisfied request and force a
       // pointless reactivation.
-      const version = activeSatisfies ? (observation.active as string) : (matchingInstalled as string);
+      const version = activeSatisfies
+        ? (observation.active as string)
+        : (matchingInstalled as string);
 
       return {
         manager: props.manager,
@@ -266,7 +276,9 @@ export const makeRuntimeToolReconciler: Effect.Effect<
         const backend = backends[props.manager];
 
         const alreadyInstalled =
-          observed !== undefined && observed.installed && versionSatisfies(props.version, observed.version);
+          observed !== undefined &&
+          observed.installed &&
+          versionSatisfies(props.version, observed.version);
 
         if (!alreadyInstalled) {
           yield* backend.install(props.tool, props.version, ctx.exec);
@@ -282,7 +294,11 @@ export const makeRuntimeToolReconciler: Effect.Effect<
         const reobserved = yield* observe(props, ctx);
         if (reobserved === undefined) {
           return yield* Effect.fail(
-            new RuntimeNotConverged({ manager: props.manager, tool: props.tool, version: props.version }),
+            new RuntimeNotConverged({
+              manager: props.manager,
+              tool: props.tool,
+              version: props.version,
+            }),
           );
         }
         return reobserved;

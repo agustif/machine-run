@@ -74,9 +74,7 @@ it.effect(
         .observe(propsFor(target, "SSH_KEY"), observeCtx)
         .pipe(
           Effect.flip,
-          Effect.ensuring(
-            fs.chmod(blocked, 0o755).pipe(Effect.orElseSucceed(() => undefined)),
-          ),
+          Effect.ensuring(fs.chmod(blocked, 0o755).pipe(Effect.orElseSucceed(() => undefined))),
         );
 
       expect(failure).toBeInstanceOf(SecretFilePathUnreadable);
@@ -106,24 +104,26 @@ it.effect("trailingNewline 'preserve' (the default) writes the backend's bytes v
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("trailingNewline 'ensure' adds exactly one newline when the backend's value has none", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeSecretFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "token");
+it.effect(
+  "trailingNewline 'ensure' adds exactly one newline when the backend's value has none",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeSecretFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "token");
 
-    const props = propsFor(target, "API_TOKEN", { trailingNewline: "ensure" });
-    const desired = yield* reconciler.desired(props);
+      const props = propsFor(target, "API_TOKEN", { trailingNewline: "ensure" });
+      const desired = yield* reconciler.desired(props);
 
-    yield* withEnv(
-      { API_TOKEN: "no-newline-here" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
-    );
+      yield* withEnv(
+        { API_TOKEN: "no-newline-here" },
+        reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      );
 
-    expect(yield* fs.readFileString(target)).toBe("no-newline-here\n");
-  }).pipe(Effect.provide(layer)),
+      expect(yield* fs.readFileString(target)).toBe("no-newline-here\n");
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("trailingNewline 'ensure' does not double a newline that is already there", () =>
@@ -146,24 +146,26 @@ it.effect("trailingNewline 'ensure' does not double a newline that is already th
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("trailingNewline 'strip' removes trailing newlines a naive comparison would choke on", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeSecretFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "token");
+it.effect(
+  "trailingNewline 'strip' removes trailing newlines a naive comparison would choke on",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeSecretFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "token");
 
-    const props = propsFor(target, "API_TOKEN", { trailingNewline: "strip" });
-    const desired = yield* reconciler.desired(props);
+      const props = propsFor(target, "API_TOKEN", { trailingNewline: "strip" });
+      const desired = yield* reconciler.desired(props);
 
-    yield* withEnv(
-      { API_TOKEN: "a-token\n\n" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
-    );
+      yield* withEnv(
+        { API_TOKEN: "a-token\n\n" },
+        reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      );
 
-    expect(yield* fs.readFileString(target)).toBe("a-token");
-  }).pipe(Effect.provide(layer)),
+      expect(yield* fs.readFileString(target)).toBe("a-token");
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("mode defaults to 0600, and the directory holding it defaults to 0700", () =>

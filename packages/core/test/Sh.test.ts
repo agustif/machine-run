@@ -9,9 +9,7 @@ it("leaves shell-safe words unquoted", () => {
 
 it("quotes the empty string so it survives as an argument", () => {
   expect(quote("")).toBe("''");
-  expect(sh("defaults", "write", "d", "k", "-string", "")).toBe(
-    "defaults write d k -string ''",
-  );
+  expect(sh("defaults", "write", "d", "k", "-string", "")).toBe("defaults write d k -string ''");
 });
 
 it("keeps a value containing spaces as a single argument", () => {

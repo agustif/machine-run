@@ -47,44 +47,41 @@ const supportLayers = (calls: { count: number }) =>
     Layer.provideMerge(NodeServices.layer),
   );
 
-it.effect(
-  "snapshots pre-existing, hand-placed content before overwriting it",
-  () => {
-    const calls = { count: 0 };
-    return Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "id_ed25519");
-      yield* fs.writeFileString(target, "a hand-placed key, never written by this tool");
+it.effect("snapshots pre-existing, hand-placed content before overwriting it", () => {
+  const calls = { count: 0 };
+  return Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "id_ed25519");
+    yield* fs.writeFileString(target, "a hand-placed key, never written by this tool");
 
-      const provider = yield* SecretFile.Provider;
-      yield* provider.reconcile({
-        id: "s",
-        fqn: "s",
-        instanceId: "s",
-        news: { path: target, source: "env", ref: "SSH_KEY" },
-        // Nothing recorded yet — the same "true first apply, and the file
-        // already has real content" situation that triggers a snapshot for
-        // `Machine.File` (see the sibling test in `dotfiles`).
-        olds: undefined,
-        output: undefined,
-        session: silentSession,
-        bindings: [],
-      });
+    const provider = yield* SecretFile.Provider;
+    yield* provider.reconcile({
+      id: "s",
+      fqn: "s",
+      instanceId: "s",
+      news: { path: target, source: "env", ref: "SSH_KEY" },
+      // Nothing recorded yet — the same "true first apply, and the file
+      // already has real content" situation that triggers a snapshot for
+      // `Machine.File` (see the sibling test in `dotfiles`).
+      olds: undefined,
+      output: undefined,
+      session: silentSession,
+      bindings: [],
+    });
 
-      // The secret is materialised, and the key that was already sitting
-      // there was copied first. Overwriting a hand-placed credential with no
-      // copy is unrecoverable, which is why this resource opts into the
-      // snapshot gate rather than relying on the store still holding the old
-      // value.
-      expect(yield* fs.readFileString(target)).not.toContain("hand-placed");
-      expect(calls.count).toBe(1);
-    }).pipe(
-      Effect.provide(toProvider(SecretFile, makeSecretFileReconciler)),
-      Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord({ SSH_KEY: "new-key\n" }))),
-      Effect.scoped,
-      Effect.provide(supportLayers(calls)),
-    );
-  },
-);
+    // The secret is materialised, and the key that was already sitting
+    // there was copied first. Overwriting a hand-placed credential with no
+    // copy is unrecoverable, which is why this resource opts into the
+    // snapshot gate rather than relying on the store still holding the old
+    // value.
+    expect(yield* fs.readFileString(target)).not.toContain("hand-placed");
+    expect(calls.count).toBe(1);
+  }).pipe(
+    Effect.provide(toProvider(SecretFile, makeSecretFileReconciler)),
+    Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord({ SSH_KEY: "new-key\n" }))),
+    Effect.scoped,
+    Effect.provide(supportLayers(calls)),
+  );
+});

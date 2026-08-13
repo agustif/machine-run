@@ -53,11 +53,7 @@ export const aiConfig = (props: AiConfigProps) =>
   });
 
 /** Sugar over one {@link aiConfig} per tool — see {@link import("./Skill.ts").aiSkills}'s doc comment. */
-export const aiConfigs = (props: {
-  home: string;
-  vaultDir: string;
-  tools: readonly AiToolId[];
-}) =>
+export const aiConfigs = (props: { home: string; vaultDir: string; tools: readonly AiToolId[] }) =>
   Effect.gen(function* () {
     for (const tool of props.tools) {
       yield* aiConfig({ home: props.home, vaultDir: props.vaultDir, tool });

@@ -19,7 +19,5 @@
       "path": "../shell"
     }
   ],
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

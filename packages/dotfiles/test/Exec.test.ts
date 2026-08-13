@@ -23,8 +23,7 @@ const layer = Layer.mergeAll(MachinePathsLive(), CommandExecutorLive()).pipe(
 const ctx = Effect.gen(function* () {
   const executor = yield* CommandExecutor;
   return {
-    exec: (props: Parameters<typeof executor.run>[0]) =>
-      executor.run(props, silentSession),
+    exec: (props: Parameters<typeof executor.run>[0]) => executor.run(props, silentSession),
     snapshot: () => Effect.succeed(undefined),
   };
 });
@@ -33,9 +32,7 @@ it.effect("observe fails with a typed error when no guard is set", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeExecReconciler;
     const c = yield* ctx;
-    const error = yield* reconciler
-      .observe({ command: "true" }, c)
-      .pipe(Effect.flip);
+    const error = yield* reconciler.observe({ command: "true" }, c).pipe(Effect.flip);
     expect(error).toBeInstanceOf(ExecGuardRequired);
   }).pipe(Effect.provide(layer)),
 );
@@ -92,10 +89,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
       expect(reconciler.matches(before!, desired)).toBe(false);
 
-      const after = yield* reconciler.apply(
-        { props, observed: before, desired },
-        c,
-      );
+      const after = yield* reconciler.apply({ props, observed: before, desired }, c);
       expect(after).toEqual({ satisfied: true });
       expect(yield* fs.exists(marker)).toBe(true);
 

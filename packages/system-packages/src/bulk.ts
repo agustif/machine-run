@@ -11,8 +11,7 @@ import * as Hash from "effect/Hash";
  * against an adversary is not a requirement. Base36 keeps it short and
  * filesystem-safe.
  */
-const shortHash = (input: string): string =>
-  (Hash.string(input) >>> 0).toString(36);
+const shortHash = (input: string): string => (Hash.string(input) >>> 0).toString(36);
 import { Package, type PackageManagerId } from "./Package.ts";
 import { Repo, type RepoManagerId } from "./Repo.ts";
 

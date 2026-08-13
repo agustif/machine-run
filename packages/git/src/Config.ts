@@ -137,8 +137,7 @@ export const GitConfigState = Schema.Struct({
 
 export type GitConfigState = typeof GitConfigState.Type;
 
-export interface Config
-  extends Resource<"Git.Config", GitConfigProps, GitConfigState> {}
+export interface Config extends Resource<"Git.Config", GitConfigProps, GitConfigState> {}
 
 export const Config = Resource<Config>("Git.Config");
 
@@ -152,9 +151,7 @@ export const Config = Resource<Config>("Git.Config");
  * else with `fatal: bad boolean config value`; this fails the same way but
  * earlier, and without needing a command to do it.
  */
-export class GitConfigInvalidBoolean extends Data.TaggedError(
-  "GitConfigInvalidBoolean",
-)<{
+export class GitConfigInvalidBoolean extends Data.TaggedError("GitConfigInvalidBoolean")<{
   key: string;
   value: string;
 }> {
@@ -171,9 +168,7 @@ export class GitConfigInvalidBoolean extends Data.TaggedError(
  * section enumerates them), not string-matching stderr, so this stays
  * reliable across git versions and locales.
  */
-export class GitConfigCommandFailed extends Data.TaggedError(
-  "GitConfigCommandFailed",
-)<{
+export class GitConfigCommandFailed extends Data.TaggedError("GitConfigCommandFailed")<{
   key: string;
   cause: CommandError;
 }> {
@@ -240,15 +235,7 @@ const getAll = (
   exec: Exec,
 ): Effect.Effect<readonly string[] | undefined, GitConfigCommandFailed> =>
   exec({
-    command: Sh.sh(
-      "git",
-      "config",
-      "--global",
-      "--get-all",
-      "-z",
-      ...typeFlag(type),
-      key,
-    ),
+    command: Sh.sh("git", "config", "--global", "--get-all", "-z", ...typeFlag(type), key),
     shell: true,
   }).pipe(
     Effect.map((result) => splitNulTerminated(result.stdout)),
@@ -291,21 +278,11 @@ const addOne = (
   exec: Exec,
 ): Effect.Effect<void, GitConfigCommandFailed> =>
   exec({
-    command: Sh.sh(
-      "git",
-      "config",
-      "--global",
-      ...typeFlag(type),
-      "--add",
-      key,
-      value,
-    ),
+    command: Sh.sh("git", "config", "--global", ...typeFlag(type), "--add", key, value),
     shell: true,
   }).pipe(
     Effect.asVoid,
-    Effect.catch((error) =>
-      Effect.fail(new GitConfigCommandFailed({ key, cause: error })),
-    ),
+    Effect.catch((error) => Effect.fail(new GitConfigCommandFailed({ key, cause: error }))),
   );
 
 /**
@@ -338,13 +315,9 @@ const resolveGlobalConfigPath = (
     const xdgConfigHome = yield* EffectConfig.option(EffectConfig.string("XDG_CONFIG_HOME")).pipe(
       Effect.orElseSucceed(() => Option.none<string>()),
     );
-    const xdgBase = Option.getOrElse(xdgConfigHome, () =>
-      path.join(paths.home, ".config"),
-    );
+    const xdgBase = Option.getOrElse(xdgConfigHome, () => path.join(paths.home, ".config"));
     const xdgConfig = path.join(xdgBase, "git", "config");
-    const xdgExists = yield* fs
-      .exists(xdgConfig)
-      .pipe(Effect.orElseSucceed(() => false));
+    const xdgExists = yield* fs.exists(xdgConfig).pipe(Effect.orElseSucceed(() => false));
     return xdgExists ? xdgConfig : path.join(paths.home, ".gitconfig");
   });
 

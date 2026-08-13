@@ -72,8 +72,7 @@ export const CodexBackend: AiToolBackend = {
           decodeCodexMcpGet(result.stdout).pipe(
             Effect.catchTag(
               "SchemaError",
-              (cause) =>
-                new AiToolConfigMalformed({ tool: "codex", path: CONFIG_PATH, cause }),
+              (cause) => new AiToolConfigMalformed({ tool: "codex", path: CONFIG_PATH, cause }),
             ),
           ),
         ),
@@ -121,9 +120,11 @@ export const CodexBackend: AiToolBackend = {
           );
         }
 
-        yield* ctx.exec({ command: parts.join(" "), shell: true, env }).pipe(
-          Effect.catchTag("CommandError", (error) => classifyCliError("codex", "codex", error)),
-        );
+        yield* ctx
+          .exec({ command: parts.join(" "), shell: true, env })
+          .pipe(
+            Effect.catchTag("CommandError", (error) => classifyCliError("codex", "codex", error)),
+          );
       }),
   },
 };

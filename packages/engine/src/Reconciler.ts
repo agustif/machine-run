@@ -17,9 +17,7 @@ export interface CommandOutput {
  * Which status session the command reports to is bound by the engine, per
  * phase, so nothing downstream has to know a session exists.
  */
-export type Exec = (
-  props: CommandRunProps,
-) => Effect.Effect<CommandOutput, CommandError>;
+export type Exec = (props: CommandRunProps) => Effect.Effect<CommandOutput, CommandError>;
 
 /**
  * What a reconciler is allowed to do while *looking* at the machine.
@@ -113,10 +111,7 @@ export interface Reconciler<Props, State, E = never, R = never> {
    *
    * This is the only thing that decides whether the machine matches the recipe.
    */
-  readonly observe: (
-    props: Props,
-    ctx: ObserveContext,
-  ) => Effect.Effect<State | undefined, E, R>;
+  readonly observe: (props: Props, ctx: ObserveContext) => Effect.Effect<State | undefined, E, R>;
 
   /** The state these props are asking for. */
   readonly desired: (props: Props) => Effect.Effect<State, E, R>;

@@ -134,8 +134,7 @@ export const DownloadState = Schema.Struct({
 
 export type DownloadState = typeof DownloadState.Type;
 
-export interface Download
-  extends Resource<"Machine.Download", DownloadProps, DownloadState> {}
+export interface Download extends Resource<"Machine.Download", DownloadProps, DownloadState> {}
 
 export const Download = Resource<Download>("Machine.Download");
 
@@ -184,13 +183,15 @@ export const makeDownloadReconciler: Effect.Effect<
     observe: (props) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
-        const info = yield* fs.stat(target).pipe(
-          Effect.catchTag("PlatformError", (cause) =>
-            isNotFound(cause)
-              ? Effect.succeed(undefined)
-              : Effect.fail(new DownloadPathUnreadable({ path: target, cause })),
-          ),
-        );
+        const info = yield* fs
+          .stat(target)
+          .pipe(
+            Effect.catchTag("PlatformError", (cause) =>
+              isNotFound(cause)
+                ? Effect.succeed(undefined)
+                : Effect.fail(new DownloadPathUnreadable({ path: target, cause })),
+            ),
+          );
         if (info === undefined) return undefined;
         if (info.type !== "File") {
           return yield* Effect.fail(new DownloadPathIsNotFile({ path: target }));
@@ -201,9 +202,7 @@ export const makeDownloadReconciler: Effect.Effect<
         const limit = props.maxBytes ?? DEFAULT_MAX_BYTES;
         const size = Number(info.size);
         if (size > limit) {
-          return yield* Effect.fail(
-            new DownloadTooLarge({ path: target, bytes: size, limit }),
-          );
+          return yield* Effect.fail(new DownloadTooLarge({ path: target, bytes: size, limit }));
         }
         const bytes = yield* fs.readFile(target);
         return {

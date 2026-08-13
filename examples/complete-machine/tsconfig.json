@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "outDir": "./lib",
+    "rootDir": "."
+  },
+  "references": [
+    { "path": "../../packages/ai" },
+    { "path": "../../packages/dotfiles" },
+    { "path": "../../packages/git" },
+    { "path": "../../packages/machine" },
+    { "path": "../../packages/macos-defaults" },
+    { "path": "../../packages/runtimes" },
+    { "path": "../../packages/secrets" },
+    { "path": "../../packages/shell" },
+    { "path": "../../packages/ssh" },
+    { "path": "../../packages/system-packages" },
+    { "path": "../../packages/system-settings" },
+    { "path": "../../packages/tailscale" }
+  ],
+  "include": ["alchemy.run.ts", "recipes/**/*.ts"]
+}

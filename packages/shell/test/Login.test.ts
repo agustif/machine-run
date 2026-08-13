@@ -109,9 +109,7 @@ const applyCtx = (exec: Exec): ApplyContext => ({
  * passes on macOS and silently exercises nothing on Linux.
  */
 const LOGIN_SHELL_OUTPUT =
-  process.platform === "darwin"
-    ? "UserShell: /bin/zsh\n"
-    : "me:x:501:20::/home/me:/bin/zsh\n";
+  process.platform === "darwin" ? "UserShell: /bin/zsh\n" : "me:x:501:20::/home/me:/bin/zsh\n";
 
 it.effect("Login reconciler observe reads the live shell via the platform's own tool", () =>
   Effect.gen(function* () {
@@ -189,7 +187,10 @@ it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior sh
     const reconciler = yield* makeLoginReconcilerAt(shellsPath);
     const calls: string[] = [];
     const props = { shell: "/bin/bash" };
-    const observed = yield* reconciler.observe(props, planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)));
+    const observed = yield* reconciler.observe(
+      props,
+      planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)),
+    );
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(

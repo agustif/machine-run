@@ -8,7 +8,7 @@ Nothing here is a resource. See [../../docs/ARCHITECTURE.md](../../docs/ARCHITEC
       Windows support needs the same facts in several more places. One service
       keeps the host-fact surface at one call site instead of scattering it.
 - [ ] **`optionalKey` helper** — centralise `...(x !== undefined ? { k: x } : {})`,
-      which appears a dozen times and exists to *omit* a key rather than set it
+      which appears a dozen times and exists to _omit_ a key rather than set it
       to `undefined`. One helper makes `noConditionalEmptyObjectSpread`
       satisfiable everywhere else.
 - [ ] **`Backups.snapshot` returns `string | undefined`** — that is our contract,

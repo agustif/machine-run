@@ -91,17 +91,17 @@ export const makeFileReconciler: Effect.Effect<
     observe: (props) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
-        const info = yield* fs.stat(target).pipe(
-          Effect.catchTag("PlatformError", (cause) =>
-            isNotFound(cause)
-              ? Effect.succeed(undefined)
-              : Effect.fail(new FilePathUnreadable({ path: target, cause })),
-          ),
-        );
+        const info = yield* fs
+          .stat(target)
+          .pipe(
+            Effect.catchTag("PlatformError", (cause) =>
+              isNotFound(cause)
+                ? Effect.succeed(undefined)
+                : Effect.fail(new FilePathUnreadable({ path: target, cause })),
+            ),
+          );
         if (info === undefined) return undefined;
-        const content = yield* fs
-          .readFileString(target)
-          .pipe(Effect.orElseSucceed(() => ""));
+        const content = yield* fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""));
         return {
           path: target,
           hash: yield* sha256(content),

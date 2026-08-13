@@ -45,9 +45,7 @@ it.effect(
         .observe({ path: target, content: "x" }, observeCtx)
         .pipe(
           Effect.flip,
-          Effect.ensuring(
-            fs.chmod(blocked, 0o755).pipe(Effect.orElseSucceed(() => undefined)),
-          ),
+          Effect.ensuring(fs.chmod(blocked, 0o755).pipe(Effect.orElseSucceed(() => undefined))),
         );
 
       expect(failure).toBeInstanceOf(FilePathUnreadable);

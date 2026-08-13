@@ -61,10 +61,7 @@ it.effect(
 
       const written = JSON.parse(yield* fs.readFileString(configPathOf(path, home)));
 
-      expect(written.plugins).toEqual([
-        "./plugin/lmstudio-v2.ts",
-        "./plugin/restart-command.ts",
-      ]);
+      expect(written.plugins).toEqual(["./plugin/lmstudio-v2.ts", "./plugin/restart-command.ts"]);
       expect(written.providers.lmstudio.options.baseURL).toBe("http://127.0.0.1:1234/v1");
       expect(written.mcp.existing).toEqual({ type: "remote", url: "https://example.com/mcp" });
 

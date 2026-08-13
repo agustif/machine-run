@@ -59,20 +59,22 @@ const applyCtx = (exec: Exec): ApplyContext => ({
   snapshot: () => Effect.die("System.Setting never snapshots — snapshotBeforeApply is unset"),
 });
 
-it.effect("Setting reconciler address is backend:key, so two Settings on the same key contend", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeSettingReconciler;
-    expect(
-      reconciler.address({
-        backend: "gsettings",
-        key: "org.gnome.desktop.interface:clock-format",
-        value: "'24h'",
-      }),
-    ).toBe("gsettings:org.gnome.desktop.interface:clock-format");
-    expect(
-      reconciler.address({ backend: "dconf", key: "/test/mypath", value: "['a', 'b']" }),
-    ).toBe("dconf:/test/mypath");
-  }),
+it.effect(
+  "Setting reconciler address is backend:key, so two Settings on the same key contend",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      expect(
+        reconciler.address({
+          backend: "gsettings",
+          key: "org.gnome.desktop.interface:clock-format",
+          value: "'24h'",
+        }),
+      ).toBe("gsettings:org.gnome.desktop.interface:clock-format");
+      expect(
+        reconciler.address({ backend: "dconf", key: "/test/mypath", value: "['a', 'b']" }),
+      ).toBe("dconf:/test/mypath");
+    }),
 );
 
 it.effect("Setting reconciler observe: undefined when the backend reports the key absent", () =>
@@ -88,19 +90,21 @@ it.effect("Setting reconciler observe: undefined when the backend reports the ke
   }),
 );
 
-it.effect("Setting reconciler observe: the live GVariant text once the backend reports a value", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeSettingReconciler;
-    const observed = yield* reconciler.observe(
-      { backend: "gsettings", key: "org.gnome.desktop.interface:clock-format", value: "'24h'" },
-      planCtx(fakeExec("'24h'\n")),
-    );
-    expect(observed).toEqual({
-      backend: "gsettings",
-      key: "org.gnome.desktop.interface:clock-format",
-      value: "'24h'",
-    });
-  }),
+it.effect(
+  "Setting reconciler observe: the live GVariant text once the backend reports a value",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const observed = yield* reconciler.observe(
+        { backend: "gsettings", key: "org.gnome.desktop.interface:clock-format", value: "'24h'" },
+        planCtx(fakeExec("'24h'\n")),
+      );
+      expect(observed).toEqual({
+        backend: "gsettings",
+        key: "org.gnome.desktop.interface:clock-format",
+        value: "'24h'",
+      });
+    }),
 );
 
 it.effect("Setting reconciler matches: true iff backend, key and value are all equal", () =>
@@ -128,10 +132,7 @@ it.effect("Setting reconciler apply: writes the value and confirms it by reading
     };
     const desired = yield* reconciler.desired(props);
 
-    const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
-      applyCtx(exec),
-    );
+    const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
 
     expect(result).toEqual({
       backend: "gsettings",
@@ -188,10 +189,7 @@ it.effect("Setting reconciler apply: dconf backend writes and confirms an array 
     const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
     const desired = yield* reconciler.desired(props);
 
-    const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
-      applyCtx(exec),
-    );
+    const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
 
     expect(result).toEqual({ backend: "dconf", key: "/test/mypath", value: "['a', 'b']" });
     expect(calls).toEqual([

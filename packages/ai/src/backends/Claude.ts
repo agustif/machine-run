@@ -68,11 +68,7 @@ const readDocument = (
     return parsed;
   });
 
-const writeDocument = (
-  configPath: string,
-  doc: Record<string, unknown>,
-  ctx: AiToolContext,
-) =>
+const writeDocument = (configPath: string, doc: Record<string, unknown>, ctx: AiToolContext) =>
   Effect.gen(function* () {
     yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), { recursive: true });
     yield* ctx.fs.writeFileString(configPath, `${JSON.stringify(doc, null, 2)}\n`);
@@ -141,8 +137,7 @@ export const ClaudeBackend: AiToolBackend = {
         const servers = yield* decodeMcpServers(raw).pipe(
           Effect.catchTag(
             "SchemaError",
-            (cause) =>
-              new AiToolConfigMalformed({ tool: "claude", path: configPath, cause }),
+            (cause) => new AiToolConfigMalformed({ tool: "claude", path: configPath, cause }),
           ),
         );
         const entry = servers[name];

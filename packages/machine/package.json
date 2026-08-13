@@ -14,17 +14,17 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@machine-run/ai": "*",
     "@machine-run/core": "*",
     "@machine-run/dotfiles": "*",
-    "@machine-run/macos-defaults": "*",
-    "@machine-run/secrets": "*",
-    "@machine-run/system-packages": "*",
-    "@machine-run/tailscale": "*",
     "@machine-run/git": "*",
-    "@machine-run/ai": "*",
-    "@machine-run/shell": "*",
+    "@machine-run/macos-defaults": "*",
     "@machine-run/runtimes": "*",
-    "@machine-run/system-settings": "*"
+    "@machine-run/secrets": "*",
+    "@machine-run/shell": "*",
+    "@machine-run/system-packages": "*",
+    "@machine-run/system-settings": "*",
+    "@machine-run/tailscale": "*"
   },
   "peerDependencies": {
     "alchemy": ">=2.0.0-beta.72",

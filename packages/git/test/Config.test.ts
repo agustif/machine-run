@@ -92,17 +92,19 @@ it.effect("observe reports absent when the key is unset (real exit code 1)", () 
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe parses NUL-terminated multi-value output, dropping the trailing terminator", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeGitConfigReconciler;
-    // Real captured output of `git config --global --get-all -z multi.key`
-    // after `--add multi.key val1` then `--add multi.key val2`.
-    const observed = yield* reconciler.observe(
-      props({ key: "multi.key", values: ["val1", "val2"] }),
-      fakeExecOk("val1\0val2\0"),
-    );
-    expect(observed).toEqual({ key: "multi.key", values: ["val1", "val2"] });
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "observe parses NUL-terminated multi-value output, dropping the trailing terminator",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeGitConfigReconciler;
+      // Real captured output of `git config --global --get-all -z multi.key`
+      // after `--add multi.key val1` then `--add multi.key val2`.
+      const observed = yield* reconciler.observe(
+        props({ key: "multi.key", values: ["val1", "val2"] }),
+        fakeExecOk("val1\0val2\0"),
+      );
+      expect(observed).toEqual({ key: "multi.key", values: ["val1", "val2"] });
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("observe reads a valueless boolean entry as canonical `true` with --type=bool", () =>
@@ -126,7 +128,10 @@ it.effect("observe surfaces a real failure rather than treating it as absent", (
     // that isn't a boolean literal exits 128 ("bad boolean config value"),
     // a code that must never be read as "nothing here".
     const error = yield* reconciler
-      .observe(props({ type: "bool" }), fakeExecExit(128, "fatal: bad boolean config value 'maybe'"))
+      .observe(
+        props({ type: "bool" }),
+        fakeExecExit(128, "fatal: bad boolean config value 'maybe'"),
+      )
       .pipe(Effect.flip);
     expect(error).toBeInstanceOf(GitConfigCommandFailed);
   }).pipe(Effect.provide(layer)),
@@ -134,16 +139,18 @@ it.effect("observe surfaces a real failure rather than treating it as absent", (
 
 // --- desired: canonicalisation mirrors git's own --type=bool read. ---
 
-it.effect("desired canonicalises a bool-typed value the same way observe's --type=bool read would", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeGitConfigReconciler;
-    const desired = yield* reconciler.desired(
-      props({ key: "push.autoSetupRemote", values: ["yes"], type: "bool" }),
-    );
-    // Verified live: `git config --global --type=bool push.autoSetupRemote
-    // yes` stores canonical "true", not the literal "yes".
-    expect(desired).toEqual({ key: "push.autoSetupRemote", values: ["true"] });
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "desired canonicalises a bool-typed value the same way observe's --type=bool read would",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeGitConfigReconciler;
+      const desired = yield* reconciler.desired(
+        props({ key: "push.autoSetupRemote", values: ["yes"], type: "bool" }),
+      );
+      // Verified live: `git config --global --type=bool push.autoSetupRemote
+      // yes` stores canonical "true", not the literal "yes".
+      expect(desired).toEqual({ key: "push.autoSetupRemote", values: ["true"] });
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("desired fails rather than silently storing an unrecognised bool literal", () =>
@@ -245,33 +252,35 @@ it.effect("address resolves to ~/.gitconfig when no XDG git config file exists",
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("address prefers an already-existing $XDG_CONFIG_HOME/git/config, matching real git", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* fs.makeTempDirectoryScoped();
-    const xdgBase = path.join(home, "xdg-config");
-    const xdgGitDir = path.join(xdgBase, "git");
-    yield* fs.makeDirectory(xdgGitDir, { recursive: true });
-    yield* fs.writeFileString(path.join(xdgGitDir, "config"), "");
+it.effect(
+  "address prefers an already-existing $XDG_CONFIG_HOME/git/config, matching real git",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const xdgBase = path.join(home, "xdg-config");
+      const xdgGitDir = path.join(xdgBase, "git");
+      yield* fs.makeDirectory(xdgGitDir, { recursive: true });
+      yield* fs.writeFileString(path.join(xdgGitDir, "config"), "");
 
-    // `Config.string`'s default provider (`ConfigProvider.fromEnv()`) takes
-    // a one-time snapshot of `process.env` at construction — verified by
-    // reading `effect/src/ConfigProvider.ts`'s `fromEnv`, which spreads
-    // `process.env` into a plain object rather than closing over it live.
-    // Because that default is a memoised `Context.Reference`, mutating
-    // `process.env` mid-test is invisible to it once any earlier test in
-    // this file has already triggered its construction. Overriding the
-    // service directly for this one Effect sidesteps that entirely, and is
-    // the correct fix regardless — it doesn't depend on test order.
-    const reconciler = yield* makeGitConfigReconciler.pipe(
-      Effect.provide(withHome(home, path)),
-      Effect.provideService(
-        ConfigProvider.ConfigProvider,
-        ConfigProvider.fromEnv({ env: { XDG_CONFIG_HOME: xdgBase } }),
-      ),
-    );
+      // `Config.string`'s default provider (`ConfigProvider.fromEnv()`) takes
+      // a one-time snapshot of `process.env` at construction — verified by
+      // reading `effect/src/ConfigProvider.ts`'s `fromEnv`, which spreads
+      // `process.env` into a plain object rather than closing over it live.
+      // Because that default is a memoised `Context.Reference`, mutating
+      // `process.env` mid-test is invisible to it once any earlier test in
+      // this file has already triggered its construction. Overriding the
+      // service directly for this one Effect sidesteps that entirely, and is
+      // the correct fix regardless — it doesn't depend on test order.
+      const reconciler = yield* makeGitConfigReconciler.pipe(
+        Effect.provide(withHome(home, path)),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromEnv({ env: { XDG_CONFIG_HOME: xdgBase } }),
+        ),
+      );
 
-    expect(reconciler.address(props())).toBe(path.join(xdgGitDir, "config"));
-  }).pipe(Effect.provide(layer)),
+      expect(reconciler.address(props())).toBe(path.join(xdgGitDir, "config"));
+    }).pipe(Effect.provide(layer)),
 );

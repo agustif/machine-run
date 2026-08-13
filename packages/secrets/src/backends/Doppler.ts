@@ -52,9 +52,7 @@ export const DopplerBackend: SecretBackend = {
           parsed.config,
         ),
         shell: true,
-      }).pipe(
-        Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))),
-      );
+      }).pipe(Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))));
 
       // `--plain` still terminates with a newline that is not part of the
       // stored value.
@@ -62,9 +60,7 @@ export const DopplerBackend: SecretBackend = {
     }),
 };
 
-const parseRef = (
-  ref: string,
-): { project: string; config: string; name: string } | undefined => {
+const parseRef = (ref: string): { project: string; config: string; name: string } | undefined => {
   const parts = ref.split("/");
   if (parts.length !== 3) return undefined;
   const [project, config, name] = parts;

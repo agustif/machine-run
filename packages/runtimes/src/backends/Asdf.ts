@@ -101,7 +101,9 @@ export const makeAsdfBackend = (deps: {
     // that a fresh directory with no `.tool-versions` gets one created
     // exactly there, not at the nearest ancestor's.
     scope._tag === "Global"
-      ? exec({ command: Sh.sh("asdf", "set", "-u", tool, version), shell: true }).pipe(Effect.asVoid)
+      ? exec({ command: Sh.sh("asdf", "set", "-u", tool, version), shell: true }).pipe(
+          Effect.asVoid,
+        )
       : exec({
           command: Sh.sh("asdf", "set", tool, version),
           shell: true,

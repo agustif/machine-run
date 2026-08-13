@@ -41,8 +41,7 @@ const withServer = (body: Uint8Array) =>
       }),
   );
 
-const sha256Hex = (bytes: Uint8Array) =>
-  createHash("sha256").update(bytes).digest("hex");
+const sha256Hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 const layer = Layer.mergeAll(MachinePathsLive(), FetchHttpClient.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -71,91 +70,88 @@ it.effect("observe reports nothing for a file that has not been fetched yet", ()
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
-  "apply fetches, verifies the checksum, and writes the bytes atomically",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const reconciler = yield* makeDownloadReconciler;
-      const { url } = yield* withServer(BODY);
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "font.ttf");
+it.effect("apply fetches, verifies the checksum, and writes the bytes atomically", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const { url } = yield* withServer(BODY);
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "font.ttf");
 
-      const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o644 };
-      const desired = yield* reconciler.desired(props);
-      const result = yield* reconciler.apply(
-        { props, observed: undefined, desired },
-        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-      );
+    const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o644 };
+    const desired = yield* reconciler.desired(props);
+    const result = yield* reconciler.apply(
+      { props, observed: undefined, desired },
+      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+    );
 
-      expect(result.hash).toBe(CHECKSUM);
-      expect(result.mode).toBe(0o644);
+    expect(result.hash).toBe(CHECKSUM);
+    expect(result.mode).toBe(0o644);
 
-      const written = yield* fs.readFile(target);
-      expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
+    const written = yield* fs.readFile(target);
+    expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
 
-      // A later plan reads the file back and finds it already converged.
-      const observedAfter = yield* reconciler.observe(props, {
-        exec: () => Effect.die("not used"),
-      });
-      expect(observedAfter).toBeDefined();
-      expect(reconciler.matches(observedAfter!, desired)).toBe(true);
-    }).pipe(Effect.scoped, Effect.provide(layer)),
+    // A later plan reads the file back and finds it already converged.
+    const observedAfter = yield* reconciler.observe(props, {
+      exec: () => Effect.die("not used"),
+    });
+    expect(observedAfter).toBeDefined();
+    expect(reconciler.matches(observedAfter!, desired)).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect(
-  "a checksum mismatch fails without ever writing the file",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const reconciler = yield* makeDownloadReconciler;
-      const { url } = yield* withServer(BODY);
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "font.ttf");
+it.effect("a checksum mismatch fails without ever writing the file", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const { url } = yield* withServer(BODY);
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "font.ttf");
 
-      const wrongChecksum = sha256Hex(new TextEncoder().encode("something else entirely"));
-      const props: DownloadProps = { url, path: target, checksum: wrongChecksum };
-      const desired = yield* reconciler.desired(props);
+    const wrongChecksum = sha256Hex(new TextEncoder().encode("something else entirely"));
+    const props: DownloadProps = { url, path: target, checksum: wrongChecksum };
+    const desired = yield* reconciler.desired(props);
 
-      const error = yield* reconciler
-        .apply({ props, observed: undefined, desired }, {
+    const error = yield* reconciler
+      .apply(
+        { props, observed: undefined, desired },
+        {
           exec: () => Effect.die("not used"),
           snapshot: () => Effect.succeed(undefined),
-        })
-        .pipe(Effect.flip);
+        },
+      )
+      .pipe(Effect.flip);
 
-      expect(error).toBeInstanceOf(DownloadChecksumMismatch);
-      if (error instanceof DownloadChecksumMismatch) {
-        expect(error.expected).toBe(wrongChecksum);
-        expect(error.actual).toBe(CHECKSUM);
-      }
-      // The whole point: a failed verification must never leave a corrupt
-      // or unexpected file sitting at the destination path.
-      expect(yield* fs.exists(target)).toBe(false);
-    }).pipe(Effect.scoped, Effect.provide(layer)),
+    expect(error).toBeInstanceOf(DownloadChecksumMismatch);
+    if (error instanceof DownloadChecksumMismatch) {
+      expect(error.expected).toBe(wrongChecksum);
+      expect(error.actual).toBe(CHECKSUM);
+    }
+    // The whole point: a failed verification must never leave a corrupt
+    // or unexpected file sitting at the destination path.
+    expect(yield* fs.exists(target)).toBe(false);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect(
-  "observe fails with a typed error when a directory occupies the path",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const reconciler = yield* makeDownloadReconciler;
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "not-a-file");
-      yield* fs.makeDirectory(target);
+it.effect("observe fails with a typed error when a directory occupies the path", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "not-a-file");
+    yield* fs.makeDirectory(target);
 
-      const error = yield* reconciler
-        .observe(
-          { url: "http://127.0.0.1:1/unreachable", path: target, checksum: CHECKSUM },
-          { exec: () => Effect.die("not used") },
-        )
-        .pipe(Effect.flip);
-      expect(error).toBeInstanceOf(DownloadPathIsNotFile);
-    }).pipe(Effect.provide(layer)),
+    const error = yield* reconciler
+      .observe(
+        { url: "http://127.0.0.1:1/unreachable", path: target, checksum: CHECKSUM },
+        { exec: () => Effect.die("not used") },
+      )
+      .pipe(Effect.flip);
+    expect(error).toBeInstanceOf(DownloadPathIsNotFile);
+  }).pipe(Effect.provide(layer)),
 );
 
 it.effect("desired never contacts the network — it reads straight from `checksum`", () =>
@@ -170,41 +166,39 @@ it.effect("desired never contacts the network — it reads straight from `checks
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
-  "refuses an artifact larger than `maxBytes` instead of holding it in memory",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const reconciler = yield* makeDownloadReconciler;
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "big.bin");
+it.effect("refuses an artifact larger than `maxBytes` instead of holding it in memory", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "big.bin");
 
-      const { url } = yield* withServer(BODY);
+    const { url } = yield* withServer(BODY);
 
-      const failure = yield* reconciler
-        .apply(
-          {
-            props: {
-              url,
-              path: target,
-              checksum: CHECKSUM,
-              // Smaller than the fixture, so the guard is what stops it
-              // rather than the fixture being trivially small.
-              maxBytes: 8,
-            },
-            observed: undefined,
-            desired: { path: target, hash: CHECKSUM },
+    const failure = yield* reconciler
+      .apply(
+        {
+          props: {
+            url,
+            path: target,
+            checksum: CHECKSUM,
+            // Smaller than the fixture, so the guard is what stops it
+            // rather than the fixture being trivially small.
+            maxBytes: 8,
           },
-          { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-        )
-        .pipe(Effect.flip);
+          observed: undefined,
+          desired: { path: target, hash: CHECKSUM },
+        },
+        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+      )
+      .pipe(Effect.flip);
 
-      expect(failure).toBeInstanceOf(DownloadTooLarge);
-      // Nothing may land at the target: an artifact too large to verify is
-      // indistinguishable from an unverified one.
-      expect(yield* fs.exists(target)).toBe(false);
-    }).pipe(Effect.provide(layer)),
+    expect(failure).toBeInstanceOf(DownloadTooLarge);
+    // Nothing may land at the target: an artifact too large to verify is
+    // indistinguishable from an unverified one.
+    expect(yield* fs.exists(target)).toBe(false);
+  }).pipe(Effect.provide(layer)),
 );
 
 it.effect(

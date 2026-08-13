@@ -13,7 +13,5 @@
       "path": "../engine"
     }
   ],
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

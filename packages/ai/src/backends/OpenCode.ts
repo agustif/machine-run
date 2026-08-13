@@ -59,7 +59,8 @@ const readDocument = (
     const text = yield* ctx.fs.readFileString(configPath);
     const parsed = yield* Effect.try({
       try: () => JSON.parse(text) as unknown,
-      catch: (cause) => new AiToolConfigMalformed({ tool: "config-opencode", path: configPath, cause }),
+      catch: (cause) =>
+        new AiToolConfigMalformed({ tool: "config-opencode", path: configPath, cause }),
     });
     if (!isRecord(parsed)) {
       return yield* Effect.fail(
@@ -73,11 +74,7 @@ const readDocument = (
     return parsed;
   });
 
-const writeDocument = (
-  configPath: string,
-  doc: Record<string, unknown>,
-  ctx: AiToolContext,
-) =>
+const writeDocument = (configPath: string, doc: Record<string, unknown>, ctx: AiToolContext) =>
   Effect.gen(function* () {
     yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), { recursive: true });
     yield* ctx.fs.writeFileString(configPath, `${JSON.stringify(doc, null, 2)}\n`);

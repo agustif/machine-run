@@ -14,8 +14,8 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@machine-run/dotfiles": "*",
-    "@machine-run/core": "*"
+    "@machine-run/core": "*",
+    "@machine-run/dotfiles": "*"
   },
   "peerDependencies": {
     "alchemy": ">=2.0.0-beta.72",

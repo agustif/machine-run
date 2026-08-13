@@ -40,7 +40,5 @@
       "path": "../system-settings"
     }
   ],
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

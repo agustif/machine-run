@@ -102,7 +102,8 @@ Sixteen packages arrived faster than the invariants tying them together.
       `Machine.Directory`.
 - [ ] **The aggregate layer has no completeness test.** It proves the layer
       resolves; it cannot notice a package was never added. That is precisely
-      the failure it exists to prevent.
+      the failure it exists to prevent. `ExampleCoverage.test.ts` now does the
+      equivalent for resource kinds; the layer needs the same.
 
 ### 3. Close verification gaps CI can now close
 

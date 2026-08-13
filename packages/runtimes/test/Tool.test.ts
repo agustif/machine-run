@@ -56,87 +56,125 @@ it.effect("observe: nothing installed and nothing active reports undefined", () 
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe: an installed-and-active version satisfying the request is reported as both", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRuntimeToolReconciler;
-    const observed = yield* reconciler.observe(
-      props({ version: "22" }),
-      observeCtx(queuedExec([miseEntry("22.11.0", true, true)])),
-    );
-    expect(observed).toEqual({
-      manager: "mise",
-      tool: "node",
-      scope: { _tag: "Global" },
-      version: "22.11.0",
-      installed: true,
-      active: true,
-    });
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "observe: an installed-and-active version satisfying the request is reported as both",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const observed = yield* reconciler.observe(
+        props({ version: "22" }),
+        observeCtx(queuedExec([miseEntry("22.11.0", true, true)])),
+      );
+      expect(observed).toEqual({
+        manager: "mise",
+        tool: "node",
+        scope: { _tag: "Global" },
+        version: "22.11.0",
+        installed: true,
+        active: true,
+      });
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe: installed but not active is reported honestly as installed=true, active=false", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRuntimeToolReconciler;
-    const observed = yield* reconciler.observe(
-      props({ version: "22" }),
-      observeCtx(queuedExec([miseEntry("22.11.0", true, false)])),
-    );
-    expect(observed).toEqual({
-      manager: "mise",
-      tool: "node",
-      scope: { _tag: "Global" },
-      version: "22.11.0",
-      installed: true,
-      active: false,
-    });
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "observe: installed but not active is reported honestly as installed=true, active=false",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const observed = yield* reconciler.observe(
+        props({ version: "22" }),
+        observeCtx(queuedExec([miseEntry("22.11.0", true, false)])),
+      );
+      expect(observed).toEqual({
+        manager: "mise",
+        tool: "node",
+        scope: { _tag: "Global" },
+        version: "22.11.0",
+        installed: true,
+        active: false,
+      });
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("matches: a fuzzy request is satisfied by any installed+active version sharing its prefix", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRuntimeToolReconciler;
-    const desired = yield* reconciler.desired(props({ version: "22" }));
-    expect(
-      reconciler.matches(
-        { manager: "mise", tool: "node", scope: { _tag: "Global" }, version: "22.11.0", installed: true, active: true },
-        desired,
-      ),
-    ).toBe(true);
-    expect(
-      reconciler.matches(
-        { manager: "mise", tool: "node", scope: { _tag: "Global" }, version: "20.11.0", installed: true, active: true },
-        desired,
-      ),
-    ).toBe(false);
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "matches: a fuzzy request is satisfied by any installed+active version sharing its prefix",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const desired = yield* reconciler.desired(props({ version: "22" }));
+      expect(
+        reconciler.matches(
+          {
+            manager: "mise",
+            tool: "node",
+            scope: { _tag: "Global" },
+            version: "22.11.0",
+            installed: true,
+            active: true,
+          },
+          desired,
+        ),
+      ).toBe(true);
+      expect(
+        reconciler.matches(
+          {
+            manager: "mise",
+            tool: "node",
+            scope: { _tag: "Global" },
+            version: "20.11.0",
+            installed: true,
+            active: true,
+          },
+          desired,
+        ),
+      ).toBe(false);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("matches: `active: false` in props is satisfied by an installed version that isn't active", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRuntimeToolReconciler;
-    const desired = yield* reconciler.desired(props({ version: "22", active: false }));
-    expect(
-      reconciler.matches(
-        { manager: "mise", tool: "node", scope: { _tag: "Global" }, version: "22.11.0", installed: true, active: false },
-        desired,
-      ),
-    ).toBe(true);
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "matches: `active: false` in props is satisfied by an installed version that isn't active",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const desired = yield* reconciler.desired(props({ version: "22", active: false }));
+      expect(
+        reconciler.matches(
+          {
+            manager: "mise",
+            tool: "node",
+            scope: { _tag: "Global" },
+            version: "22.11.0",
+            installed: true,
+            active: false,
+          },
+          desired,
+        ),
+      ).toBe(true);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("matches: installed=false never matches, even if the recorded version satisfies the request", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRuntimeToolReconciler;
-    const desired = yield* reconciler.desired(props({ version: "22" }));
-    // The observed shape a drifted asdf pin produces: active names a version
-    // that is no longer installed.
-    expect(
-      reconciler.matches(
-        { manager: "mise", tool: "node", scope: { _tag: "Global" }, version: "22.11.0", installed: false, active: true },
-        desired,
-      ),
-    ).toBe(false);
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "matches: installed=false never matches, even if the recorded version satisfies the request",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const desired = yield* reconciler.desired(props({ version: "22" }));
+      // The observed shape a drifted asdf pin produces: active names a version
+      // that is no longer installed.
+      expect(
+        reconciler.matches(
+          {
+            manager: "mise",
+            tool: "node",
+            scope: { _tag: "Global" },
+            version: "22.11.0",
+            installed: false,
+            active: true,
+          },
+          desired,
+        ),
+      ).toBe(false);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("apply: installs and activates when nothing was observed", () =>
@@ -149,7 +187,10 @@ it.effect("apply: installs and activates when nothing was observed", () =>
     // `apply` re-observes at the end — queue the post-install/activate
     // listing as the *last* fixture the exec sees.
     const exec = capturingExec(miseEntry("22.11.0", true, true), calls);
-    const result = yield* reconciler.apply({ props: p, observed: undefined, desired }, applyCtx(exec));
+    const result = yield* reconciler.apply(
+      { props: p, observed: undefined, desired },
+      applyCtx(exec),
+    );
 
     expect(result).toEqual({
       manager: "mise",
@@ -211,7 +252,9 @@ it.effect("address: is the manager's shared config file, not the manager id alon
     const reconciler = yield* makeRuntimeToolReconciler;
     const global = reconciler.address(props({ tool: "node" }));
     const globalOtherTool = reconciler.address(props({ tool: "python" }));
-    const scoped = reconciler.address(props({ tool: "node", scope: { _tag: "Directory", path: "/proj" } }));
+    const scoped = reconciler.address(
+      props({ tool: "node", scope: { _tag: "Directory", path: "/proj" } }),
+    );
     // Two different tools activated globally on the same manager contend for
     // the same file, so they share an address.
     expect(global).toBe(globalOtherTool);
@@ -224,7 +267,10 @@ it.effect("rustup/uv reject a `tool` other than the one they fix", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRuntimeToolReconciler;
     const error = yield* reconciler
-      .observe(props({ manager: "rustup", tool: "node", version: "1.75.0" }), observeCtx(queuedExec([""])))
+      .observe(
+        props({ manager: "rustup", tool: "node", version: "1.75.0" }),
+        observeCtx(queuedExec([""])),
+      )
       .pipe(Effect.flip);
     expect(error).toBeInstanceOf(RuntimeToolMismatch);
   }).pipe(Effect.provide(layer)),

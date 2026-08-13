@@ -90,37 +90,18 @@ export default Alchemy.Stack<{}>()(
       restartApp: "Finder",
     });
 
-    // Requires `op signin` and a real 1Password item reference first:
+    // Deliberately stops here. Secrets, AI tooling, ssh hosts and Tailscale
+    // each need something this repo cannot provide for you — an authenticated
+    // vault, a reviewed vault directory, an existing `Host` block removed by
+    // hand, a real tailnet — so a recipe meant to be *run* should not carry
+    // them until you have done that setup.
     //
-    // import * as Secrets from "@machine-run/secrets";
-    // yield* Secrets.SecretFile("ssh-key", {
-    //   path: "~/.ssh/id_ed25519",
-    //   source: "1password",
-    //   ref: "op://Personal/SSH Key/private key",
-    //   mode: 0o600,
-    // });
-
-    // Requires reviewing and copying real config/skills content into a
-    // vault directory first — see @machine-run/ai-tools' README:
-    //
-    // import * as AiTools from "@machine-run/ai-tools";
-    // yield* AiTools.aiTools({ home: "~", vaultDir: "~/machine-run/vault/ai-tools" });
-
-    // Requires the old unmanaged Host block removed from ~/.ssh/config first:
-    //
-    // import { sshHost } from "@machine-run/ssh";
-    // yield* sshHost({
-    //   configPath: "~/.ssh/config",
-    //   name: "example",
-    //   hostnames: ["example.com"],
-    //   identityFile: "~/.ssh/id_ed25519",
-    // });
-
-    // Requires a real Tailscale account + an auth key stored in 1Password:
-    //
-    // import * as Tailscale from "@machine-run/tailscale";
-    // yield* Tailscale.TailscaleConnection("tailscale", {
-    //   authKeyRef: "op://Personal/Tailscale/authkey",
-    // });
+    // They used to sit here as commented-out prose, which was worse than not
+    // having them: commented code is never type-checked, so this block went on
+    // naming a package for as long as that package had been deleted without
+    // anything failing. Every resource kind now has a real, compiled call in
+    // `examples/complete-machine` instead, where `tsc -b` and
+    // `packages/machine/test/ExampleCoverage.test.ts` keep it honest. Copy
+    // from there.
   }),
 );

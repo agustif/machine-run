@@ -2,11 +2,7 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import {
-  AiToolConfigMalformed,
-  type AiMcpServerSpec,
-  type AiToolBackend,
-} from "../Backend.ts";
+import { AiToolConfigMalformed, type AiMcpServerSpec, type AiToolBackend } from "../Backend.ts";
 import { classifyCliError, metaToken } from "./cliMcp.ts";
 
 /**
@@ -94,9 +90,11 @@ export const GrokBackend: AiToolBackend = {
           );
         }
 
-        yield* ctx.exec({ command: parts.join(" "), shell: true, env }).pipe(
-          Effect.catchTag("CommandError", (error) => classifyCliError("grok", "grok", error)),
-        );
+        yield* ctx
+          .exec({ command: parts.join(" "), shell: true, env })
+          .pipe(
+            Effect.catchTag("CommandError", (error) => classifyCliError("grok", "grok", error)),
+          );
       }),
   },
 };

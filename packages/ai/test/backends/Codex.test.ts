@@ -12,10 +12,11 @@ const fakeExec =
     Effect.succeed({ exitCode: 0, stdout, stderr: "" });
 
 /** The same, but recording the command string and env it was asked to run. */
-const capturingExec = (
-  stdout: string,
-  calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[],
-): AiToolContext["exec"] =>
+const capturingExec =
+  (
+    stdout: string,
+    calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[],
+  ): AiToolContext["exec"] =>
   (props) => {
     calls.push({ command: props.command, env: props.env ?? {} });
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
@@ -108,7 +109,10 @@ it.effect(
           stderr: "Error: No MCP server named 'doesnotexist' found.",
         }),
       });
-      const observed = yield* CodexBackend.mcp!.observe("doesnotexist", ctxWith(failingExec(error)));
+      const observed = yield* CodexBackend.mcp!.observe(
+        "doesnotexist",
+        ctxWith(failingExec(error)),
+      );
       expect(observed).toBeUndefined();
     }),
 );
@@ -126,29 +130,33 @@ it.effect("observe reports AiToolCliMissing when the codex binary itself is abse
   }),
 );
 
-it.effect("apply builds `codex mcp add` with literal env values quoted directly in the command", () =>
-  Effect.gen(function* () {
-    const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] = [];
-    const desired: AiMcpServerDesired = {
-      command: "npx",
-      args: ["-y", "my-mcp-server"],
-      env: { LOG_LEVEL: "debug" },
-    };
-    yield* CodexBackend.mcp!.apply("testserver", desired, ctxWith(capturingExec("", calls)));
+it.effect(
+  "apply builds `codex mcp add` with literal env values quoted directly in the command",
+  () =>
+    Effect.gen(function* () {
+      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+        [];
+      const desired: AiMcpServerDesired = {
+        command: "npx",
+        args: ["-y", "my-mcp-server"],
+        env: { LOG_LEVEL: "debug" },
+      };
+      yield* CodexBackend.mcp!.apply("testserver", desired, ctxWith(capturingExec("", calls)));
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.command).toBe(
-      "codex mcp add testserver --env LOG_LEVEL=debug -- npx -y my-mcp-server",
-    );
-    expect(calls[0]!.env).toEqual({});
-  }),
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.command).toBe(
+        "codex mcp add testserver --env LOG_LEVEL=debug -- npx -y my-mcp-server",
+      );
+      expect(calls[0]!.env).toEqual({});
+    }),
 );
 
 it.effect(
   "apply never puts a secret-sourced env value into the command string — it goes through Exec's env instead",
   () =>
     Effect.gen(function* () {
-      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] = [];
+      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+        [];
       const secret = Redacted.make("sk-super-secret-value");
       const desired: AiMcpServerDesired = {
         command: "npx",
@@ -166,15 +174,21 @@ it.effect(
     }),
 );
 
-it.effect("apply fails with AiToolFieldUnsupported when asked for headers, which codex has no way to express", () =>
-  Effect.gen(function* () {
-    const desired: AiMcpServerDesired = {
-      url: "https://example.com/mcp",
-      headers: { Authorization: "Bearer x" },
-    };
-    const failure = yield* CodexBackend.mcp!
-      .apply("x", desired, ctxWith(fakeExec("")))
-      .pipe(Effect.flip);
-    expect(failure).toMatchObject({ _tag: "AiToolFieldUnsupported", tool: "codex", field: "headers" });
-  }),
+it.effect(
+  "apply fails with AiToolFieldUnsupported when asked for headers, which codex has no way to express",
+  () =>
+    Effect.gen(function* () {
+      const desired: AiMcpServerDesired = {
+        url: "https://example.com/mcp",
+        headers: { Authorization: "Bearer x" },
+      };
+      const failure = yield* CodexBackend.mcp!.apply("x", desired, ctxWith(fakeExec(""))).pipe(
+        Effect.flip,
+      );
+      expect(failure).toMatchObject({
+        _tag: "AiToolFieldUnsupported",
+        tool: "codex",
+        field: "headers",
+      });
+    }),
 );

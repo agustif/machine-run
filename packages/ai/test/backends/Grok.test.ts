@@ -10,10 +10,11 @@ const fakeExec =
   () =>
     Effect.succeed({ exitCode: 0, stdout, stderr: "" });
 
-const capturingExec = (
-  stdout: string,
-  calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[],
-): AiToolContext["exec"] =>
+const capturingExec =
+  (
+    stdout: string,
+    calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[],
+  ): AiToolContext["exec"] =>
   (props) => {
     calls.push({ command: props.command, env: props.env ?? {} });
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
@@ -78,35 +79,39 @@ it.effect("observe reports AiToolCliMissing when the grok binary itself is absen
       command: "grok mcp list --json",
       reason: new UnexpectedExit({ exitCode: 127, stderr: "grok: command not found" }),
     });
-    const failure = yield* GrokBackend.mcp!
-      .observe("x", ctxWith(failingExec(error)))
-      .pipe(Effect.flip);
+    const failure = yield* GrokBackend.mcp!.observe("x", ctxWith(failingExec(error))).pipe(
+      Effect.flip,
+    );
     expect(failure).toMatchObject({ _tag: "AiToolCliMissing", tool: "grok" });
   }),
 );
 
-it.effect("apply builds a stdio `grok mcp add` with a literal env value quoted in the command", () =>
-  Effect.gen(function* () {
-    const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] = [];
-    const desired: AiMcpServerDesired = {
-      command: "npx",
-      args: ["-y", "@modelcontextprotocol/server-postgres"],
-      env: { LOG_LEVEL: "debug" },
-    };
-    yield* GrokBackend.mcp!.apply("postgres", desired, ctxWith(capturingExec("", calls)));
+it.effect(
+  "apply builds a stdio `grok mcp add` with a literal env value quoted in the command",
+  () =>
+    Effect.gen(function* () {
+      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+        [];
+      const desired: AiMcpServerDesired = {
+        command: "npx",
+        args: ["-y", "@modelcontextprotocol/server-postgres"],
+        env: { LOG_LEVEL: "debug" },
+      };
+      yield* GrokBackend.mcp!.apply("postgres", desired, ctxWith(capturingExec("", calls)));
 
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.command).toBe(
-      "grok mcp add -e LOG_LEVEL=debug postgres -- npx -y @modelcontextprotocol/server-postgres",
-    );
-  }),
+      expect(calls).toHaveLength(1);
+      expect(calls[0]!.command).toBe(
+        "grok mcp add -e LOG_LEVEL=debug postgres -- npx -y @modelcontextprotocol/server-postgres",
+      );
+    }),
 );
 
 it.effect(
   "apply for a remote server never puts a secret header value into the command string",
   () =>
     Effect.gen(function* () {
-      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] = [];
+      const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+        [];
       const secret = Redacted.make("Bearer sk-super-secret-value");
       const desired: AiMcpServerDesired = {
         url: "https://mcp.sentry.dev/mcp",

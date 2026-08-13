@@ -49,11 +49,7 @@ const supportLayers = (calls: { count: number }) =>
     Layer.provideMerge(NodeServices.layer),
   );
 
-const reconcile = (
-  news: FileProps,
-  olds: FileProps | undefined,
-  output: FileState | undefined,
-) =>
+const reconcile = (news: FileProps, olds: FileProps | undefined, output: FileState | undefined) =>
   Effect.gen(function* () {
     const provider = yield* File.Provider;
     return yield* provider.reconcile({
@@ -121,11 +117,7 @@ it.effect("does NOT snapshot on a routine update — both olds and output record
 
     // A routine content change: both `olds` and `output` are this
     // resource's own prior run — not adoption, not a first apply.
-    yield* reconcile(
-      { path: target, content: "v2" },
-      { path: target, content: "v1" },
-      firstOutput,
-    );
+    yield* reconcile({ path: target, content: "v2" }, { path: target, content: "v1" }, firstOutput);
 
     expect(calls.count).toBe(1);
     expect(yield* fs.readFileString(target)).toBe("v2");
@@ -143,11 +135,7 @@ it.effect("does not snapshot at all when the update is a no-op", () => {
     const firstOutput = yield* reconcile({ path: target, content: "v1" }, undefined, undefined);
     expect(calls.count).toBe(1);
 
-    yield* reconcile(
-      { path: target, content: "v1" },
-      { path: target, content: "v1" },
-      firstOutput,
-    );
+    yield* reconcile({ path: target, content: "v1" }, { path: target, content: "v1" }, firstOutput);
 
     expect(calls.count).toBe(1);
   }).pipe(Effect.scoped, Effect.provide(supportLayers(calls)));

@@ -39,9 +39,7 @@ import { firstTokens, lines } from "../../parse.ts";
 export const makeMasBackend = (): PackageManagerBackend => ({
   id: "mas",
   list: (exec) =>
-    exec({ command: "mas list" }).pipe(
-      Effect.map((result) => firstTokens(lines(result.stdout))),
-    ),
+    exec({ command: "mas list" }).pipe(Effect.map((result) => firstTokens(lines(result.stdout)))),
   install: (name, exec) =>
     exec({
       command: Sh.sh("sudo", "mas", "install", name),

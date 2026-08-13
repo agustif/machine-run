@@ -10,11 +10,7 @@ import * as Schema from "effect/Schema";
  * needs no `Exec` and cannot fail, because it only says what literal
  * string(s) belong in `credential.helper`, never runs a command itself.
  */
-export const CredentialHelperBackendId = Schema.Literals([
-  "osxkeychain",
-  "libsecret",
-  "gh",
-]);
+export const CredentialHelperBackendId = Schema.Literals(["osxkeychain", "libsecret", "gh"]);
 
 export type CredentialHelperBackendId = typeof CredentialHelperBackendId.Type;
 

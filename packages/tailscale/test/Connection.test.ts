@@ -36,10 +36,7 @@ it.effect("observe reports absent when the daemon is stopped or logged out (nonz
     // "Tailscale is stopped." when the daemon isn't running — no mention of
     // "command not found"/"ENOENT", so this must not be classified as a
     // missing binary.
-    const observed = yield* reconciler.observe(
-      props,
-      fakeExecFailing("Tailscale is stopped.\n"),
-    );
+    const observed = yield* reconciler.observe(props, fakeExecFailing("Tailscale is stopped.\n"));
     expect(observed).toBeUndefined();
   }),
 );
@@ -80,22 +77,20 @@ it.effect("observe treats unparseable status JSON the same as not connected, not
  * against a directly-constructed `observed` value in the `apply` tests below,
  * which don't go through this code path.
  */
-it.effect(
-  "observe reports the connected state, including hostname, for a live daemon",
-  () =>
-    Effect.gen(function* () {
-      const reconciler = yield* makeTailscaleConnectionReconciler;
-      const observed = yield* reconciler.observe(
-        props,
-        fakeExecOk(JSON.stringify({ BackendState: "Running", Self: { HostName: "my-mac" } })),
-      );
-      // The status decoder takes the command's stdout, not the whole
-      // `{ exitCode, stdout, stderr }` result. Handing it the result object
-      // makes every decode fail, which this resource treats as "cannot
-      // confirm it is running" — so a genuinely connected daemon would read
-      // as absent and every apply would re-run `tailscale up`.
-      expect(observed).toEqual({ hostname: "my-mac" });
-    }),
+it.effect("observe reports the connected state, including hostname, for a live daemon", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeTailscaleConnectionReconciler;
+    const observed = yield* reconciler.observe(
+      props,
+      fakeExecOk(JSON.stringify({ BackendState: "Running", Self: { HostName: "my-mac" } })),
+    );
+    // The status decoder takes the command's stdout, not the whole
+    // `{ exitCode, stdout, stderr }` result. Handing it the result object
+    // makes every decode fail, which this resource treats as "cannot
+    // confirm it is running" — so a genuinely connected daemon would read
+    // as absent and every apply would re-run `tailscale up`.
+    expect(observed).toEqual({ hostname: "my-mac" });
+  }),
 );
 
 it.effect("matches: a recipe that doesn't pin a hostname is satisfied by whatever is live", () =>

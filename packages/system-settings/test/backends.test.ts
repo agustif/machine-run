@@ -83,7 +83,9 @@ it.effect("gsettings backend write shells out to `gsettings set <schema> <key> <
       "'24h'",
       capturingExec("", calls),
     );
-    expect(calls).toEqual(["gsettings set org.gnome.desktop.interface clock-format ''\\''24h'\\'''"]);
+    expect(calls).toEqual([
+      "gsettings set org.gnome.desktop.interface clock-format ''\\''24h'\\'''",
+    ]);
   }),
 );
 
@@ -114,19 +116,21 @@ it.effect("dconf backend reads a key's live value verbatim, GVariant quoting inc
   }),
 );
 
-it.effect("dconf backend distinguishes an unset key (zero bytes) from an empty-string value ('')", () =>
-  Effect.gen(function* () {
-    // `dconf read /test/myuint` after `dconf reset /test/myuint`: genuinely
-    // empty stdout, exit 0 — nothing was ever written here.
-    const unset = yield* DconfBackend.read("/test/myuint", fakeExec(""));
-    expect(unset).toBeUndefined();
+it.effect(
+  "dconf backend distinguishes an unset key (zero bytes) from an empty-string value ('')",
+  () =>
+    Effect.gen(function* () {
+      // `dconf read /test/myuint` after `dconf reset /test/myuint`: genuinely
+      // empty stdout, exit 0 — nothing was ever written here.
+      const unset = yield* DconfBackend.read("/test/myuint", fakeExec(""));
+      expect(unset).toBeUndefined();
 
-    // `dconf write /test/mypath2 '""'` then `dconf read /test/mypath2`:
-    // prints the two characters `''` — an actual empty-string *value*, not
-    // an absent key.
-    const empty = yield* DconfBackend.read("/test/mypath2", fakeExec("''\n"));
-    expect(empty).toBe("''");
-  }),
+      // `dconf write /test/mypath2 '""'` then `dconf read /test/mypath2`:
+      // prints the two characters `''` — an actual empty-string *value*, not
+      // an absent key.
+      const empty = yield* DconfBackend.read("/test/mypath2", fakeExec("''\n"));
+      expect(empty).toBe("''");
+    }),
 );
 
 it.effect("dconf backend reads an array value's canonical GVariant text", () =>

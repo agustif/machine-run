@@ -2,7 +2,8 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import { type SettingsBackend, SettingKeyInvalid } from "../Backend.ts";
 
-const EXPECTED = 'an absolute dconf path starting, but not ending, with "/", e.g. "/org/gnome/desktop/interface/clock-format"';
+const EXPECTED =
+  'an absolute dconf path starting, but not ending, with "/", e.g. "/org/gnome/desktop/interface/clock-format"';
 
 const isValidPath = (key: string): boolean => key.startsWith("/") && !key.endsWith("/");
 
@@ -54,7 +55,9 @@ export const DconfBackend: SettingsBackend = {
 
   write: (key, value, exec) =>
     checkKey(key).pipe(
-      Effect.flatMap((path) => exec({ command: Sh.sh("dconf", "write", path, value), shell: true })),
+      Effect.flatMap((path) =>
+        exec({ command: Sh.sh("dconf", "write", path, value), shell: true }),
+      ),
       Effect.asVoid,
     ),
 };

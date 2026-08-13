@@ -63,8 +63,7 @@ export const SymlinkState = Schema.Struct({
 
 export type SymlinkState = typeof SymlinkState.Type;
 
-export interface Symlink
-  extends Resource<"Machine.Symlink", SymlinkProps, SymlinkState> {}
+export interface Symlink extends Resource<"Machine.Symlink", SymlinkProps, SymlinkState> {}
 
 export const Symlink = Resource<Symlink>("Machine.Symlink");
 
@@ -72,7 +71,11 @@ export const Symlink = Resource<Symlink>("Machine.Symlink");
 const isNotFound = (error: PlatformError) => error.reason._tag === "NotFound";
 
 export const makeSymlinkReconciler: Effect.Effect<
-  Reconciler<SymlinkProps, SymlinkState, PlatformError | SymlinkSourceMissing | SymlinkPathUnreadable>,
+  Reconciler<
+    SymlinkProps,
+    SymlinkState,
+    PlatformError | SymlinkSourceMissing | SymlinkPathUnreadable
+  >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths
 > = Effect.gen(function* () {
@@ -150,9 +153,7 @@ export const makeSymlinkReconciler: Effect.Effect<
     apply: ({ desired }) =>
       Effect.gen(function* () {
         if (!(yield* fs.exists(desired.source))) {
-          return yield* Effect.fail(
-            new SymlinkSourceMissing({ source: desired.source }),
-          );
+          return yield* Effect.fail(new SymlinkSourceMissing({ source: desired.source }));
         }
 
         yield* fs.makeDirectory(path.dirname(desired.path), { recursive: true });

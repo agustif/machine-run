@@ -20,14 +20,7 @@ import { build, parse } from "plist";
  * The cost is that a dictionary whose key is literally `$data` or `$date`
  * cannot be expressed; nothing in `defaults` uses such keys.
  */
-export type PlistValue =
-  | boolean
-  | number
-  | string
-  | PlistData
-  | PlistDate
-  | PlistArray
-  | PlistDict;
+export type PlistValue = boolean | number | string | PlistData | PlistDate | PlistArray | PlistDict;
 
 /**
  * The recursive cases are interfaces rather than inline type literals so that
@@ -169,8 +162,7 @@ const toNative = (value: PlistValue): Result.Result<unknown, PlistDecodeError> =
     const iso = asInstant.value.$date;
     return DateTime.make(iso).pipe(
       Option.match({
-        onNone: () =>
-          Result.fail(new PlistDecodeError({ detail: `"${iso}" is not a valid date` })),
+        onNone: () => Result.fail(new PlistDecodeError({ detail: `"${iso}" is not a valid date` })),
         onSome: (instant) => Result.succeed(DateTime.toDate(instant)),
       }),
     );
@@ -185,13 +177,9 @@ const toNative = (value: PlistValue): Result.Result<unknown, PlistDecodeError> =
     // drift whenever a recipe listed keys in a different order, and rewrite the
     // key on every apply without ever converging. Array order is meaningful and
     // is left alone.
-    const entries = Object.entries(value).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    );
+    const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     const converted = traverse(entries, ([key, inner]) =>
-      toNative(inner as PlistValue).pipe(
-        Result.map((native) => [key, native] as const),
-      ),
+      toNative(inner as PlistValue).pipe(Result.map((native) => [key, native] as const)),
     );
     return Result.map(converted, (pairs) => Object.fromEntries(pairs));
   }
@@ -234,8 +222,7 @@ export const readXml = (xml: string): Result.Result<PlistValue, PlistDecodeError
   Result.flatMap(
     Result.try({
       try: () => parse(xml),
-      catch: (cause) =>
-        new PlistDecodeError({ detail: "not a readable property list", cause }),
+      catch: (cause) => new PlistDecodeError({ detail: "not a readable property list", cause }),
     }),
     fromNative,
   );

@@ -37,12 +37,11 @@ export const TailscaleConnectionState = Schema.Struct({
 
 export type TailscaleConnectionState = typeof TailscaleConnectionState.Type;
 
-export interface TailscaleConnection
-  extends Resource<
-    "Tailscale.Connection",
-    TailscaleConnectionProps,
-    TailscaleConnectionState
-  > {}
+export interface TailscaleConnection extends Resource<
+  "Tailscale.Connection",
+  TailscaleConnectionProps,
+  TailscaleConnectionState
+> {}
 
 export const TailscaleConnection = Resource<TailscaleConnection>("Tailscale.Connection");
 
@@ -77,9 +76,7 @@ export class TailscaleNotInstalled extends Data.TaggedError("TailscaleNotInstall
 const TailscaleStatus = Schema.fromJsonString(
   Schema.Struct({
     BackendState: Schema.optionalKey(Schema.String),
-    Self: Schema.optionalKey(
-      Schema.Struct({ HostName: Schema.optionalKey(Schema.String) }),
-    ),
+    Self: Schema.optionalKey(Schema.Struct({ HostName: Schema.optionalKey(Schema.String) })),
   }),
 );
 
@@ -113,9 +110,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
       Effect.flatMap((result) => decodeStatus(result.stdout)),
       Effect.map((status) =>
         status.BackendState === "Running"
-          ? { ...(status.Self?.HostName !== undefined
-              ? { hostname: status.Self.HostName }
-              : {}) }
+          ? { ...(status.Self?.HostName !== undefined ? { hostname: status.Self.HostName } : {}) }
           : undefined,
       ),
       Effect.catchTag("CommandError", (error) =>
@@ -131,9 +126,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
     ),
 
   desired: (props) =>
-    Effect.succeed(
-      props.hostname !== undefined ? { hostname: props.hostname } : {},
-    ),
+    Effect.succeed(props.hostname !== undefined ? { hostname: props.hostname } : {}),
 
   // A recipe that does not pin a hostname is satisfied by whatever the tailnet
   // already advertises, so only a stated hostname is compared.

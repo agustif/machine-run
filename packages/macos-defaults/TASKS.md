@@ -3,7 +3,7 @@
 `MacOS.Default`, carrying full property-list values via XML.
 
 - [ ] **`-array-add` / `-dict-add` semantics.** These converge toward a
-      *superset* rather than toward equality, so `matches` becomes "contains"
+      _superset_ rather than toward equality, so `matches` becomes "contains"
       and the reconciler contract genuinely differs. Needs an explicit `mode`
       prop rather than a silent merge.
 - [ ] **Byhost preferences** (`defaults -currentHost`) are a separate axis and

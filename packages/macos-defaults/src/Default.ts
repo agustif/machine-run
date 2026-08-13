@@ -46,8 +46,7 @@ export const MacDefaultState = Schema.Struct({
 
 export type MacDefaultState = typeof MacDefaultState.Type;
 
-export interface MacDefault
-  extends Resource<"MacOS.Default", MacDefaultProps, MacDefaultState> {}
+export interface MacDefault extends Resource<"MacOS.Default", MacDefaultProps, MacDefaultState> {}
 
 export const MacDefault = Resource<MacDefault>("MacOS.Default");
 

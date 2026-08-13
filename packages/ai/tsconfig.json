@@ -19,7 +19,5 @@
       "path": "../secrets"
     }
   ],
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

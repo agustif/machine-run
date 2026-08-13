@@ -28,7 +28,5 @@ export const makeSha256: Effect.Effect<
 > = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   return (input: string) =>
-    crypto
-      .digest("SHA-256", new TextEncoder().encode(input))
-      .pipe(Effect.map(Encoding.encodeHex));
+    crypto.digest("SHA-256", new TextEncoder().encode(input)).pipe(Effect.map(Encoding.encodeHex));
 });

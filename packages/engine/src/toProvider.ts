@@ -185,9 +185,7 @@ export const toProvider = <Res extends ResourceLike, State, E, R>(
           if (observed === undefined) return { action: "update" as const };
 
           const desired = yield* reconciler.desired(news);
-          return reconciler.matches(observed, desired)
-            ? undefined
-            : { action: "update" as const };
+          return reconciler.matches(observed, desired) ? undefined : { action: "update" as const };
         }),
 
         reconcile: Effect.fn(function* ({

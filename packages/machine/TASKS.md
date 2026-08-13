@@ -10,7 +10,7 @@ forget a package's `providers()`, so it is only correct while it is complete.
       which is the failure mode this package converts a silent runtime error
       into — but only for resources someone actually uses.
 - [ ] **A test that fails when a package is missing from the merge.** The
-      current smoke test proves the layer *resolves*; it cannot notice that a
+      current smoke test proves the layer _resolves_; it cannot notice that a
       newly added package was never included. Enumerating the workspace and
       asserting every resource-defining package appears would close the gap
       that the aggregate exists to close.

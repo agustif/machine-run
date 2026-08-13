@@ -20,19 +20,14 @@ import {
  * prompts through its own pinentry rather than failing with a
  * "not signed in" message.
  */
-export const PassBackend: SecretBackend = ({
+export const PassBackend: SecretBackend = {
   id: "pass",
   read: (ref, exec) =>
-    exec({ command: Sh.sh("pass", "show", ref), shell: true })
-      .pipe(
-        Effect.map((result) =>
-          Redacted.make(result.stdout.split("\n")[0] ?? ""),
-        ),
-        Effect.catchTag("CommandError", (error) =>
-          Effect.fail(classify(ref, error)),
-        ),
-      ),
-});
+    exec({ command: Sh.sh("pass", "show", ref), shell: true }).pipe(
+      Effect.map((result) => Redacted.make(result.stdout.split("\n")[0] ?? "")),
+      Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))),
+    ),
+};
 
 const classify = (ref: string, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();

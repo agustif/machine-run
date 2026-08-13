@@ -47,8 +47,7 @@ interface TestFileState {
   readonly backupPath?: string;
 }
 
-interface TestFile
-  extends Resource<"Test.Engine.File", TestFileProps, TestFileState> {}
+interface TestFile extends Resource<"Test.Engine.File", TestFileProps, TestFileState> {}
 
 const TestFile = Resource<TestFile>("Test.Engine.File");
 
@@ -69,13 +68,15 @@ const makeTestFileReconciler = (
     const fs = yield* FileSystem.FileSystem;
 
     const read = (path: string) =>
-      fs.exists(path).pipe(
-        Effect.flatMap((exists) =>
-          exists
-            ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
-            : Effect.succeed(undefined),
-        ),
-      );
+      fs
+        .exists(path)
+        .pipe(
+          Effect.flatMap((exists) =>
+            exists
+              ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
+              : Effect.succeed(undefined),
+          ),
+        );
 
     return {
       address: (props) => props.path,
@@ -95,8 +96,7 @@ const makeTestFileReconciler = (
           // recover later (see `Reconciler.unapply`'s doc comment: the
           // engine's own auto-snapshot discards the path for exactly this
           // reason — it has nowhere of its own to put it).
-          const backupPath =
-            observed !== undefined ? yield* ctx.snapshot(props.path) : undefined;
+          const backupPath = observed !== undefined ? yield* ctx.snapshot(props.path) : undefined;
           yield* fs.writeFileString(props.path, props.content);
           return backupPath !== undefined ? { ...desired, backupPath } : desired;
         }),
@@ -124,13 +124,15 @@ const makeNoUnapplyReconciler: Effect.Effect<
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const read = (path: string) =>
-    fs.exists(path).pipe(
-      Effect.flatMap((exists) =>
-        exists
-          ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
-          : Effect.succeed(undefined),
-      ),
-    );
+    fs
+      .exists(path)
+      .pipe(
+        Effect.flatMap((exists) =>
+          exists
+            ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
+            : Effect.succeed(undefined),
+        ),
+      );
 
   return {
     address: (props) => props.path,
@@ -170,7 +172,10 @@ it.effect(
       Effect.gen(function* () {
         yield* fs.writeFileString(target, "hand-written");
         let unapplyCalls = 0;
-        const layer = toProvider(TestFile, makeTestFileReconciler(() => unapplyCalls++));
+        const layer = toProvider(
+          TestFile,
+          makeTestFileReconciler(() => unapplyCalls++),
+        );
 
         yield* Effect.gen(function* () {
           const provider = yield* TestFile.Provider;
@@ -196,7 +201,10 @@ it.effect("under an explicit retain(), delete is a no-op", () =>
     Effect.gen(function* () {
       yield* fs.writeFileString(target, "hand-written");
       let unapplyCalls = 0;
-      const layer = toProvider(TestFile, makeTestFileReconciler(() => unapplyCalls++));
+      const layer = toProvider(
+        TestFile,
+        makeTestFileReconciler(() => unapplyCalls++),
+      );
 
       yield* Effect.gen(function* () {
         const provider = yield* TestFile.Provider;
@@ -247,7 +255,10 @@ it.effect(
     withTempFile((target, fs) =>
       Effect.gen(function* () {
         let unapplyCalls = 0;
-        const layer = toProvider(TestFile, makeTestFileReconciler(() => unapplyCalls++));
+        const layer = toProvider(
+          TestFile,
+          makeTestFileReconciler(() => unapplyCalls++),
+        );
 
         yield* Effect.gen(function* () {
           const provider = yield* TestFile.Provider;
@@ -290,7 +301,10 @@ it.effect(
     withTempFile((target, fs) =>
       Effect.gen(function* () {
         yield* fs.writeFileString(target, "hand-written before machine-run");
-        const layer = toProvider(TestFile, makeTestFileReconciler(() => {}));
+        const layer = toProvider(
+          TestFile,
+          makeTestFileReconciler(() => {}),
+        );
 
         yield* Effect.gen(function* () {
           const provider = yield* TestFile.Provider;
@@ -333,7 +347,10 @@ it.effect("under destroy(), unapply is skipped when the target is already gone",
   withTempFile((target, fs) =>
     Effect.gen(function* () {
       let unapplyCalls = 0;
-      const layer = toProvider(TestFile, makeTestFileReconciler(() => unapplyCalls++));
+      const layer = toProvider(
+        TestFile,
+        makeTestFileReconciler(() => unapplyCalls++),
+      );
 
       yield* Effect.gen(function* () {
         const provider = yield* TestFile.Provider;

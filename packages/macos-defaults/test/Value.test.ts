@@ -41,9 +41,7 @@ it("distinguishes integers from reals", () => {
 
 it("encodes data as base64 and dates as ISO-8601", () => {
   expect(xml(data("SGk="))).toContain("SGk=");
-  expect(xml(date("2026-01-02T03:04:05.000Z"))).toContain(
-    "<date>2026-01-02T03:04:05Z</date>",
-  );
+  expect(xml(date("2026-01-02T03:04:05.000Z"))).toContain("<date>2026-01-02T03:04:05Z</date>");
 });
 
 it("canonicalises differently-formatted XML to one spelling", () => {

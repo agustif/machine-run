@@ -2,11 +2,7 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import {
-  BackendParseError,
-  type RuntimeBackend,
-  type RuntimeScope,
-} from "../Backend.ts";
+import { BackendParseError, type RuntimeBackend, type RuntimeScope } from "../Backend.ts";
 
 /**
  * `mise ls <tool> --json` prints an array — one entry per installed version
@@ -47,8 +43,7 @@ const MiseListEntry = Schema.Struct({
 const MiseList = Schema.fromJsonString(Schema.Array(MiseListEntry));
 const decodeMiseList = Schema.decodeUnknownEffect(MiseList);
 
-const parseFailure = (cause: unknown) =>
-  new BackendParseError({ manager: "mise", cause });
+const parseFailure = (cause: unknown) => new BackendParseError({ manager: "mise", cause });
 
 /**
  * mise's own `--json` listing already answers both halves of an
@@ -71,7 +66,8 @@ export const makeMiseBackend = (deps: {
 }): RuntimeBackend => {
   const { home, path, globalConfigOverride } = deps;
 
-  const globalConfigPath = globalConfigOverride ?? path.join(home, ".config", "mise", "config.toml");
+  const globalConfigPath =
+    globalConfigOverride ?? path.join(home, ".config", "mise", "config.toml");
 
   const configPath = (scope: RuntimeScope): string =>
     scope._tag === "Global" ? globalConfigPath : path.join(scope.path, "mise.toml");
@@ -79,7 +75,11 @@ export const makeMiseBackend = (deps: {
   const observe: RuntimeBackend["observe"] = (tool, scope, exec) =>
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
-      const result = yield* exec({ command: Sh.sh("mise", "ls", tool, "--json"), shell: true, cwd });
+      const result = yield* exec({
+        command: Sh.sh("mise", "ls", tool, "--json"),
+        shell: true,
+        cwd,
+      });
       const entries = yield* decodeMiseList(result.stdout).pipe(
         Effect.catchTag("SchemaError", (cause) => Effect.fail(parseFailure(cause))),
       );

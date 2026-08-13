@@ -44,8 +44,15 @@ manager output) instead of a script dying three steps in.
 machine-run is the framework and carries nobody's real values. Your name,
 email, SSH hosts, package lists and secret references belong in a **separate,
 private repo** that depends on this one.
-[`examples/example-machine`](./examples/example-machine/alchemy.run.ts) is a
-minimal recipe using the primitives directly.
+Two examples, with different jobs:
+
+- [`examples/example-machine`](./examples/example-machine/alchemy.run.ts) — a
+  small recipe meant to actually run, carrying only resources that need no
+  vault, tailnet or prior hand-cleanup.
+- [`examples/complete-machine`](./examples/complete-machine) — every resource
+  kind exercised once, as compiled code. A reference to copy from, not a
+  machine to deploy. `packages/machine/test/ExampleCoverage.test.ts` fails if a
+  new resource kind lands without a call there.
 
 ## What's here
 

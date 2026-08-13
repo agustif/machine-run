@@ -73,8 +73,7 @@ it("reports a BEGIN with no matching END instead of corrupting the file", () => 
 });
 
 it("reports an END that precedes its BEGIN instead of corrupting the file", () => {
-  const inverted =
-    "# machine-run:example END\nbody\n# machine-run:example BEGIN\n";
+  const inverted = "# machine-run:example END\nbody\n# machine-run:example BEGIN\n";
   const result = renderFile(inverted, "example", "x");
   expect(Result.isFailure(result)).toBe(true);
 });

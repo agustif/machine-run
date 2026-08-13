@@ -49,8 +49,7 @@ export const quote = (arg: string): string => {
  * executor.run({ command: sh("brew", "install", name), shell: true }, session)
  * ```
  */
-export const sh = (...argv: readonly string[]): string =>
-  argv.map(quote).join(" ");
+export const sh = (...argv: readonly string[]): string => argv.map(quote).join(" ");
 
 /**
  * Builds a command string that references environment variables rather than
@@ -83,12 +82,10 @@ export const ref = (envVar: string): string => `"$${envVar}"`;
  * invocation and fails. A quoting function cannot see which position its
  * result will land in, so the only correct answer is to always quote.
  */
-export const quotePwsh = (arg: string): string =>
-  `'${arg.replaceAll("'", "''")}'`;
+export const quotePwsh = (arg: string): string => `'${arg.replaceAll("'", "''")}'`;
 
 /** Builds a `shell: "powershell.exe"`-safe command string from an argv array. */
-export const pwsh = (...argv: readonly string[]): string =>
-  argv.map(quotePwsh).join(" ");
+export const pwsh = (...argv: readonly string[]): string => argv.map(quotePwsh).join(" ");
 
 /** References an environment variable in PowerShell: `$env:NAME`. */
 export const refPwsh = (envVar: string): string => `$env:${envVar}`;

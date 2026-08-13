@@ -57,23 +57,31 @@ it.effect("observe reports absent when nothing exists at the path yet", () =>
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "does-not-exist");
 
-    const observed = yield* reconciler.observe({ path: target, remote: "irrelevant" }, notARepoExec);
+    const observed = yield* reconciler.observe(
+      { path: target, remote: "irrelevant" },
+      notARepoExec,
+    );
     expect(observed).toBeUndefined();
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe reports absent for an existing but empty directory — `git clone` accepts one", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeGitRepoReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "empty");
-    yield* fs.makeDirectory(target);
+it.effect(
+  "observe reports absent for an existing but empty directory — `git clone` accepts one",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "empty");
+      yield* fs.makeDirectory(target);
 
-    const observed = yield* reconciler.observe({ path: target, remote: "irrelevant" }, notARepoExec);
-    expect(observed).toBeUndefined();
-  }).pipe(Effect.provide(layer)),
+      const observed = yield* reconciler.observe(
+        { path: target, remote: "irrelevant" },
+        notARepoExec,
+      );
+      expect(observed).toBeUndefined();
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect(
@@ -183,30 +191,32 @@ it.effect("observe surfaces a real command failure rather than treating it as ab
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply clones when nothing was observed, never pre-creating the target directory itself", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeGitRepoReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "fresh-clone");
+it.effect(
+  "apply clones when nothing was observed, never pre-creating the target directory itself",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "fresh-clone");
 
-    const calls: string[] = [];
-    const props = { path: target, remote: "https://example.com/repo.git", branch: "main" };
-    const desired = yield* reconciler.desired(props);
-    const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
-      applyCtx((commandProps) => {
-        calls.push(commandProps.command);
-        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
-      }),
-    );
+      const calls: string[] = [];
+      const props = { path: target, remote: "https://example.com/repo.git", branch: "main" };
+      const desired = yield* reconciler.desired(props);
+      const result = yield* reconciler.apply(
+        { props, observed: undefined, desired },
+        applyCtx((commandProps) => {
+          calls.push(commandProps.command);
+          return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+        }),
+      );
 
-    expect(result).toEqual(desired);
-    expect(calls).toEqual([
-      `git clone --branch main --origin origin https://example.com/repo.git ${target}`,
-    ]);
-  }).pipe(Effect.provide(layer)),
+      expect(result).toEqual(desired);
+      expect(calls).toEqual([
+        `git clone --branch main --origin origin https://example.com/repo.git ${target}`,
+      ]);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("apply adds `origin` when the repository exists but has none configured", () =>
@@ -227,33 +237,31 @@ it.effect("apply adds `origin` when the repository exists but has none configure
     );
 
     expect(result).toEqual(desired);
-    expect(calls).toEqual([
-      `git -C ${target} remote add origin https://example.com/repo.git`,
-    ]);
+    expect(calls).toEqual([`git -C ${target} remote add origin https://example.com/repo.git`]);
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply fixes the remote with set-url — never checkout/reset/clean/pull — when it differs", () =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const reconciler = yield* makeGitRepoReconciler;
-    const target = path.join("/tmp", "existing-repo");
+it.effect(
+  "apply fixes the remote with set-url — never checkout/reset/clean/pull — when it differs",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const target = path.join("/tmp", "existing-repo");
 
-    const calls: string[] = [];
-    const props = { path: target, remote: "https://example.com/new.git" };
-    const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply(
-      { props, observed: { path: target, remote: "https://example.com/old.git" }, desired },
-      applyCtx((commandProps) => {
-        calls.push(commandProps.command);
-        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
-      }),
-    );
+      const calls: string[] = [];
+      const props = { path: target, remote: "https://example.com/new.git" };
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply(
+        { props, observed: { path: target, remote: "https://example.com/old.git" }, desired },
+        applyCtx((commandProps) => {
+          calls.push(commandProps.command);
+          return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+        }),
+      );
 
-    expect(calls).toEqual([
-      `git -C ${target} remote set-url origin https://example.com/new.git`,
-    ]);
-  }).pipe(Effect.provide(layer)),
+      expect(calls).toEqual([`git -C ${target} remote set-url origin https://example.com/new.git`]);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("apply does nothing when the remote already matches", () =>

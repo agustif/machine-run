@@ -42,13 +42,13 @@ was verified by running each CLI, and where the remaining gaps are.
 ## Correctness
 
 - [ ] **Cross-compiled rustup toolchains.** `Rustup.ts` only strips the
-      *default* host's triple suffix off a toolchain name; a toolchain
+      _default_ host's triple suffix off a toolchain name; a toolchain
       installed for a different host keeps its full triple-qualified name, so
       a recipe wanting one has to spell it out completely rather than using a
       bare channel/version. Reasoned, not exercised — no cross toolchain was
       actually installed and observed.
 - [ ] **No caching.** Two `Runtime.Tool` resources naming the same `(manager,
-      tool, scope)` (unusual, not prevented) each shell out independently.
+    tool, scope)` (unusual, not prevented) each shell out independently.
       `system-packages`'s `PackageIndex` is the precedent if this turns out to
       matter; see `docs/notes/runtime-notes.md`'s closing section for why it wasn't
       an obvious win to port over unchanged.

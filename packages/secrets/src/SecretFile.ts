@@ -68,8 +68,11 @@ export const SecretFileState = Schema.Struct({
 
 export type SecretFileState = typeof SecretFileState.Type;
 
-export interface SecretFile
-  extends Resource<"Machine.SecretFile", SecretFileProps, SecretFileState> {}
+export interface SecretFile extends Resource<
+  "Machine.SecretFile",
+  SecretFileProps,
+  SecretFileState
+> {}
 
 export const SecretFile = Resource<SecretFile>("Machine.SecretFile");
 
@@ -81,9 +84,10 @@ export const SecretFile = Resource<SecretFile>("Machine.SecretFile");
  * nothing could see, so a permissions problem would be answered by moving
  * credential material rather than by reporting it.
  */
-export class SecretFilePathUnreadable extends Data.TaggedError(
-  "SecretFilePathUnreadable",
-)<{ path: string; cause: PlatformError }> {
+export class SecretFilePathUnreadable extends Data.TaggedError("SecretFilePathUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
   override get message() {
     return `Could not inspect "${this.path}": ${this.cause.reason._tag}.`;
   }
@@ -125,13 +129,15 @@ export const makeSecretFileReconciler: Effect.Effect<
     observe: (props) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
-        const info = yield* fs.stat(target).pipe(
-          Effect.catchTag("PlatformError", (cause) =>
-            isNotFound(cause)
-              ? Effect.succeed(undefined)
-              : Effect.fail(new SecretFilePathUnreadable({ path: target, cause })),
-          ),
-        );
+        const info = yield* fs
+          .stat(target)
+          .pipe(
+            Effect.catchTag("PlatformError", (cause) =>
+              isNotFound(cause)
+                ? Effect.succeed(undefined)
+                : Effect.fail(new SecretFilePathUnreadable({ path: target, cause })),
+            ),
+          );
         if (info === undefined) return undefined;
         return { path: target, mode: Number(info.mode) & 0o777 };
       }),

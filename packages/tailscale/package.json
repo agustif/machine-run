@@ -14,9 +14,9 @@
     "check": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@machine-run/secrets": "*",
     "@machine-run/core": "*",
-    "@machine-run/engine": "*"
+    "@machine-run/engine": "*",
+    "@machine-run/secrets": "*"
   },
   "peerDependencies": {
     "alchemy": ">=2.0.0-beta.72",

@@ -29,9 +29,7 @@ export const parseUvToolList = (stdout: string): string[] =>
 export const makeUvToolBackend = (): PackageManagerBackend => ({
   id: "uv-tool",
   list: (exec) =>
-    exec({ command: "uv tool list" }).pipe(
-      Effect.map((result) => parseUvToolList(result.stdout)),
-    ),
+    exec({ command: "uv tool list" }).pipe(Effect.map((result) => parseUvToolList(result.stdout))),
   install: (name, exec) =>
     exec({
       command: Sh.sh("uv", "tool", "install", name),

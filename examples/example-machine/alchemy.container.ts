@@ -63,10 +63,7 @@ const providers = Layer.mergeAll(
   Git.providers(),
   Secrets.providers(),
   SystemPackages.providers(),
-).pipe(
-  Layer.provideMerge(Core.services()),
-  Layer.provide(CommandExecutorLive()),
-);
+).pipe(Layer.provideMerge(Core.services()), Layer.provide(CommandExecutorLive()));
 
 export default Alchemy.Stack<{}>()(
   "example-machine-container",
@@ -77,9 +74,12 @@ export default Alchemy.Stack<{}>()(
   Effect.gen(function* () {
     yield* Dotfiles.File("persona-config", {
       path: "~/.gitconfig-personal",
-      content: ["[user]", "\tname = Container Test", "\temail = container-test@example.com", ""].join(
-        "\n",
-      ),
+      content: [
+        "[user]",
+        "\tname = Container Test",
+        "\temail = container-test@example.com",
+        "",
+      ].join("\n"),
     });
 
     // `detectSystemPackageManager` would also pick "apt" on this image (a

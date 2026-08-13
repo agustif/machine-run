@@ -48,22 +48,23 @@ See [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
       `Effect.map`/`orElseSucceed` returning `undefined` becomes
       `Option.none()` the same way. No reconciler's actual observation logic
       needs to change, only how "nothing here" and "here it is" are spelled.
+
 - **Decided against: a generic engine-level reuse of the plan-phase
-      observation via Alchemy's `Artifacts`.** `toProvider` calls `observe`
-      once in `diff` and again inside `reconcile`, immediately before a
-      possible `apply`. For a filesystem resource that second call is a cheap
-      `stat`; for `System.Package` or `Tailscale.Connection` it's a second
-      shell-out per resource, which looks like free savings. It isn't, at the
-      adapter level: `packages/system-packages/src/Package.ts` already solved
-      this problem for itself, deliberately, with **two independent**
-      memoized listings (`planIndex`/`applyIndex`) rather than one shared
-      cache — because a package uninstalled by something else between a
-      human reviewing a plan and confirming it (an `alchemy plan` followed by
-      a separate `apply`) would otherwise still read as present: the
-      plan-time observation populated the cache while the package still
-      existed, and the apply-time re-observe would reuse that stale entry
-      instead of re-listing, silently surviving the very drift the caching
-      exists alongside.
+  observation via Alchemy's `Artifacts`.** `toProvider` calls `observe`
+  once in `diff` and again inside `reconcile`, immediately before a
+  possible `apply`. For a filesystem resource that second call is a cheap
+  `stat`; for `System.Package` or `Tailscale.Connection` it's a second
+  shell-out per resource, which looks like free savings. It isn't, at the
+  adapter level: `packages/system-packages/src/Package.ts` already solved
+  this problem for itself, deliberately, with **two independent**
+  memoized listings (`planIndex`/`applyIndex`) rather than one shared
+  cache — because a package uninstalled by something else between a
+  human reviewing a plan and confirming it (an `alchemy plan` followed by
+  a separate `apply`) would otherwise still read as present: the
+  plan-time observation populated the cache while the package still
+  existed, and the apply-time re-observe would reuse that stale entry
+  instead of re-listing, silently surviving the very drift the caching
+  exists alongside.
 
       A generic `toProvider`-level cache keyed only on `address` would have
       to make the *same* plan/apply distinction to be safe — which is just
@@ -79,6 +80,7 @@ See [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
       version actually correct (e.g., invalidating just the touched manager's
       entry after `apply`, not the whole cache). Shipping a subtly-unsafe
       generic version would be worse than not shipping one.
+
 - [ ] **Bridge `Action`** for side effects that are not state: `killall Dock`
       after a `defaults write` batch, `brew update`. Today `MacOS.Default` runs
       `killall` inside its own apply, so eight dock settings can restart the

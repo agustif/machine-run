@@ -147,13 +147,15 @@ it.effect("npm backend surfaces a typed BackendParseError on malformed JSON", ()
   }),
 );
 
-it.effect("npm backend forces the list command to exit 0, so ELSPROBLEMS can never discard stdout", () =>
-  Effect.gen(function* () {
-    const calls: string[] = [];
-    const backend = makeNpmBackend();
-    yield* backend.list(capturingExec("{}", calls));
-    expect(calls).toEqual(["npm ls -g --depth=0 --json; true"]);
-  }),
+it.effect(
+  "npm backend forces the list command to exit 0, so ELSPROBLEMS can never discard stdout",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const backend = makeNpmBackend();
+      yield* backend.list(capturingExec("{}", calls));
+      expect(calls).toEqual(["npm ls -g --depth=0 --json; true"]);
+    }),
 );
 
 it.effect(
@@ -251,19 +253,18 @@ it.effect("dnf backend install shells out to `sudo dnf install -y <name>`", () =
   }),
 );
 
-it.effect("dnf backend listRepos parses `dnf copr list`, reporting both hub-qualified and bare forms", () =>
-  Effect.gen(function* () {
-    const backend = makeDnfBackend();
-    const listRepos = backend.listRepos;
-    if (!listRepos) throw new Error("dnf backend must implement listRepos");
-    // Real captured output from the same container after
-    // `dnf copr enable -y atim/lazygit`.
-    const repos = yield* listRepos(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n"));
-    expect(repos).toEqual([
-      "copr.fedorainfracloud.org/atim/lazygit",
-      "atim/lazygit",
-    ]);
-  }),
+it.effect(
+  "dnf backend listRepos parses `dnf copr list`, reporting both hub-qualified and bare forms",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeDnfBackend();
+      const listRepos = backend.listRepos;
+      if (!listRepos) throw new Error("dnf backend must implement listRepos");
+      // Real captured output from the same container after
+      // `dnf copr enable -y atim/lazygit`.
+      const repos = yield* listRepos(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n"));
+      expect(repos).toEqual(["copr.fedorainfracloud.org/atim/lazygit", "atim/lazygit"]);
+    }),
 );
 
 it.effect("dnf backend addRepo shells out to `sudo dnf copr enable -y <repo>`", () =>
@@ -343,22 +344,24 @@ it.effect("pacman backend install shells out to `sudo pacman -S --noconfirm <nam
 // yay-bin/yay-bin-debug — never cmatrix.
 // ---------------------------------------------------------------------------
 
-it.effect("yay/paru backends list AUR-origin packages via `pacman -Qmq`, not their own binary", () =>
-  Effect.gen(function* () {
-    const yayCalls: string[] = [];
-    const paruCalls: string[] = [];
-    // Real captured `pacman -Qmq` output after building yay-bin from the AUR.
-    const installedYay = yield* makeYayBackend().list(
-      capturingExec("yay-bin\nyay-bin-debug\n", yayCalls),
-    );
-    const installedParu = yield* makeParuBackend().list(
-      capturingExec("yay-bin\nyay-bin-debug\n", paruCalls),
-    );
-    expect(installedYay).toEqual(["yay-bin", "yay-bin-debug"]);
-    expect(installedParu).toEqual(["yay-bin", "yay-bin-debug"]);
-    expect(yayCalls).toEqual(["pacman -Qmq"]);
-    expect(paruCalls).toEqual(["pacman -Qmq"]);
-  }),
+it.effect(
+  "yay/paru backends list AUR-origin packages via `pacman -Qmq`, not their own binary",
+  () =>
+    Effect.gen(function* () {
+      const yayCalls: string[] = [];
+      const paruCalls: string[] = [];
+      // Real captured `pacman -Qmq` output after building yay-bin from the AUR.
+      const installedYay = yield* makeYayBackend().list(
+        capturingExec("yay-bin\nyay-bin-debug\n", yayCalls),
+      );
+      const installedParu = yield* makeParuBackend().list(
+        capturingExec("yay-bin\nyay-bin-debug\n", paruCalls),
+      );
+      expect(installedYay).toEqual(["yay-bin", "yay-bin-debug"]);
+      expect(installedParu).toEqual(["yay-bin", "yay-bin-debug"]);
+      expect(yayCalls).toEqual(["pacman -Qmq"]);
+      expect(paruCalls).toEqual(["pacman -Qmq"]);
+    }),
 );
 
 it.effect("yay backend install shells out to `yay -S --noconfirm <name>`", () =>
@@ -415,17 +418,19 @@ it.effect("uv-tool backend install shells out to `uv tool install <name>`", () =
   }),
 );
 
-it.effect("gem backend parses real `gem list --local` output, including multi-version and default-gem lines", () =>
-  Effect.gen(function* () {
-    // Real captured output (macOS system Ruby 2.6.10): a bundled default
-    // gem, and a gem installed at three different versions via two
-    // `gem install --user-install rake -v ...` calls.
-    const backend = makeGemBackend();
-    const installed = yield* backend.list(
-      fakeExec("bigdecimal (default: 1.4.1)\nrake (13.4.2, 13.0.6, 12.3.3)\n"),
-    );
-    expect(installed).toEqual(["bigdecimal", "rake"]);
-  }),
+it.effect(
+  "gem backend parses real `gem list --local` output, including multi-version and default-gem lines",
+  () =>
+    Effect.gen(function* () {
+      // Real captured output (macOS system Ruby 2.6.10): a bundled default
+      // gem, and a gem installed at three different versions via two
+      // `gem install --user-install rake -v ...` calls.
+      const backend = makeGemBackend();
+      const installed = yield* backend.list(
+        fakeExec("bigdecimal (default: 1.4.1)\nrake (13.4.2, 13.0.6, 12.3.3)\n"),
+      );
+      expect(installed).toEqual(["bigdecimal", "rake"]);
+    }),
 );
 
 it.effect("gem backend install shells out to `gem install --user-install <name>`", () =>
@@ -801,16 +806,18 @@ it.effect(
     }),
 );
 
-it.effect("Repo reconciler observe: dnf, matching a COPR named as owner/project against `dnf copr list`'s hub-qualified output", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRepoReconciler;
-    const observed = yield* reconciler.observe(
-      { manager: "dnf", repo: "atim/lazygit" },
-      // Real captured `dnf copr list` output — see Dnf.ts's doc comment.
-      planCtx(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n")),
-    );
-    expect(observed).toEqual({ manager: "dnf", repo: "atim/lazygit" });
-  }),
+it.effect(
+  "Repo reconciler observe: dnf, matching a COPR named as owner/project against `dnf copr list`'s hub-qualified output",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const observed = yield* reconciler.observe(
+        { manager: "dnf", repo: "atim/lazygit" },
+        // Real captured `dnf copr list` output — see Dnf.ts's doc comment.
+        planCtx(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n")),
+      );
+      expect(observed).toEqual({ manager: "dnf", repo: "atim/lazygit" });
+    }),
 );
 
 it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <repo>`", () =>

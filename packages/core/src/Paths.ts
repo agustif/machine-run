@@ -15,11 +15,7 @@ import { homedir } from "node:os";
  */
 export const expandHome = (path: Path.Path, target: string, home: string): string => {
   const expanded =
-    target === "~"
-      ? home
-      : target.startsWith("~/")
-        ? path.join(home, target.slice(2))
-        : target;
+    target === "~" ? home : target.startsWith("~/") ? path.join(home, target.slice(2)) : target;
   return path.resolve(expanded);
 };
 
@@ -74,5 +70,4 @@ export const MachinePathsLive = () =>
  * or a `SystemError` whose `_tag` is a normalised `SystemErrorTag` — so this
  * is a typed field read rather than a match on a message.
  */
-export const isNotFound = (error: PlatformError): boolean =>
-  error.reason._tag === "NotFound";
+export const isNotFound = (error: PlatformError): boolean => error.reason._tag === "NotFound";

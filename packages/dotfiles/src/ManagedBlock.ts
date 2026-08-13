@@ -91,8 +91,11 @@ export const ManagedBlockState = Schema.Struct({
 
 export type ManagedBlockState = typeof ManagedBlockState.Type;
 
-export interface ManagedBlock
-  extends Resource<"Machine.ManagedBlock", ManagedBlockProps, ManagedBlockState> {}
+export interface ManagedBlock extends Resource<
+  "Machine.ManagedBlock",
+  ManagedBlockProps,
+  ManagedBlockState
+> {}
 
 export const ManagedBlock = Resource<ManagedBlock>("Machine.ManagedBlock");
 
@@ -150,9 +153,7 @@ export const readBlock = (
   if (beginIndex === -1) return undefined;
   const endIndex = existing.indexOf(end, beginIndex + begin.length);
   if (endIndex === -1) return undefined;
-  return normalize(
-    existing.slice(beginIndex + begin.length, endIndex).replace(/^\n/, ""),
-  );
+  return normalize(existing.slice(beginIndex + begin.length, endIndex).replace(/^\n/, ""));
 };
 
 /**
@@ -178,15 +179,11 @@ export const renderFile = (
   // END is searched for after BEGIN so an inverted pair is detected rather
   // than spliced into nonsense.
   const endIndex =
-    beginIndex === -1
-      ? existing.indexOf(end)
-      : existing.indexOf(end, beginIndex + begin.length);
+    beginIndex === -1 ? existing.indexOf(end) : existing.indexOf(end, beginIndex + begin.length);
 
   if (beginIndex === -1 && endIndex === -1) {
     if (options.position === "prepend") {
-      return Result.succeed(
-        existing.length === 0 ? `${region}\n` : `${region}\n${existing}`,
-      );
+      return Result.succeed(existing.length === 0 ? `${region}\n` : `${region}\n${existing}`);
     }
     const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
     return Result.succeed(`${existing}${separator}${region}\n`);
@@ -209,11 +206,7 @@ export const renderFile = (
 };
 
 export const makeManagedBlockReconciler: Effect.Effect<
-  Reconciler<
-    ManagedBlockProps,
-    ManagedBlockState,
-    PlatformError | ManagedBlockMalformed
-  >,
+  Reconciler<ManagedBlockProps, ManagedBlockState, PlatformError | ManagedBlockMalformed>,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
 > = Effect.gen(function* () {
@@ -280,5 +273,4 @@ export const makeManagedBlockReconciler: Effect.Effect<
   };
 });
 
-export const ManagedBlockProvider = () =>
-  toProvider(ManagedBlock, makeManagedBlockReconciler);
+export const ManagedBlockProvider = () => toProvider(ManagedBlock, makeManagedBlockReconciler);

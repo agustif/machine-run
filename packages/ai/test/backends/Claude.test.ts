@@ -160,16 +160,12 @@ it.effect(
       yield* fs.writeFileString(path.join(home, ".claude.json"), "not json at all {{{");
 
       const ctx: AiToolContext = { exec: dieExec, fs, path, home };
-      const error = yield* ClaudeBackend.mcp!.apply(
-        "first",
-        { command: "npx" },
-        ctx,
-      ).pipe(Effect.flip);
+      const error = yield* ClaudeBackend.mcp!.apply("first", { command: "npx" }, ctx).pipe(
+        Effect.flip,
+      );
 
       expect(error).toMatchObject({ _tag: "AiToolConfigMalformed" });
       // Untouched — a malformed file is never overwritten to "fix" it.
-      expect(yield* fs.readFileString(path.join(home, ".claude.json"))).toBe(
-        "not json at all {{{",
-      );
+      expect(yield* fs.readFileString(path.join(home, ".claude.json"))).toBe("not json at all {{{");
     }).pipe(Effect.provide(layer)),
 );

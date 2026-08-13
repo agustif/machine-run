@@ -52,10 +52,7 @@ it.effect(
 
       const props = { path: linkPath, source: realSource };
       const desired = yield* reconciler.desired(props);
-      const result = yield* reconciler.apply(
-        { props, observed: undefined, desired },
-        applyCtx,
-      );
+      const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
 
       expect(result.source).toBe(realSource);
       expect(yield* fs.readLink(linkPath)).toBe(realSource);
@@ -128,9 +125,7 @@ it.effect(
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped();
 
-      const reconciler = yield* makeSymlinkReconciler.pipe(
-        Effect.provide(withHome(home, path)),
-      );
+      const reconciler = yield* makeSymlinkReconciler.pipe(Effect.provide(withHome(home, path)));
 
       const realSource = path.join(home, "vault");
       yield* fs.writeFileString(realSource, "reviewed content");

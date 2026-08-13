@@ -1,0 +1,25 @@
+{
+  "name": "complete-machine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "plan": "alchemy plan"
+  },
+  "dependencies": {
+    "@machine-run/ai": "*",
+    "@machine-run/dotfiles": "*",
+    "@machine-run/git": "*",
+    "@machine-run/machine": "*",
+    "@machine-run/macos-defaults": "*",
+    "@machine-run/runtimes": "*",
+    "@machine-run/secrets": "*",
+    "@machine-run/shell": "*",
+    "@machine-run/ssh": "*",
+    "@machine-run/system-packages": "*",
+    "@machine-run/system-settings": "*",
+    "@machine-run/tailscale": "*",
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.108"
+  }
+}
