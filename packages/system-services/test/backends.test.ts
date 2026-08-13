@@ -350,28 +350,32 @@ const BREW_INFO_NEVER_STARTED = JSON.stringify([
 const brewInfoWith = (registered: boolean, loaded: boolean, running: boolean): string =>
   JSON.stringify([{ registered, loaded, running }]);
 
-it.effect("brew-services backend: observe maps registered/loaded/running to installed/enabled/running", () =>
-  Effect.gen(function* () {
-    const backend = makeBrewServicesBackend();
-    const observed = yield* backend.observe(
-      "transmission-cli",
-      undefined,
-      fakeExec(BREW_INFO_NEVER_STARTED),
-    );
-    expect(observed).toEqual({ installed: false, enabled: false, running: false });
-  }),
+it.effect(
+  "brew-services backend: observe maps registered/loaded/running to installed/enabled/running",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeBrewServicesBackend();
+      const observed = yield* backend.observe(
+        "transmission-cli",
+        undefined,
+        fakeExec(BREW_INFO_NEVER_STARTED),
+      );
+      expect(observed).toEqual({ installed: false, enabled: false, running: false });
+    }),
 );
 
-it.effect("brew-services backend: observe reports a fully registered, loaded and running service", () =>
-  Effect.gen(function* () {
-    const backend = makeBrewServicesBackend();
-    const observed = yield* backend.observe(
-      "some-formula",
-      undefined,
-      fakeExec(brewInfoWith(true, true, true)),
-    );
-    expect(observed).toEqual({ installed: true, enabled: true, running: true });
-  }),
+it.effect(
+  "brew-services backend: observe reports a fully registered, loaded and running service",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeBrewServicesBackend();
+      const observed = yield* backend.observe(
+        "some-formula",
+        undefined,
+        fakeExec(brewInfoWith(true, true, true)),
+      );
+      expect(observed).toEqual({ installed: true, enabled: true, running: true });
+    }),
 );
 
 it.effect("brew-services backend: converge(true, true) issues a single `start`", () =>
@@ -383,13 +387,15 @@ it.effect("brew-services backend: converge(true, true) issues a single `start`",
   }),
 );
 
-it.effect("brew-services backend: converge(true, false) starts then kills — no single verb reaches this from cold", () =>
-  Effect.gen(function* () {
-    const backend = makeBrewServicesBackend();
-    const { exec, calls } = queuedExec([{ stdout: "" }, { stdout: "" }]);
-    yield* backend.converge("thing", undefined, { enabled: true, running: false }, exec);
-    expect(calls).toEqual(["brew services start thing", "brew services kill thing"]);
-  }),
+it.effect(
+  "brew-services backend: converge(true, false) starts then kills — no single verb reaches this from cold",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeBrewServicesBackend();
+      const { exec, calls } = queuedExec([{ stdout: "" }, { stdout: "" }]);
+      yield* backend.converge("thing", undefined, { enabled: true, running: false }, exec);
+      expect(calls).toEqual(["brew services start thing", "brew services kill thing"]);
+    }),
 );
 
 it.effect("brew-services backend: converge(false, true) stops then runs unregistered", () =>

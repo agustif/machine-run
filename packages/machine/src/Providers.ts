@@ -8,6 +8,7 @@ import * as Secrets from "@machine-run/secrets";
 import * as Shell from "@machine-run/shell";
 import * as Ssh from "@machine-run/ssh";
 import * as SystemPackages from "@machine-run/system-packages";
+import * as SystemServices from "@machine-run/system-services";
 import * as SystemSettings from "@machine-run/system-settings";
 import * as Tailscale from "@machine-run/tailscale";
 import { CommandExecutorLive } from "alchemy/Command";
@@ -103,6 +104,7 @@ export const providers = () =>
     Shell.providers(),
     Ssh.providers(),
     SystemPackages.providers(),
+    SystemServices.providers(),
     SystemSettings.providers(),
     Tailscale.providers(),
   ).pipe(Layer.provideMerge(coreServices()), Layer.provide(CommandExecutorLive()));

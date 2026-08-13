@@ -24,20 +24,20 @@ rather than an incidental widening here.
       `enabled` here means "currently loaded" (`launchctl list <label>`
       succeeds), not launchd's own persistent override
       (`launchctl enable`/`disable`, inspectable with `launchctl
-      print-disabled`), which survives unload/reboot and can make a future
+    print-disabled`), which survives unload/reboot and can make a future
       `load` fail outright. Real example from this machine:
       `launchctl print-disabled gui/501` lists several real services with
       that override set. A `System.Service` recipe that asks for
       `enabled: true` against a job carrying that override will get an
       honest `CommandError` from a failed `load` — not a silent no-op — but
-      diagnosing *why* requires reading `print-disabled` by hand today.
+      diagnosing _why_ requires reading `print-disabled` by hand today.
       Worth a fourth boolean, or at least a mention in the error path, once
       there's a real recipe that hits it.
 
 - [ ] **`systemd-user`'s `enable`/`disable` were never executed**, only
       documented (`man7.org/linux/man-pages/man1/systemctl.1.html`) — every
       other command in that backend (`is-enabled`, `is-active`, `start`,
-      `stop`) *was* run for real against a genuinely booted `systemd --user`
+      `stop`) _was_ run for real against a genuinely booted `systemd --user`
       instance in a container (see `backends/linux/SystemdUser.ts`'s doc
       comment for the exact transcript). The gap is narrow and specific:
       re-run `converge` end-to-end in the same container setup once nothing
@@ -76,7 +76,7 @@ rather than an incidental widening here.
       right response to a recipe line being removed. Worth revisiting
       alongside `system-settings`' `gsettings reset`/`dconf reset` idea,
       since `brew services stop`/`launchctl unload`/`systemctl --user
-      disable` are all real, honest reversals a future `unapply` could use.
+    disable` are all real, honest reversals a future `unapply` could use.
 
 ## Smaller, lower-priority
 

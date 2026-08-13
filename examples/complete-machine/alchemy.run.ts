@@ -1,10 +1,6 @@
-import { services as coreServices } from "@machine-run/core";
 import * as Machine from "@machine-run/machine";
-import * as SystemServices from "@machine-run/system-services";
 import * as Alchemy from "alchemy";
-import { CommandExecutorLive } from "alchemy/Command";
 import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
 import { ai } from "./recipes/ai.ts";
 import { dotfiles } from "./recipes/dotfiles.ts";
 import { git } from "./recipes/git.ts";
@@ -35,25 +31,12 @@ import { shell } from "./recipes/shell.ts";
  *
  * The recipes are split by domain rather than kept in one file so that adding a
  * resource means editing the module that owns its domain.
- *
- * `@machine-run/system-services` is not yet folded into `Machine.providers()`
- * itself (see `docs/TASKS.md`), so its own `providers()` is merged in here
- * directly — exactly the escape hatch `packages/machine/src/Providers.ts`'s
- * own doc comment describes for a package the aggregate doesn't cover yet.
- * Unlike `Machine.providers()` (which already closes over its own
- * `Core.services()`/`CommandExecutorLive()` internally), `SystemServices.providers()`
- * leaves those to the composing recipe — the same convention every resource
- * package here follows, see that package's own `Providers.ts` — so this
- * stack supplies them once more on the outside, the identical shape
- * `packages/machine/src/Providers.ts`'s final `.pipe(...)` uses.
+
  */
 export default Alchemy.Stack<{}>()(
   "complete-machine",
   {
-    providers: Layer.mergeAll(Machine.providers(), SystemServices.providers()).pipe(
-      Layer.provideMerge(coreServices()),
-      Layer.provide(CommandExecutorLive()),
-    ),
+    providers: Machine.providers(),
     state: Alchemy.localState(),
   },
   Effect.gen(function* () {

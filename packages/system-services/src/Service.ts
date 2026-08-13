@@ -232,10 +232,7 @@ export const makeServiceReconciler: Effect.Effect<
         // (`gsettings set`'s container-verified silent no-op is the model
         // case), not a hypothetical this resource is inventing a check for.
         const reobserved = yield* backend.observe(props.name, props.path, ctx.exec);
-        if (
-          reobserved.enabled !== desired.enabled ||
-          reobserved.running !== desired.running
-        ) {
+        if (reobserved.enabled !== desired.enabled || reobserved.running !== desired.running) {
           return yield* Effect.fail(
             new ServiceNotConverged({
               backend: props.backend,

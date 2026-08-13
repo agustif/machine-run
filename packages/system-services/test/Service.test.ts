@@ -97,68 +97,77 @@ it.effect("desired: enabled and running can each be pinned false independently",
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("matches: true iff backend, name, enabled and running all agree — installed is not compared", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeServiceReconciler;
-    const desired = {
-      backend: "brew-services" as const,
-      name: "thing",
-      installed: true,
-      enabled: true,
-      running: true,
-    };
-    // Same enabled/running, but the definition file happens to be gone —
-    // still matches, since a fully-off request doesn't compare `installed`
-    // and this request isn't fully off, but `installed` is excluded either
-    // way — see `Service.ts`'s doc comment.
-    expect(reconciler.matches({ ...desired, installed: false }, desired)).toBe(true);
-    expect(reconciler.matches({ ...desired, enabled: false }, desired)).toBe(false);
-    expect(reconciler.matches({ ...desired, running: false }, desired)).toBe(false);
-    expect(reconciler.matches({ ...desired, name: "other" }, desired)).toBe(false);
-    expect(reconciler.matches({ ...desired, backend: "launchd" }, desired)).toBe(false);
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "matches: true iff backend, name, enabled and running all agree — installed is not compared",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      const desired = {
+        backend: "brew-services" as const,
+        name: "thing",
+        installed: true,
+        enabled: true,
+        running: true,
+      };
+      // Same enabled/running, but the definition file happens to be gone —
+      // still matches, since a fully-off request doesn't compare `installed`
+      // and this request isn't fully off, but `installed` is excluded either
+      // way — see `Service.ts`'s doc comment.
+      expect(reconciler.matches({ ...desired, installed: false }, desired)).toBe(true);
+      expect(reconciler.matches({ ...desired, enabled: false }, desired)).toBe(false);
+      expect(reconciler.matches({ ...desired, running: false }, desired)).toBe(false);
+      expect(reconciler.matches({ ...desired, name: "other" }, desired)).toBe(false);
+      expect(reconciler.matches({ ...desired, backend: "launchd" }, desired)).toBe(false);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe: never returns undefined — a fully absent service is a defined, all-false state", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeServiceReconciler;
-    // Real captured `brew services info transmission-cli --json` shape (see
-    // `test/backends.test.ts`), never started on this machine.
-    const observed = yield* reconciler.observe(
-      props({ name: "transmission-cli" }),
-      observeCtx(queuedExec([brewInfo(false, false, false)]).exec),
-    );
-    expect(observed).toEqual({
-      backend: "brew-services",
-      name: "transmission-cli",
-      installed: false,
-      enabled: false,
-      running: false,
-    });
-  }).pipe(Effect.provide(layer)),
+it.effect(
+  "observe: never returns undefined — a fully absent service is a defined, all-false state",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      // Real captured `brew services info transmission-cli --json` shape (see
+      // `test/backends.test.ts`), never started on this machine.
+      const observed = yield* reconciler.observe(
+        props({ name: "transmission-cli" }),
+        observeCtx(queuedExec([brewInfo(false, false, false)]).exec),
+      );
+      expect(observed).toEqual({
+        backend: "brew-services",
+        name: "transmission-cli",
+        installed: false,
+        enabled: false,
+        running: false,
+      });
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply: converges brew-services to (enabled: true, running: true) via a single `start`", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeServiceReconciler;
-    const p = props({ name: "thing" });
-    const desired = yield* reconciler.desired(p);
-    const { exec, calls } = queuedExec([
-      "", // `brew services start thing`
-      brewInfo(true, true, true), // the re-observe `brew services info thing --json`
-    ]);
+it.effect(
+  "apply: converges brew-services to (enabled: true, running: true) via a single `start`",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      const p = props({ name: "thing" });
+      const desired = yield* reconciler.desired(p);
+      const { exec, calls } = queuedExec([
+        "", // `brew services start thing`
+        brewInfo(true, true, true), // the re-observe `brew services info thing --json`
+      ]);
 
-    const result = yield* reconciler.apply({ props: p, observed: undefined, desired }, applyCtx(exec));
+      const result = yield* reconciler.apply(
+        { props: p, observed: undefined, desired },
+        applyCtx(exec),
+      );
 
-    expect(result).toEqual({
-      backend: "brew-services",
-      name: "thing",
-      installed: true,
-      enabled: true,
-      running: true,
-    });
-    expect(calls).toEqual(["brew services start thing", "brew services info thing --json"]);
-  }).pipe(Effect.provide(layer)),
+      expect(result).toEqual({
+        backend: "brew-services",
+        name: "thing",
+        installed: true,
+        enabled: true,
+        running: true,
+      });
+      expect(calls).toEqual(["brew services start thing", "brew services info thing --json"]);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect(

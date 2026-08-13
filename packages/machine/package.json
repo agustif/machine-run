@@ -24,6 +24,7 @@
     "@machine-run/shell": "*",
     "@machine-run/ssh": "*",
     "@machine-run/system-packages": "*",
+    "@machine-run/system-services": "*",
     "@machine-run/system-settings": "*",
     "@machine-run/tailscale": "*"
   },

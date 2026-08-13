@@ -130,7 +130,12 @@ export const makeLaunchdBackend = (deps: {
       return { installed, ...loaded } satisfies ServiceObservation;
     });
 
-  const setLoaded = (name: string, explicitPath: string | undefined, enabled: boolean, exec: Exec) =>
+  const setLoaded = (
+    name: string,
+    explicitPath: string | undefined,
+    enabled: boolean,
+    exec: Exec,
+  ) =>
     Boolean.match(enabled, {
       onTrue: () =>
         exec({
