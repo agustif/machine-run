@@ -44,6 +44,19 @@ export const renderPosixAlias = (name: string, command: string): string =>
   `alias ${name}=${Sh.quote(command)}`;
 
 /**
+ * `name() { body }`, POSIX's ordinary function syntax — identical in zsh and
+ * bash. `body` is one or more lines of shell source, indented for
+ * readability only; POSIX functions expose their caller's positional
+ * parameters as `$1`, `$2`, ... and `$@` with nothing to declare, which is
+ * exactly the capability `alias` lacks. Verified in a container (Ubuntu
+ * 24.04): a function defined this way in both bash and zsh, called with two
+ * arguments, read them back as `$1`/`$2` and via `$@` — see
+ * `docs/shell-notes.md`.
+ */
+export const renderPosixFunction = (name: string, body: string): string =>
+  [`${name}() {`, ...body.split("\n").map((line) => `  ${line}`), "}"].join("\n");
+
+/**
  * The `case "$PWD" in ...` glob dispatch shared by every POSIX hook body.
  *
  * `pathGlob` is inserted unescaped: it is meant to be interpreted as a shell

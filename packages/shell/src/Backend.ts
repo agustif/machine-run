@@ -53,6 +53,30 @@ export interface ShellBackend {
   readonly renderPathEntry: (dir: string) => string;
   /** Renders a shell alias/function equivalent to `alias name=command`. */
   readonly renderAlias: (name: string, command: string) => string;
+  /**
+   * Renders a named function taking positional arguments — what `alias`
+   * cannot express, since an alias is a fixed substitution with no parameter
+   * of its own (see `backends/Pwsh.ts`'s `renderAlias`, which already
+   * generates a one-off forwarding function to make `alias` work at all on a
+   * shell with no native alias-with-arguments form).
+   *
+   * `body` is source in `props.shell`'s own syntax, exactly like
+   * `renderAlias`'s `command` and `renderHook`'s `command` — this package
+   * never translates one shell's dialect into another's. Every backend
+   * except nu's exposes arguments the same way that shell already does for
+   * any function (`$1`/`$2`/`$@` for zsh/bash, `$argv` for fish, `$args` for
+   * pwsh) with no signature to declare, so `params` is ignored there. nu's
+   * `def` is genuinely different: nu functions are statically parameterised,
+   * so there is no implicit "argv" a body can read — `params` names the
+   * positional parameters nu's `def` must declare for `body` to reference
+   * them at all. Passing `params` for a backend that ignores it is harmless;
+   * omitting it for nu produces a valid zero-argument function.
+   */
+  readonly renderFunction: (
+    name: string,
+    body: string,
+    params?: ReadonlyArray<string>,
+  ) => string;
   /** Renders a directory-change hook — see {@link ShellHookProps}. */
   readonly renderHook: (props: ShellHookProps) => string;
   /**

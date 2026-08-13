@@ -27,10 +27,41 @@ It also owns the only `unapply` in the codebase.
 
 ## Coverage
 
-- [ ] **`Shell.Function`.** `alias` cannot express a shell function, and the
-      difference is real: an alias cannot take positional arguments. The pwsh
-      backend already fakes functions to implement `alias`, which is a hint that
-      the missing concept is functions, not aliases.
+- [x] **`Shell.Function`.** Added as `func` in `Profile.ts`, following the
+      existing `alias`/`envVar`/`hook` shape exactly — a plain function
+      returning a `Dotfiles.ManagedBlock`, not a new `Resource` type. Backend
+      seam extended with `ShellBackend.renderFunction(name, body, params?)`,
+      one implementation per shell:
+      - zsh/bash share `renderPosixFunction` (`backends/posix.ts`):
+        `name() { body }`, positional args via `$1`/`$2`/`$@` — no
+        declaration needed.
+      - fish: `function name ... end`, args via `$argv`/`$argv[n]`.
+      - pwsh: `function name { body }`, args via the automatic `$args` array
+        — a real function body, distinct from `renderAlias`'s
+        forward-via-`@args` trick for aliasing another command.
+      - nu: `def name [params] { body }` — nu's `def` is genuinely different
+        from every other backend here: it's statically parameterised, so
+        there's no implicit "argv" a body can read. `FunctionProps.params`
+        (ignored by every other backend) names the positional parameters nu's
+        signature must declare; omitting it declares a zero-argument
+        function, and a caller can pass `["...rest"]` for nu's variadic form.
+
+      **Verified live in containers** (not just read from docs): zsh, bash
+      and fish via `docker run --rm ubuntu:24.04` (installing zsh/fish with
+      `apt-get`); nu via `ghcr.io/nushell/nushell:latest` (0.114.1, matching
+      the version already verified elsewhere in this package); pwsh via
+      `mcr.microsoft.com/powershell:latest` (7.4.2). Confirmed for each: a
+      function defined in exactly this shape, called with two arguments,
+      reads them back correctly (`$1`/`$2` and `$@` for zsh/bash; `$argv[1]`/
+      `$argv[2]` and full `$argv` for fish; declared `[a, b]` params for nu,
+      plus a `[...rest]` variadic case; `$args[0]`/`$args[1]` and
+      `$args -join ' '` for pwsh). All containers were run with `--rm` and a
+      unique `--name`, and removed themselves on exit — no cleanup left
+      outstanding. Not independently re-captured as byte-exact fixtures the
+      way `backends.test.ts`'s hook/alias assertions are (those predate this
+      change) — the container output confirmed the *mechanism* per shell,
+      and `test/backends.test.ts`'s new `renderFunction` cases assert the
+      exact rendered syntax against that confirmed mechanism.
 - [ ] **Completion registration.** Every one of these shells has a
       completions directory or a registration call, and nothing models it.
 - [ ] **Prompt / theme.** Deliberately out of scope so far — starship,

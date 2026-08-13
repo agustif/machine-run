@@ -50,6 +50,18 @@ export const FishBackend: ShellBackend = {
   renderAlias: (name, command) => `alias ${name} ${quoteFish(command)}`,
 
   /**
+   * fish's ordinary function form — `function name ... end`, with the body
+   * indented purely for readability. Positional arguments need no
+   * declaration: `$argv` is always available inside a fish function body,
+   * `$argv[1]`/`$argv[2]` for individual ones. Verified in a container (fish
+   * 3.7.0): a function defined this way, called with two arguments, read
+   * them back both as `$argv[1]`/`$argv[2]` and as the full `$argv` list —
+   * see `docs/shell-notes.md`.
+   */
+  renderFunction: (name, body) =>
+    [`function ${name}`, ...body.split("\n").map((line) => `    ${line}`), "end"].join("\n"),
+
+  /**
    * `function ... --on-variable PWD` fires whenever fish's `PWD` variable is
    * set, which includes every `cd`. Verified live in a container (fish
    * 3.7.0): three `cd`s produced three hook firings, one per change.

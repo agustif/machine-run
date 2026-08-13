@@ -3,6 +3,7 @@ import {
   renderPosixAlias,
   renderPosixCase,
   renderPosixEnvVar,
+  renderPosixFunction,
   renderPosixPathEntry,
   toPosixIdent,
 } from "./posix.ts";
@@ -58,6 +59,7 @@ export const BashBackend: ShellBackend = {
   renderEnvVar: renderPosixEnvVar,
   renderPathEntry: renderPosixPathEntry,
   renderAlias: renderPosixAlias,
+  renderFunction: renderPosixFunction,
 
   /**
    * bash has no `chpwd`-style hook, so the closest equivalent is prepending

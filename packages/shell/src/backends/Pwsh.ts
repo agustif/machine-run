@@ -76,6 +76,21 @@ export const PwshBackend: ShellBackend = {
   renderAlias: (name, command) => `function ${name} { & ${command} @args }`,
 
   /**
+   * PowerShell's ordinary function form, `function name { body }`. Unlike
+   * `renderAlias` above — which forwards to another command via the `@args`
+   * splat because it never needs to inspect the arguments itself — a genuine
+   * function's `body` reads its caller's positional arguments from the
+   * automatic `$args` array (`$args[0]`, `$args[1]`, ...), needing no
+   * parameter declaration, the same implicit-argv shape bash/zsh/fish use.
+   * Verified in a container (`mcr.microsoft.com/powershell`, pwsh 7.4.2): a
+   * function defined this way, called with two arguments, read them back via
+   * `$args[0]`/`$args[1]` and via `$args -join ' '` — see
+   * `docs/shell-notes.md`.
+   */
+  renderFunction: (name, body) =>
+    [`function ${name} {`, ...body.split("\n").map((line) => `    ${line}`), "}"].join("\n"),
+
+  /**
    * PowerShell 7.1+ exposes a genuine directory-change event,
    * `$ExecutionContext.SessionState.InvokeCommand.LocationChangedAction` —
    * confirmed present via `Get-Member` and, more importantly, confirmed to

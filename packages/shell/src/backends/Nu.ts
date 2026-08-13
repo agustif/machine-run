@@ -39,6 +39,27 @@ export const NuBackend: ShellBackend = {
   renderAlias: (name, command) => `alias ${name} = ${command}`,
 
   /**
+   * nu's `def` is genuinely different from every other backend's function
+   * form: nu functions are statically parameterised, so there is no implicit
+   * "argv" a body can read the way `$1`/`$argv`/`$args` work elsewhere in
+   * this package. `params` names the positional parameters `def` declares —
+   * untyped (`[a, b]`, not `[a: string, b: string]`), so a caller passing any
+   * value nu can bind doesn't need this package to guess a type. Omitting
+   * `params` (or passing an empty array) declares a zero-argument function,
+   * which is valid nu and simply means `body` takes no parameters. Verified
+   * in a container (nu 0.114.1): `def greet [a, b] { $"hello ($a) and ($b)" }`
+   * called as `greet Alice Bob` read back `hello Alice and Bob`, and a
+   * variadic `def greetall [...rest] { ... }` (a caller can put `...name` in
+   * `params` for this, since it's inserted into the signature verbatim)
+   * called with three arguments joined all three back out of `rest` — see
+   * `docs/shell-notes.md`.
+   */
+  renderFunction: (name, body, params = []) =>
+    [`def ${name} [${params.join(", ")}] {`, ...body.split("\n").map((line) => `    ${line}`), "}"].join(
+      "\n",
+    ),
+
+  /**
    * ## The mechanism, and what's verified vs. not
    *
    * nu's directory-change hook is `$env.config.hooks.env_change.PWD`, a list

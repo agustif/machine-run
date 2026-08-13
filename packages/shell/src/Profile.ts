@@ -86,6 +86,44 @@ export const alias = (id: string, props: AliasProps) => {
   });
 };
 
+export interface FunctionProps extends WithShellTarget {
+  readonly name: string;
+  /**
+   * The function's source, in whatever syntax `props.shell` expects for a
+   * function body — a plain command string for zsh/bash/fish/pwsh (see each
+   * backend's `renderFunction` doc comment for how positional arguments
+   * reach it: `$1`/`$2`/`$@`, `$argv`, `$args`), or nu source for nu. Not
+   * portable across shells as a single string, the same as `AliasProps.command`.
+   */
+  readonly body: string;
+  /**
+   * Positional parameter names, used only by nu's backend — nu's `def` is
+   * statically parameterised and has no implicit "argv" `body` could read
+   * otherwise. Every other backend ignores this, since a shell function
+   * there already exposes its caller's arguments with nothing to declare.
+   * See `backends/Nu.ts`'s `renderFunction` doc comment.
+   */
+  readonly params?: ReadonlyArray<string>;
+}
+
+/**
+ * A named shell function — what {@link alias} cannot express, since an alias
+ * is a fixed substitution with no parameter of its own. Use this the moment a
+ * recipe needs positional arguments (`greet() { echo "hi $1" }`), and `alias`
+ * for everything that's genuinely just "run this fixed command under a
+ * shorter name".
+ */
+export const func = (id: string, props: FunctionProps) => {
+  const { backend, path } = targetOf(props);
+  return Dotfiles.ManagedBlock(id, {
+    path,
+    marker: `shell-function:${props.name}`,
+    commentPrefix: backend.commentPrefix,
+    content: backend.renderFunction(props.name, props.body, props.params),
+    ...(props.after !== undefined ? { after: props.after } : {}),
+  });
+};
+
 export interface HookProps extends WithShellTarget {
   /** Identifier-safe name, folded into the generated function/hook name — must be stable across runs. */
   readonly name: string;

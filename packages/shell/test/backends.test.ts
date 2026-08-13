@@ -35,6 +35,13 @@ it("zsh renders export/alias with Sh.quote and a case-glob PATH guard", () => {
   );
 });
 
+it("zsh renders a POSIX function — verified in a container that $1/$2/$@ read back the caller's arguments", () => {
+  const zsh = shellBackend("zsh");
+  expect(zsh.renderFunction("greet", 'echo "hello $1 and $2"')).toBe(
+    ["greet() {", '  echo "hello $1 and $2"', "}"].join("\n"),
+  );
+});
+
 it("zsh renders a chpwd_functions hook wrapping a case/esac glob dispatch", () => {
   const zsh = shellBackend("zsh");
   expect(zsh.renderHook(HOOK_PROPS)).toBe(
@@ -54,6 +61,13 @@ it("bash shares zsh's POSIX env/alias/PATH rendering", () => {
   expect(bash.rcPath).toBe("~/.bashrc");
   expect(bash.renderEnvVar("FOO", "bar baz")).toBe(`export FOO='bar baz'`);
   expect(bash.renderAlias("ll", "ls -la")).toBe(`alias ll='ls -la'`);
+});
+
+it("bash shares zsh's POSIX function rendering", () => {
+  const bash = shellBackend("bash");
+  expect(bash.renderFunction("greet", 'echo "hello $1 and $2"')).toBe(
+    ["greet() {", '  echo "hello $1 and $2"', "}"].join("\n"),
+  );
 });
 
 it("bash renders a dedupe-guarded PROMPT_COMMAND hook — verified to fire once per directory, not once per prompt", () => {
@@ -105,6 +119,13 @@ it("fish renders a contains-guarded PATH prepend — verified to dedupe (adding 
   );
 });
 
+it("fish renders a function with argv, indented — verified in a container that $argv[1]/$argv[2] and $argv itself read back", () => {
+  const fish = shellBackend("fish");
+  expect(fish.renderFunction("greet", "echo hello $argv[1] and $argv[2]")).toBe(
+    ["function greet", "    echo hello $argv[1] and $argv[2]", "end"].join("\n"),
+  );
+});
+
 it("fish renders an --on-variable PWD hook with a switch/case glob dispatch", () => {
   const fish = shellBackend("fish");
   expect(fish.renderHook(HOOK_PROPS)).toBe(
@@ -132,6 +153,25 @@ it("nu's alias takes a bare pipeline, not a quoted string — a real, documented
   expect(shellBackend("nu").renderAlias("ll", "ls -la")).toBe("alias ll = ls -la");
 });
 
+it("nu renders a def with declared positional params — verified in a container that greet Alice Bob reads them back", () => {
+  const nu = shellBackend("nu");
+  expect(nu.renderFunction("greet", '$"hello ($a) and ($b)"', ["a", "b"])).toBe(
+    ["def greet [a, b] {", '    $"hello ($a) and ($b)"', "}"].join("\n"),
+  );
+});
+
+it("nu renders a zero-parameter def when params is omitted", () => {
+  const nu = shellBackend("nu");
+  expect(nu.renderFunction("hello", '"hi"')).toBe(["def hello [] {", '    "hi"', "}"].join("\n"));
+});
+
+it("nu renders a variadic def when params carries a ...rest spread — verified in a container that greetall a b c reads all three back", () => {
+  const nu = shellBackend("nu");
+  expect(nu.renderFunction("greetall", '$"all: ($rest | str join \' \')"', ["...rest"])).toBe(
+    ["def greetall [...rest] {", "    $\"all: ($rest | str join ' ')\"", "}"].join("\n"),
+  );
+});
+
 it("nu renders a compose-not-replace env_change.PWD hook with a str starts-with prefix check", () => {
   const nu = shellBackend("nu");
   expect(nu.renderHook(HOOK_PROPS)).toBe(
@@ -153,6 +193,13 @@ it("pwsh renders $env: assignment and a function-as-alias", () => {
   expect(pwsh.rcPath).toBe("~/.config/powershell/Microsoft.PowerShell_profile.ps1");
   expect(pwsh.renderEnvVar("FOO", "bar baz")).toBe(`$env:FOO = 'bar baz'`);
   expect(pwsh.renderAlias("ll", "ls -la")).toBe("function ll { & ls -la @args }");
+});
+
+it("pwsh renders a function reading $args, not a forwarding-to-another-command alias", () => {
+  const pwsh = shellBackend("pwsh");
+  expect(pwsh.renderFunction("greet", '"$($args[0]) and $($args[1])"')).toBe(
+    ["function greet {", '    "$($args[0]) and $($args[1])"', "}"].join("\n"),
+  );
 });
 
 it("pwsh renders a PathSeparator-split PATH guard, not a POSIX colon-split one", () => {

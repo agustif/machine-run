@@ -3,6 +3,7 @@ import {
   renderPosixAlias,
   renderPosixCase,
   renderPosixEnvVar,
+  renderPosixFunction,
   renderPosixPathEntry,
   toPosixIdent,
 } from "./posix.ts";
@@ -27,6 +28,7 @@ export const ZshBackend: ShellBackend = {
   renderEnvVar: renderPosixEnvVar,
   renderPathEntry: renderPosixPathEntry,
   renderAlias: renderPosixAlias,
+  renderFunction: renderPosixFunction,
   renderHook: (props) => {
     const fnName = `_machine_run_${toPosixIdent(props.name)}`;
     return [
