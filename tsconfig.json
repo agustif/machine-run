@@ -9,6 +9,9 @@
     { "path": "packages/roles" },
     { "path": "packages/toolchains" },
     { "path": "packages/ai-tools" },
+    { "path": "packages/macos-defaults" },
+    { "path": "packages/ssh" },
+    { "path": "packages/tailscale" },
     { "path": "apps/macbook-neo" }
   ]
 }

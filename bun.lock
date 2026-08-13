@@ -22,8 +22,11 @@
         "@machine-run/dotfiles": "workspace:*",
         "@machine-run/git-identity": "workspace:*",
         "@machine-run/homebrew": "workspace:*",
+        "@machine-run/macos-defaults": "workspace:*",
         "@machine-run/roles": "workspace:*",
         "@machine-run/secrets": "workspace:*",
+        "@machine-run/ssh": "workspace:*",
+        "@machine-run/tailscale": "workspace:*",
         "@machine-run/toolchains": "workspace:*",
         "alchemy": "2.0.0-beta.67",
         "effect": "4.0.0-beta.102",
@@ -83,6 +86,14 @@
         "effect": "4.0.0-beta.102",
       },
     },
+    "packages/macos-defaults": {
+      "name": "@machine-run/macos-defaults",
+      "version": "0.0.0",
+      "peerDependencies": {
+        "alchemy": "2.0.0-beta.67",
+        "effect": "4.0.0-beta.102",
+      },
+    },
     "packages/roles": {
       "name": "@machine-run/roles",
       "version": "0.0.0",
@@ -98,6 +109,28 @@
     "packages/secrets": {
       "name": "@machine-run/secrets",
       "version": "0.0.0",
+      "peerDependencies": {
+        "alchemy": "2.0.0-beta.67",
+        "effect": "4.0.0-beta.102",
+      },
+    },
+    "packages/ssh": {
+      "name": "@machine-run/ssh",
+      "version": "0.0.0",
+      "dependencies": {
+        "@machine-run/dotfiles": "workspace:*",
+      },
+      "peerDependencies": {
+        "alchemy": "2.0.0-beta.67",
+        "effect": "4.0.0-beta.102",
+      },
+    },
+    "packages/tailscale": {
+      "name": "@machine-run/tailscale",
+      "version": "0.0.0",
+      "dependencies": {
+        "@machine-run/secrets": "workspace:*",
+      },
       "peerDependencies": {
         "alchemy": "2.0.0-beta.67",
         "effect": "4.0.0-beta.102",
@@ -267,9 +300,15 @@
 
     "@machine-run/homebrew": ["@machine-run/homebrew@workspace:packages/homebrew"],
 
+    "@machine-run/macos-defaults": ["@machine-run/macos-defaults@workspace:packages/macos-defaults"],
+
     "@machine-run/roles": ["@machine-run/roles@workspace:packages/roles"],
 
     "@machine-run/secrets": ["@machine-run/secrets@workspace:packages/secrets"],
+
+    "@machine-run/ssh": ["@machine-run/ssh@workspace:packages/ssh"],
+
+    "@machine-run/tailscale": ["@machine-run/tailscale@workspace:packages/tailscale"],
 
     "@machine-run/toolchains": ["@machine-run/toolchains@workspace:packages/toolchains"],
 

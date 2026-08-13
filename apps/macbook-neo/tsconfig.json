@@ -10,8 +10,11 @@
     { "path": "../../packages/dotfiles" },
     { "path": "../../packages/git-identity" },
     { "path": "../../packages/homebrew" },
+    { "path": "../../packages/macos-defaults" },
     { "path": "../../packages/roles" },
     { "path": "../../packages/secrets" },
+    { "path": "../../packages/ssh" },
+    { "path": "../../packages/tailscale" },
     { "path": "../../packages/toolchains" }
   ],
   "include": ["alchemy.run.ts"]

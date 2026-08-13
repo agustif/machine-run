@@ -1,7 +1,11 @@
 import * as AiTools from "@machine-run/ai-tools";
+import * as Dotfiles from "@machine-run/dotfiles";
 import { brewBundle } from "@machine-run/homebrew";
+import * as MacOsDefaults from "@machine-run/macos-defaults";
 import * as Roles from "@machine-run/roles";
 import * as Secrets from "@machine-run/secrets";
+import { sshHost } from "@machine-run/ssh";
+import * as Tailscale from "@machine-run/tailscale";
 import * as Toolchains from "@machine-run/toolchains";
 import * as Alchemy from "alchemy";
 import * as Command from "alchemy/Command";
@@ -20,6 +24,8 @@ export default Alchemy.Stack(
       Command.providers(),
       Secrets.providers(),
       Toolchains.providers(),
+      MacOsDefaults.providers(),
+      Tailscale.providers(),
     ),
     state: Alchemy.localState(),
   },
@@ -88,6 +94,8 @@ export default Alchemy.Stack(
           "muxy-app/tap/muxy",
           "orbstack",
           "slack",
+          // Added by machine-run: required for the Tailscale example below.
+          "tailscale",
         ],
       },
       GENERATED_DIR,
@@ -110,6 +118,29 @@ export default Alchemy.Stack(
       ],
     });
 
+    // Captured directly from `defaults read` on this machine — every value
+    // below is what's already set, so this is a true no-op on first apply.
+    yield* MacOsDefaults.MacDefault("dock-autohide", {
+      domain: "com.apple.dock",
+      key: "autohide",
+      type: "bool",
+      value: "false",
+      restartApp: "Dock",
+    });
+    yield* MacOsDefaults.MacDefault("dock-tilesize", {
+      domain: "com.apple.dock",
+      key: "tilesize",
+      type: "int",
+      value: "35",
+      restartApp: "Dock",
+    });
+    yield* MacOsDefaults.MacDefault("trackpad-tap-to-click", {
+      domain: "com.apple.AppleMultitouchTrackpad",
+      key: "Clicking",
+      type: "bool",
+      value: "false",
+    });
+
     // Once `op signin` has been run manually and a real 1Password item
     // reference exists, uncomment and fill in the ref:
     //
@@ -124,5 +155,26 @@ export default Alchemy.Stack(
     // real content exists at those source paths:
     //
     // yield* AiTools.aiTools({ home: HOME, vaultDir: VAULT_DIR });
+
+    // ~/.ssh/config already has this Host block hand-written (found by
+    // machine-run's initial exploration). Remove that unmarked stanza first
+    // — otherwise this would coexist as a harmless but redundant duplicate
+    // (ssh_config is first-match-wins, so the old one would still win) —
+    // then uncomment:
+    //
+    // yield* sshHost({
+    //   configPath: `${HOME}/.ssh/config`,
+    //   name: "exe",
+    //   hostnames: ["exe.dev", "*.exe.xyz"],
+    //   identityFile: `${HOME}/.ssh/exe_dev`,
+    //   extra: { IdentitiesOnly: "yes" },
+    // });
+
+    // Requires a real Tailscale account + an auth key stored in 1Password:
+    //
+    // yield* Tailscale.TailscaleConnection("machine-neo-tailscale", {
+    //   authKeyOpRef: "op://Personal/Tailscale/authkey",
+    //   hostname: "machine-neo",
+    // });
   }),
 );
