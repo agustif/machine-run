@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import type { Exec } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
+import * as nodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -40,6 +41,14 @@ const sequencedExec = (outputs: readonly string[]): Exec => {
 };
 
 const HOME = "/home/test";
+
+/**
+ * Joins with the platform's own separator, so an expected path matches what
+ * `Path.join` actually produced. A literal "/a/b" assertion passes on POSIX
+ * and fails on Windows for a path the code built correctly.
+ */
+const p = (...segments: readonly string[]): string => nodePath.join(...segments);
+
 const GLOBAL = { _tag: "Global" as const };
 const dir = (path: string) => ({ _tag: "Directory" as const, path });
 
@@ -167,8 +176,8 @@ it.effect(
     Effect.gen(function* () {
       const path = yield* Path.Path;
       const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
-      expect(backend.configPath(GLOBAL)).toBe("/home/test/.config/mise/config.toml");
-      expect(backend.configPath(dir("/home/test/proj"))).toBe("/home/test/proj/mise.toml");
+      expect(backend.configPath(GLOBAL)).toBe(p(HOME, ".config", "mise", "config.toml"));
+      expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", "mise.toml"));
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -279,7 +288,7 @@ it.effect("rustup backend: fixedTool is \"rust\", and configPath ignores scope",
     // directory-override table lives inside the same `settings.toml` as the
     // global default, verified directly by inspecting it after setting one.
     expect(backend.configPath(GLOBAL)).toBe(backend.configPath(dir("/private/tmp/proj")));
-    expect(backend.configPath(GLOBAL)).toBe("/home/test/.rustup/settings.toml");
+    expect(backend.configPath(GLOBAL)).toBe(p(HOME, ".rustup", "settings.toml"));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -363,8 +372,8 @@ it.effect("asdf backend: configPath is <home>/.tool-versions for Global, <dir>/.
   Effect.gen(function* () {
     const path = yield* Path.Path;
     const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
-    expect(backend.configPath(GLOBAL)).toBe("/home/test/.tool-versions");
-    expect(backend.configPath(dir("/home/test/proj"))).toBe("/home/test/proj/.tool-versions");
+    expect(backend.configPath(GLOBAL)).toBe(p(HOME, ".tool-versions"));
+    expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".tool-versions"));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -462,6 +471,6 @@ it.effect("uv backend: fixedTool is \"python\", configPath is <dir>/.python-vers
     const pathSvc = yield* Path.Path;
     const backend = makeUvBackend({ home: HOME, path: pathSvc, fs, configDirOverride: undefined });
     expect(backend.fixedTool).toBe("python");
-    expect(backend.configPath(dir("/home/test/proj"))).toBe("/home/test/proj/.python-version");
+    expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".python-version"));
   }).pipe(Effect.provide(NodeServices.layer)),
 );

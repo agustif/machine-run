@@ -73,19 +73,19 @@ it('parseEtcShells returns an empty list for empty content, rather than [""]', (
 
 /** A command runner whose canned output depends on which command was asked for. */
 const fakeLoginExec =
-  (username: string, dsclOutput: string): Exec =>
+  (username: string, loginShellOutput: string): Exec =>
   (props) =>
     Effect.succeed({
       exitCode: 0,
-      stdout: props.command.startsWith("id ") ? `${username}\n` : dsclOutput,
+      stdout: props.command.startsWith("id ") ? `${username}\n` : loginShellOutput,
       stderr: "",
     });
 
 const capturing =
-  (username: string, dsclOutput: string, calls: string[]): Exec =>
+  (username: string, loginShellOutput: string, calls: string[]): Exec =>
   (props) => {
     calls.push(props.command);
-    return fakeLoginExec(username, dsclOutput)(props);
+    return fakeLoginExec(username, loginShellOutput)(props);
   };
 
 const planCtx = (exec: Exec): ObserveContext => ({ exec });
@@ -96,23 +96,29 @@ const applyCtx = (exec: Exec): ApplyContext => ({
 });
 
 /**
- * This suite runs wherever `vitest` runs — on this repo, that's macOS — so
- * `observe`'s live command is `dscl`, and the fixture below matches `dscl`'s
- * real output format captured directly on this host
- * (`dscl . -read /Users/<me> UserShell` read back exactly this shape). The
- * Linux `getent passwd` branch is exercised in a container instead (see
- * `docs/shell-notes.md`), because `readLoginShell` dispatches on the real
- * `process.platform` the test process is running under, not an injectable
- * seam — the same constraint `system-packages`' `detect.ts` has.
+ * `readLoginShell` dispatches on the real `process.platform` the test process
+ * is running under rather than an injectable seam — the same constraint
+ * `system-packages`' `detect.ts` has — so the fixture has to match whichever
+ * branch this host will actually take. Both shapes are real captured output:
+ * `dscl . -read /Users/<me> UserShell` on macOS, and `getent passwd <user>`
+ * (a `passwd(5)` record whose 7th colon-separated field is the shell) on
+ * Linux.
+ *
+ * Selecting the fixture by platform is what makes this suite meaningful on
+ * every runner instead of only the author's machine; a fixed `dscl` fixture
+ * passes on macOS and silently exercises nothing on Linux.
  */
-const DSCL_OUTPUT = "UserShell: /bin/zsh\n";
+const LOGIN_SHELL_OUTPUT =
+  process.platform === "darwin"
+    ? "UserShell: /bin/zsh\n"
+    : "me:x:501:20::/home/me:/bin/zsh\n";
 
 it.effect("Login reconciler observe reads the live shell via the platform's own tool", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeLoginReconcilerAt("/etc/shells");
     const observed = yield* reconciler.observe(
       { shell: "/bin/bash" },
-      planCtx(fakeLoginExec("me", DSCL_OUTPUT)),
+      planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)),
     );
     expect(observed).toEqual({ shell: "/bin/zsh" });
   }).pipe(Effect.provide(NodeServices.layer)),
@@ -183,12 +189,12 @@ it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior sh
     const reconciler = yield* makeLoginReconcilerAt(shellsPath);
     const calls: string[] = [];
     const props = { shell: "/bin/bash" };
-    const observed = yield* reconciler.observe(props, planCtx(fakeLoginExec("me", DSCL_OUTPUT)));
+    const observed = yield* reconciler.observe(props, planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)));
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
       { props, observed, desired },
-      applyCtx(capturing("me", DSCL_OUTPUT, calls)),
+      applyCtx(capturing("me", LOGIN_SHELL_OUTPUT, calls)),
     );
 
     expect(result).toEqual({ shell: "/bin/bash", previousShell: "/bin/zsh" });
@@ -207,7 +213,7 @@ it.effect("Login reconciler unapply restores the captured previous shell", () =>
     expect(reconciler.unapply).toBeDefined();
     yield* reconciler.unapply!(
       { props, observed: observedNow, recorded },
-      applyCtx(capturing("me", DSCL_OUTPUT, calls)),
+      applyCtx(capturing("me", LOGIN_SHELL_OUTPUT, calls)),
     );
 
     expect(calls).toEqual(["chsh -s /bin/zsh"]);
@@ -224,7 +230,7 @@ it.effect("Login reconciler unapply is a no-op when nothing was ever captured", 
 
     yield* reconciler.unapply!(
       { props, observed: observedNow, recorded },
-      applyCtx(capturing("me", DSCL_OUTPUT, calls)),
+      applyCtx(capturing("me", LOGIN_SHELL_OUTPUT, calls)),
     );
 
     expect(calls).toEqual([]);
