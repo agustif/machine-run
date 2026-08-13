@@ -6,6 +6,7 @@ import * as MacOsDefaults from "@machine-run/macos-defaults";
 import * as Runtimes from "@machine-run/runtimes";
 import * as Secrets from "@machine-run/secrets";
 import * as Shell from "@machine-run/shell";
+import * as Ssh from "@machine-run/ssh";
 import * as SystemPackages from "@machine-run/system-packages";
 import * as SystemSettings from "@machine-run/system-settings";
 import * as Tailscale from "@machine-run/tailscale";
@@ -100,6 +101,7 @@ export const providers = () =>
     Runtimes.providers(),
     Secrets.providers(),
     Shell.providers(),
+    Ssh.providers(),
     SystemPackages.providers(),
     SystemSettings.providers(),
     Tailscale.providers(),

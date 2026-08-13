@@ -20,18 +20,20 @@ import {
 
 it("parsePublicKey reads type and comment from a real OpenSSH public key line", () => {
   // Captured verbatim from `ssh-keygen -t ed25519 -f id_test -C "test-comment" -N ""`.
-  const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMBPRMl3j36RIng7sMf+ciTKq/tHYZczpAuCtgyOoq5j test-comment\n";
+  const line =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMBPRMl3j36RIng7sMf+ciTKq/tHYZczpAuCtgyOoq5j test-comment\n";
   expect(parsePublicKey(line)).toEqual({ keyType: "ssh-ed25519", comment: "test-comment" });
 });
 
-it("parsePublicKey keeps a multi-word comment intact (`ssh-keygen -C \"work laptop\"` is legal)", () => {
+it('parsePublicKey keeps a multi-word comment intact (`ssh-keygen -C "work laptop"` is legal)', () => {
   const line = "ssh-ed25519 AAAAsomekeymaterial work laptop";
   expect(parsePublicKey(line)).toEqual({ keyType: "ssh-ed25519", comment: "work laptop" });
 });
 
 it("parsePublicKey reports an empty comment, not `undefined`, when none was given", () => {
   // Captured verbatim from `ssh-keygen -t ed25519 -f id_nocomment -C "" -N ""`.
-  const line = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIZG0KpN23EMluPT5TxShl42ZjJhVAsXw/Nk65xesWPe \n";
+  const line =
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIZG0KpN23EMluPT5TxShl42ZjJhVAsXw/Nk65xesWPe \n";
   expect(parsePublicKey(line)).toEqual({ keyType: "ssh-ed25519", comment: "" });
 });
 
@@ -46,7 +48,7 @@ it("parseFingerprint reads the SHA256 field from real `ssh-keygen -lf` output", 
   expect(parseFingerprint(output)).toBe("SHA256:pxiH72Fxf2aHIOr/FB5eC/dwbavL1FeTz2RQq67k8sI");
 });
 
-it("parseFingerprint is not fooled by a comment that itself contains the text \"SHA256:\"", () => {
+it('parseFingerprint is not fooled by a comment that itself contains the text "SHA256:"', () => {
   const output = "256 SHA256:realhash my SHA256: fake comment (ED25519)";
   expect(parseFingerprint(output)).toBe("SHA256:realhash");
 });
@@ -144,7 +146,7 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("apply defaults the comment to \"\" rather than OpenSSH's own <user>@<host> default", () =>
+it.effect('apply defaults the comment to "" rather than OpenSSH\'s own <user>@<host> default', () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -190,7 +192,10 @@ it.effect("`-b` is passed for rsa but never for ed25519, which OpenSSH ignores i
     const ed25519Target = path.join(dir, "id_ed25519");
     const ed25519Props = propsFor(ed25519Target, { algorithm: "ed25519", bits: 256 });
     const ed25519Desired = yield* reconciler.desired(ed25519Props);
-    yield* reconciler.apply({ props: ed25519Props, observed: undefined, desired: ed25519Desired }, spy);
+    yield* reconciler.apply(
+      { props: ed25519Props, observed: undefined, desired: ed25519Desired },
+      spy,
+    );
     expect(spy.seen.some((cmd) => cmd.includes("-t") && cmd.includes("ed25519"))).toBe(true);
     expect(spy.seen.some((cmd) => cmd.includes("-b"))).toBe(false);
 
@@ -227,25 +232,23 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect(
-  "observe raises KeyPairIncomplete for a lone .pub with no private key",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const reconciler = yield* makeKeyReconciler;
-      const c = yield* ctx;
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, "id_ed25519");
+it.effect("observe raises KeyPairIncomplete for a lone .pub with no private key", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeKeyReconciler;
+    const c = yield* ctx;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "id_ed25519");
 
-      yield* fs.writeFileString(`${target}.pub`, "ssh-ed25519 AAAAsomekey orphaned");
+    yield* fs.writeFileString(`${target}.pub`, "ssh-ed25519 AAAAsomekey orphaned");
 
-      const error = yield* reconciler.observe(propsFor(target), c).pipe(Effect.flip);
-      expect(error).toBeInstanceOf(KeyPairIncomplete);
-      if (error instanceof KeyPairIncomplete) {
-        expect(error.missing).toBe("private");
-      }
-    }).pipe(Effect.scoped, Effect.provide(layer)),
+    const error = yield* reconciler.observe(propsFor(target), c).pipe(Effect.flip);
+    expect(error).toBeInstanceOf(KeyPairIncomplete);
+    if (error instanceof KeyPairIncomplete) {
+      expect(error.missing).toBe("private");
+    }
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect(
@@ -271,7 +274,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeKeyReconciler;
-      const dyingCtx = { exec: () => Effect.die("must not run a command"), snapshot: () => Effect.succeed(undefined) };
+      const dyingCtx = {
+        exec: () => Effect.die("must not run a command"),
+        snapshot: () => Effect.succeed(undefined),
+      };
       const props = propsFor("/tmp/irrelevant/id_ed25519");
       const desired = yield* reconciler.desired(props);
       const alreadyThere = {
@@ -282,10 +288,7 @@ it.effect(
         fingerprint: "SHA256:already-generated",
       };
 
-      const result = yield* reconciler.apply(
-        { props, observed: alreadyThere, desired },
-        dyingCtx,
-      );
+      const result = yield* reconciler.apply({ props, observed: alreadyThere, desired }, dyingCtx);
       expect(result).toEqual(alreadyThere);
     }).pipe(Effect.provide(layer)),
 );

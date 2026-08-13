@@ -41,7 +41,10 @@ const resourceDefiningPackages = (): readonly string[] =>
     .filter((entry) => entry.isDirectory())
     .filter((entry) => {
       const srcDir = Path.join(packagesDir, entry.name, "src");
+      // See ExampleCoverage.test.ts: a directory lacking either is a package
+      // mid-creation, not one missing from the aggregate.
       if (!Fs.existsSync(srcDir)) return false;
+      if (!Fs.existsSync(Path.join(packagesDir, entry.name, "package.json"))) return false;
       return tsFilesIn(srcDir).some((file) =>
         /export const \w+ = Resource<[^>]*>\(/.test(Fs.readFileSync(file, "utf8")),
       );

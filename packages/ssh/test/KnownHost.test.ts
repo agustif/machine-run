@@ -32,11 +32,7 @@ github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQ==
 it("parses every host/keytype/key line, skipping ssh-keyscan's own `#` comment lines", () => {
   const entries = parseKnownHosts(REAL_GITHUB_KEYSCAN);
   expect(entries).toHaveLength(3);
-  expect(entries.map((e) => e.keyType)).toEqual([
-    "ecdsa-sha2-nistp256",
-    "ssh-ed25519",
-    "ssh-rsa",
-  ]);
+  expect(entries.map((e) => e.keyType)).toEqual(["ecdsa-sha2-nistp256", "ssh-ed25519", "ssh-rsa"]);
   expect(entries[1]).toEqual({
     host: "github.com",
     keyType: "ssh-ed25519",
@@ -247,6 +243,8 @@ it.effect("defaults `path` to ~/.ssh/known_hosts when not given", () =>
       keyType: "ssh-ed25519",
       publicKey: "AAAA",
     };
-    expect(reconciler.address(withoutPath)).toBe(reconciler.address(propsFor("~/.ssh/known_hosts")));
+    expect(reconciler.address(withoutPath)).toBe(
+      reconciler.address(propsFor("~/.ssh/known_hosts")),
+    );
   }).pipe(Effect.provide(layer)),
 );

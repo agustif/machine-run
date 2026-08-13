@@ -42,10 +42,12 @@ const declaredResources = (): readonly ResourceKind[] => {
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const srcDir = Path.join(packagesDir, entry.name, "src");
-      if (!Fs.existsSync(srcDir)) return [];
-      const pkg = JSON.parse(
-        Fs.readFileSync(Path.join(packagesDir, entry.name, "package.json"), "utf8"),
-      ).name as string;
+      const manifest = Path.join(packagesDir, entry.name, "package.json");
+      // A directory without both is a package mid-creation, not a package that
+      // forgot its resources. Crashing here would turn an unrelated in-progress
+      // change into a failure of this check.
+      if (!Fs.existsSync(srcDir) || !Fs.existsSync(manifest)) return [];
+      const pkg = JSON.parse(Fs.readFileSync(manifest, "utf8")).name as string;
       return tsFilesIn(srcDir).flatMap((file) => {
         const source = Fs.readFileSync(file, "utf8");
         return [...source.matchAll(/export const (\w+) = Resource<[^>]*>\(\s*"([^"]+)"/g)].map(

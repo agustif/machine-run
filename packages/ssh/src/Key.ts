@@ -285,12 +285,20 @@ export const makeKeyReconciler: Effect.Effect<
       if (!hasPrivate && !hasPublic) return undefined;
       if (hasPrivate && !hasPublic) {
         return yield* Effect.fail(
-          new KeyPairIncomplete({ path: privatePath, publicKeyPath: publicPath, missing: "public" }),
+          new KeyPairIncomplete({
+            path: privatePath,
+            publicKeyPath: publicPath,
+            missing: "public",
+          }),
         );
       }
       if (!hasPrivate && hasPublic) {
         return yield* Effect.fail(
-          new KeyPairIncomplete({ path: privatePath, publicKeyPath: publicPath, missing: "private" }),
+          new KeyPairIncomplete({
+            path: privatePath,
+            publicKeyPath: publicPath,
+            missing: "private",
+          }),
         );
       }
 

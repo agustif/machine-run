@@ -258,7 +258,12 @@ export const makeKnownHostReconciler: Effect.Effect<
         // `found.keyType` (both are equal by construction — `findKnownHostEntry`
         // filtered on exactly that value) so this needs no unsafe cast back
         // into the literal union.
-        return { path: target, host: found.host, keyType: props.keyType, publicKey: found.publicKey };
+        return {
+          path: target,
+          host: found.host,
+          keyType: props.keyType,
+          publicKey: found.publicKey,
+        };
       }),
 
     desired: (props) =>
@@ -298,15 +303,13 @@ export const makeKnownHostReconciler: Effect.Effect<
           mode: props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
         });
 
-        const existed = yield* fs
-          .stat(desired.path)
-          .pipe(
-            Effect.as(true),
-            Effect.catchTag("PlatformError", (cause) => {
-              if (isNotFound(cause)) return Effect.succeed(false);
-              return Effect.fail(new KnownHostsFileUnreadable({ path: desired.path, cause }));
-            }),
-          );
+        const existed = yield* fs.stat(desired.path).pipe(
+          Effect.as(true),
+          Effect.catchTag("PlatformError", (cause) => {
+            if (isNotFound(cause)) return Effect.succeed(false);
+            return Effect.fail(new KnownHostsFileUnreadable({ path: desired.path, cause }));
+          }),
+        );
 
         const current = yield* readContentOrEmpty(desired.path);
         const updated = appendKnownHostLine(current, {

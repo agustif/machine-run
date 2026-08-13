@@ -27,12 +27,12 @@ instead of resolving itself either way).
       `parsePublicKey`, `parseFingerprint`) are tested without any I/O.
 - [x] **Verify against real `ssh -G`** — partially. Ran
       `ssh -F <fixture> -G exe.dev` against a fixture with a specific `Host
-      exe.dev` block placed *before* a catch-all `Host *`, both setting
+    exe.dev` block placed _before_ a catch-all `Host *`, both setting
       `ForwardAgent` to different values. Confirmed real ssh: resolves
-      `forwardagent` to the *specific* block's value (first match for that
+      `forwardagent` to the _specific_ block's value (first match for that
       keyword), while `identitiesonly` (unset by the specific block) still
-      comes from the catch-all — i.e. first-match-wins is per-*keyword*, not
-      per-*block*, exactly as `Host.ts`'s doc comment already claimed. This is
+      comes from the catch-all — i.e. first-match-wins is per-_keyword_, not
+      per-_block_, exactly as `Host.ts`'s doc comment already claimed. This is
       the fixture the prepend ordering in `test/Host.test.ts` is built to
       preserve. **Not yet re-verified**: the exact block `sshHost()` itself
       renders (multiple hostnames, `extra`, `ProxyCommand`) hasn't separately
@@ -68,7 +68,7 @@ instead of resolving itself either way).
       this resource cannot offer without either prompting (breaks
       unattended `deploy`) or reading a passphrase from a secret backend
       (overlaps with, and duplicates, what `@machine-run/secrets` already
-      does for *material*, not passphrases-that-unlock-material — a genuinely
+      does for _material_, not passphrases-that-unlock-material — a genuinely
       different shape, not solved here).
 - [ ] **`Ssh.Key`'s `ecdsa` `bits` isn't validated up front.** `-b` for
       `ecdsa` must be `256`, `384` or `521` — an invalid value currently

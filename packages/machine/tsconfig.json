@@ -38,6 +38,9 @@
     },
     {
       "path": "../system-settings"
+    },
+    {
+      "path": "../ssh"
     }
   ],
   "include": ["src"]
