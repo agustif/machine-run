@@ -217,6 +217,39 @@ have caught it.
 **Fix:** extend the same source-reading check to exported composition functions,
 or accept the gap explicitly and say why.
 
+### 1.4 Nothing can upgrade, and no backend refreshes its index
+
+Verified by grep across all 19 package backends: **zero** occurrences of
+upgrade, update, `-Sy` or refresh. `Package.ts`'s `apply` calls only
+`backend.install`.
+
+**A machine managed by this tool never receives an update through it.** Once a
+package is present, `matches` compares presence, finds it, and reports converged
+— permanently. Combined with 2.6 (no way to pin a version) that means the tool
+installs a machine once and then reports it healthy indefinitely while it drifts
+underneath. Security updates included.
+
+Second, smaller, and immediate: no backend refreshes its index before
+installing. `apt install <pkg>` against a stale index fails with "Unable to
+locate package" for anything recent, and `pacman -S` without `-Sy` does the
+same. Any container test that works around this with a manual `apt-get update`
+is hiding it.
+
+**Fix — this is one design with 2.6, not two:**
+
+- `VersionSpec` — what the recipe wants.
+- **Drift with a direction.** `matches` returns a boolean, which cannot separate
+  "installed 1.2, want 1.3" (behind, upgradable) from "installed 1.4, want 1.3"
+  (ahead, usually *not* downgradable). A boolean forces the same action for
+  opposite situations. This is the concrete case for the `matches` → typed
+  reason change already proposed.
+- **`UpdatePolicy`** — `Never` (install once, then leave alone — defensible and
+  probably the common choice), `ToSpec`, `Latest`.
+
+That last one is what makes the whole design cohere: **`Latest` is not a version,
+it is an update policy.** Modelling it as a version is why it currently hides as
+the silent default.
+
 ---
 
 ## Tier 1b — wrong results (from the audit, not independently re-verified)
