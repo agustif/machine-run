@@ -480,7 +480,11 @@ reasoning and the judgement calls.
       first genuine test of every observe in the repo) → drift each kind →
       destroy leaves the machine untouched.
 
-✗ P1  Resource-type rename (state-schema break — must precede any release)
+✗ P2  Resource-type rename. NOT a state-schema break and NOT release-gating —
+      Alchemy's Resource(type, { aliases }) carries pre-rename names and
+      tryFindProviderByType falls back to them (proven in engine/test/
+      aliases.test.ts). Do it after the first real deploy, with old names in
+      aliases.
 ✗ P1  observe → Option<State>  (largest single contributor to 671 lint warnings)
 ✗ P1  Reconcile directoryMode props vs Machine.Directory — two ways to say
       "a directory" is one too many

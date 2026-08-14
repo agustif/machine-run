@@ -64,8 +64,13 @@ Fourteen packages arrived faster than the invariants tying them together.
 - [ ] **Eight resource-type naming conventions** — `Machine.*`, `System.*`,
       `MacOS.*`, `Tailscale.*`, `Git.*`, `Ai.*`, `Runtime.*`, `Shell.*`. The
       `Machine`/`System` split stopped meaning anything once both became
-      reconcilers. A rename is a state-schema break, so settle it before
-      anything ships.
+      reconcilers. **Not** a state-schema break, contrary to what this said
+      before: Alchemy's `Resource(type, { aliases })` carries pre-rename type
+      names, and `tryFindProviderByType` falls back to them — verified in
+      `packages/engine/test/aliases.test.ts`. So this does not gate shipping;
+      settle it after the first real `plan`/`deploy`, when there is evidence
+      about which split actually reads well, and list every old name in
+      `aliases`.
 - [ ] **`observe` → `Option<State>`** — written up in
       `packages/engine/TASKS.md` as one atomic change with the full implementer
       list. Largest single contributor to a lint backlog now at 671 warnings.

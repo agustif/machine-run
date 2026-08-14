@@ -20,7 +20,7 @@
     "lint": "oxlint",
     "patches:check": "bash scripts/apply-patches.sh",
     "postinstall": "bash scripts/apply-patches.sh",
-    "test": "vitest run"
+    "test": "tsc -b && vitest run"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.108",

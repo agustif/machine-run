@@ -618,11 +618,26 @@ directories only and that is written down where the eight can see it.
 and `System.Service` in `system-services`. The `Machine`/`System` split tracks
 nothing a reader can predict.
 
-Deferred deliberately, not forgotten: a rename is a state-schema break, and
-doing it before the engine has ever run risks renaming to a second wrong thing.
-The cost of waiting is that every new resource picks a namespace by imitation.
+Deferred deliberately, not forgotten — but **not for the reason recorded here
+until now.** This entry claimed a rename is a state-schema break. It is not:
+Alchemy has a first-class rename path we simply had not read for. `Resource`'s
+second options argument takes `aliases`; `Provider.succeed`/`.effect` copy them
+off the class onto the provider service; and `tryFindProviderByType` falls back
+to scanning `aliases` when nothing is registered under the requested type. So a
+state row persisted as `Machine.File` keeps resolving after the type becomes
+something else, for the cost of one array literal per resource.
 
-**Fix:** settle it immediately after the first successful `plan`/`deploy`.
+`toProvider` needs no change at all — it builds through `Provider.effect`, which
+does the copying itself. Verified live in `packages/engine/test/aliases.test.ts`:
+lookup by a pre-rename name resolves, resolves to the *same service instance* as
+the current name, and a name nobody claims still resolves to nothing.
+
+What remains is the real reason to wait: renaming before the engine has ever run
+risks renaming to a second wrong thing. The cost of waiting is unchanged — every
+new resource picks a namespace by imitation.
+
+**Fix:** settle it immediately after the first successful `plan`/`deploy`,
+carrying every old type name in `aliases`. Not a release blocker.
 
 ### 2.4 `observe` returns `State | undefined`
 
