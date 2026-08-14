@@ -100,12 +100,39 @@ these came out of it. None was tracked anywhere before.
       access). What is left to decide is `System.Package`, `System.Repo` and
       `Machine.SecretFile` — the last needing a way to tell a file this resource
       wrote from one it adopted before deleting a credential is safe.
-- [ ] **Five Alchemy primitives are unbridged.** `Action` (no imperative
-      one-shots), `Artifacts` (`Machine.Download` rolls its own fetch-and-hash
-      instead), `KeyPair` (the natural `Ssh.Key`), `Namespace` (no multi-machine
-      scoping), `ProviderMode` (plan-vs-apply capability is hand-rolled inside
-      `toProvider`). Each is a decision to make, not necessarily work to do —
-      but "we never looked" is not a decision.
+- [ ] **Alchemy primitives, audited — three still open.** Read each before
+      deciding; the ones below were checked and the reasoning is recorded so it
+      does not have to be redone.
+
+      Still open: `Action` (no imperative one-shots), `Namespace` (no
+      multi-machine scoping), and `Artifacts.cached` as a possible replacement for
+      `PackageIndex`'s hand-rolled per-run memoisation — the fit is unclear
+      because `Artifacts` is FQN-scoped while `PackageIndex` shares one cache
+      across every `System.Package` on a manager.
+
+      Declined, with the reason:
+      - `KeyPair` — its state is `{ privateKey: Redacted<string>, publicKey }`.
+        Adopting it would put a private key in the state store, which is the one
+        thing `Ssh.Key` exists to avoid (it shells to `ssh-keygen` and `stat`s
+        rather than reads). Reuse would regress rule 8.
+      - `PhysicalName` — generates a *unique new* cloud name from
+        stack+id+stage+entropy. `address` names something that already has a
+        name. Unrelated.
+      - `Phase` — `"plan" | "runtime"`, distinguishing the deploy tool from a
+        deployed artifact. Our observe/apply split is a type-level capability
+        boundary, which is both a different question and stronger.
+      - `Artifacts` for `Machine.Download` — this entry used to claim Download
+        "rolls its own fetch-and-hash instead" of using it. Wrong: `Artifacts` is
+        a per-FQN key/value cache, not an artifact fetcher.
+
+- [ ] **`renamedFrom` is undocumented, and now matters more.** Alchemy's
+      `Rename` module lets a recipe rename a resource's logical id without a
+      destroy+create: `Dotfiles.File("new-id", {...}).pipe(renamedFrom("old-id"))`.
+      It is fully wired in `Plan` and works on our resources unchanged — nothing
+      in this repo mentions it. It matters more since `refuseUnowned` landed: a
+      renamed `File` would otherwise plan a create, and the create now *refuses*
+      because the file it finds is unowned. Document it, and test that a rename
+      migrates the state row.
 - [ ] **`@machine-run/ssh` has a `src/` and no `test/`** — the only package like
       that. Details in `packages/ssh/TASKS.md`.
 - [ ] **The two least-verified seams are `secrets` (5 backends) and `ai` (12).**
