@@ -16,8 +16,7 @@ export const network = Effect.gen(function* () {
   // The auth key is a reference, never a literal — the same rule as
   // `Machine.SecretFile`, for the same reason.
   yield* Tailscale.TailscaleConnection("tailnet", {
-    authKeySource: "1password",
-    authKeyRef: "op://Personal/Tailscale/authkey",
+    authKey: { _tag: "OnePassword", vault: "Personal", item: "Tailscale", field: "authkey" },
     hostname: "complete-machine",
   });
 

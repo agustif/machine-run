@@ -19,8 +19,12 @@ export const secrets = Effect.gen(function* () {
   // consumer doing an exact comparison.
   yield* Secrets.SecretFile("ssh-key", {
     path: "~/.ssh/id_ed25519_personal",
-    source: "1password",
-    ref: "op://Personal/GitHub SSH Key/private key",
+    source: {
+      _tag: "OnePassword",
+      vault: "Personal",
+      item: "GitHub SSH Key",
+      field: "private key",
+    },
     mode: 0o600,
     directoryMode: 0o700,
     trailingNewline: "ensure",
@@ -28,8 +32,7 @@ export const secrets = Effect.gen(function* () {
 
   yield* Secrets.SecretFile("npm-token", {
     path: "~/.config/complete-machine/npm-token",
-    source: "doppler",
-    ref: "complete-machine/dev/NPM_TOKEN",
+    source: { _tag: "Doppler", project: "complete-machine", config: "dev", name: "NPM_TOKEN" },
     mode: 0o600,
     trailingNewline: "strip",
   });
@@ -37,15 +40,13 @@ export const secrets = Effect.gen(function* () {
   // `keychain` addresses by `service` or `service/account`.
   yield* Secrets.SecretFile("api-key-keychain", {
     path: "~/.config/complete-machine/api-key",
-    source: "keychain",
-    ref: "complete-machine/api",
+    source: { _tag: "Keychain", service: "complete-machine", account: "api" },
   });
 
   // `pass` addresses by store path.
   yield* Secrets.SecretFile("api-key-pass", {
     path: "~/.config/complete-machine/pass-token",
-    source: "pass",
-    ref: "work/github/token",
+    source: { _tag: "Pass", path: "work/github/token" },
   });
 
   // `env` reads from this process's own environment, which makes it the one
@@ -53,7 +54,6 @@ export const secrets = Effect.gen(function* () {
   // exported the variable is now part of your trust boundary.
   yield* Secrets.SecretFile("ci-token", {
     path: "~/.config/complete-machine/ci-token",
-    source: "env",
-    ref: "GITHUB_TOKEN",
+    source: { _tag: "Env", variable: "GITHUB_TOKEN" },
   });
 });

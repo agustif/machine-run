@@ -1,5 +1,5 @@
 import { Sh } from "@machine-run/core";
-import { secretBackend, type SecretError } from "@machine-run/secrets";
+import { readSecret, type SecretError, type SecretSource } from "@machine-run/secrets";
 import type { CommandError, CommandRunProps } from "alchemy/Command";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -27,7 +27,18 @@ const KEYCHAIN_SERVICE = "machine-run-state";
 /** Never put through the command string — see {@link persistDataKey}. */
 const DATA_KEY_ENV_VAR = "MACHINE_RUN_STATE_KEY";
 
-const keychainRef = (stack: string): string => `${KEYCHAIN_SERVICE}/${stack}`;
+/**
+ * Where this stack's data key lives in the keychain.
+ *
+ * The service and the account are separate fields rather than one
+ * `service/account` string, so nothing has to agree on a separator or split it
+ * back apart — a stack name containing `/` was previously ambiguous.
+ */
+const keychainSource = (stack: string): SecretSource => ({
+  _tag: "Keychain",
+  service: KEYCHAIN_SERVICE,
+  account: stack,
+});
 
 /**
  * Storing a newly generated key in the keychain failed. Only reachable from
@@ -76,14 +87,12 @@ export const readDataKey = (
   stack: string,
   exec: Exec,
 ): Effect.Effect<Redacted.Redacted<Uint8Array>, DataKeyUnavailable> =>
-  secretBackend("keychain")
-    .read(keychainRef(stack), exec)
-    .pipe(
-      Effect.flatMap(decodeKey),
-      Effect.catch((cause: SecretError | Encoding.EncodingError) =>
-        Effect.fail(new DataKeyUnavailable({ stack, cause })),
-      ),
-    );
+  readSecret(keychainSource(stack), exec).pipe(
+    Effect.flatMap(decodeKey),
+    Effect.catch((cause: SecretError | Encoding.EncodingError) =>
+      Effect.fail(new DataKeyUnavailable({ stack, cause })),
+    ),
+  );
 
 /**
  * Writes the stack's data key to the keychain, updating it in place if a

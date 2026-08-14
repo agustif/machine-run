@@ -120,8 +120,7 @@ export default Alchemy.Stack<{}>()(
     // before running `alchemy deploy`.
     yield* Secrets.SecretFile("demo-secret", {
       path: "~/.config/machine-run-demo/secret",
-      source: "env",
-      ref: "MACHINE_RUN_TEST_SECRET",
+      source: { _tag: "Env", variable: "MACHINE_RUN_TEST_SECRET" },
     });
   }),
 );

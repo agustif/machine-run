@@ -110,7 +110,7 @@ it.effect(
         tool: "claude",
         name: "my-server",
         command: "npx",
-        env: { API_KEY: { source: "env", ref: "MCP_TEST_TOKEN" } },
+        env: { API_KEY: { _tag: "Env", variable: "MCP_TEST_TOKEN" } },
       };
       const desired = yield* reconciler.desired(props);
 
@@ -150,7 +150,7 @@ it.effect(
         tool: "claude",
         name: "my-server",
         command: "npx",
-        env: { API_KEY: { source: "env", ref: "MCP_TEST_TOKEN_ROTATE" } },
+        env: { API_KEY: { _tag: "Env", variable: "MCP_TEST_TOKEN_ROTATE" } },
       };
       const desired = yield* reconciler.desired(props);
       yield* reconciler

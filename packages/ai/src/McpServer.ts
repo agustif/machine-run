@@ -1,6 +1,6 @@
 import { MachinePaths } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
-import { SecretBackendId, secretBackend, type SecretError } from "@machine-run/secrets";
+import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -37,10 +37,7 @@ export type AiMcpToolId = typeof AiMcpToolId.Type;
  * instead, resolved through the exact same `@machine-run/secrets` seam
  * `Machine.SecretFile` and `Tailscale.Connection` already use.
  */
-export const McpEnvValue = Schema.Union([
-  Schema.String,
-  Schema.Struct({ source: SecretBackendId, ref: Schema.String }),
-]);
+export const McpEnvValue = Schema.Union([Schema.String, SecretSource]);
 
 export type McpEnvValue = typeof McpEnvValue.Type;
 
@@ -93,8 +90,7 @@ export interface McpServer extends Resource<"Ai.McpServer", McpServerProps, McpS
 
 export const McpServer = Resource<McpServer>("Ai.McpServer");
 
-const isSecretRef = (value: McpEnvValue): value is { source: SecretBackendId; ref: string } =>
-  typeof value !== "string";
+const isSecretRef = (value: McpEnvValue): value is SecretSource => typeof value !== "string";
 
 /** Every declared key, sorted — both literal and secret-sourced, since either kind existing or not existing is real drift. */
 const declaredKeys = (entries: Record<string, McpEnvValue> | undefined): string[] =>
@@ -237,10 +233,7 @@ export const makeMcpServerReconciler: Effect.Effect<
           Effect.gen(function* () {
             const out: Record<string, string | Redacted.Redacted<string>> = {};
             for (const [key, value] of Object.entries(entries ?? {})) {
-              out[key] =
-                typeof value === "string"
-                  ? value
-                  : yield* secretBackend(value.source).read(value.ref, ctx.exec);
+              out[key] = typeof value === "string" ? value : yield* readSecret(value, ctx.exec);
             }
             return out;
           });

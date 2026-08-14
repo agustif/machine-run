@@ -1,6 +1,6 @@
 import { Sh } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
-import { SecretBackendId, secretBackend, type SecretError } from "@machine-run/secrets";
+import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -11,14 +11,15 @@ import * as UndefinedOr from "effect/UndefinedOr";
 
 export const TailscaleConnectionProps = Schema.Struct({
   /** Which secret store the auth key lives in. @default "1password" */
-  authKeySource: Schema.optionalKey(SecretBackendId),
   /**
-   * Reference to the auth key within that store. For the default
-   * `"1password"` source this is a secret reference such as
-   * `op://Personal/Tailscale/authkey`; see `SecretFileProps.ref` for the shape
-   * each backend expects.
+   * Where the tailnet auth key is read from.
+   *
+   * One tagged value rather than a store name beside a loose reference string,
+   * so a 1Password source cannot be paired with, say, an environment variable
+   * name — the store and the fields it needs travel together.
    */
-  authKeyRef: Schema.String,
+  authKey: SecretSource,
+
   /** Device name to advertise on the tailnet. Defaults to the OS hostname. */
   hostname: Schema.optionalKey(Schema.String),
 });
@@ -146,8 +147,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
         desired.hostname !== undefined ? { TS_HOSTNAME: desired.hostname } : {};
 
       if (observed === undefined) {
-        const source = props.authKeySource ?? "1password";
-        const authKey = yield* secretBackend(source).read(props.authKeyRef, ctx.exec);
+        const authKey = yield* readSecret(props.authKey, ctx.exec);
 
         yield* ctx.exec({
           // The key reaches the process through `env` as a `Redacted`, never

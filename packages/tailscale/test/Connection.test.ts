@@ -11,8 +11,7 @@ import {
 } from "../src/Connection.ts";
 
 const props: TailscaleConnectionProps = {
-  authKeySource: "env",
-  authKeyRef: "TS_KEY",
+  authKey: { _tag: "Env", variable: "TS_KEY" } as const,
 };
 
 const fakeExecOk = (stdout: string) => ({
