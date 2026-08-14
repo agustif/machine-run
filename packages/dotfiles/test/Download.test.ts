@@ -222,3 +222,55 @@ it.effect(
       expect(failure).toBeInstanceOf(DownloadTooLarge);
     }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * A read-only final mode. This is the case that makes the temp file's
+ * pre-write restriction non-trivial: the window has to be closed with a mode
+ * that is still writable by us, because chmod'ing straight to 0444 and then
+ * writing fails with EACCES — for the owner too, which is easy to assume
+ * otherwise. Asserting a read-only download still succeeds is what keeps that
+ * ordering from regressing.
+ */
+it.effect("a read-only mode still downloads, and lands read-only", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const { url } = yield* withServer(BODY);
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "pinned.ttf");
+
+    const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o444 };
+    const desired = yield* reconciler.desired(props);
+    const result = yield* reconciler.apply(
+      { props, observed: undefined, desired },
+      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+    );
+
+    expect(result.mode).toBe(0o444);
+    const written = yield* fs.readFile(target);
+    expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+/** A download that expresses no opinion about mode keeps the platform
+ * default, rather than being quietly tightened by the fix above. */
+it.effect("a download with no mode is left at the platform default", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const { url } = yield* withServer(BODY);
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "unmoded.ttf");
+
+    const props: DownloadProps = { url, path: target, checksum: CHECKSUM };
+    const desired = yield* reconciler.desired(props);
+    const result = yield* reconciler.apply(
+      { props, observed: undefined, desired },
+      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+    );
+
+    expect(result.mode).not.toBe(0o600);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);

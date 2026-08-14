@@ -1,6 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import { CREDENTIAL_DIRECTORY_MODE, writeCredentialFileString } from "@machine-run/core";
 import {
   AiToolConfigMalformed,
   type AiMcpServerDesired,
@@ -80,10 +81,18 @@ const readDocument = (
     return parsed;
   });
 
+/**
+ * `mcpServers[].env` accepts `Redacted<string>` — carrying an API key into
+ * this file is the documented use, not an accident — so the file is written
+ * with the credential discipline rather than at the process umask.
+ */
 const writeDocument = (configPath: string, doc: Record<string, unknown>, ctx: AiToolContext) =>
   Effect.gen(function* () {
-    yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), { recursive: true });
-    yield* ctx.fs.writeFileString(configPath, `${JSON.stringify(doc, null, 2)}\n`);
+    yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), {
+      recursive: true,
+      mode: CREDENTIAL_DIRECTORY_MODE,
+    });
+    yield* writeCredentialFileString(ctx.fs, configPath, `${JSON.stringify(doc, null, 2)}\n`);
   });
 
 const unwrap = (value: string | Redacted.Redacted<string>): string =>

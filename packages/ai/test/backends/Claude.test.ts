@@ -169,3 +169,56 @@ it.effect(
       expect(yield* fs.readFileString(path.join(home, ".claude.json"))).toBe("not json at all {{{");
     }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * `mcpServers[].env` and `headers` are typed to accept `Redacted<string>`, so
+ * this file is a credential store by design. It was previously written with
+ * no mode at all, which on a default umask means 0644 — the API key of every
+ * registered MCP server, world-readable.
+ *
+ * Both directions are asserted because they fail for different reasons: the
+ * OS applies a write's `mode` only when the file is created, so a fresh file
+ * needs the mode passed on the write, and a file some other tool already
+ * created at 0644 needs the explicit chmod or it keeps those bits forever.
+ */
+it.effect("writes a fresh config at 0600, in a 0700 directory", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const configDir = path.join(home, "nested");
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home: configDir };
+    yield* ClaudeBackend.mcp!.apply(
+      "newserver",
+      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+      ctx,
+    );
+
+    const fileInfo = yield* fs.stat(path.join(configDir, ".claude.json"));
+    const dirInfo = yield* fs.stat(configDir);
+    expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
+    expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("tightens a config another tool already created world-readable", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const configPath = path.join(home, ".claude.json");
+    yield* fs.writeFileString(configPath, REAL_CLAUDE_JSON);
+    yield* fs.chmod(configPath, 0o644);
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+    yield* ClaudeBackend.mcp!.apply(
+      "newserver",
+      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+      ctx,
+    );
+
+    const info = yield* fs.stat(configPath);
+    expect(Number(info.mode) & 0o777).toBe(0o600);
+  }).pipe(Effect.provide(layer)),
+);

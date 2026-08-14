@@ -1,4 +1,4 @@
-import { isNotFound, MachinePaths } from "@machine-run/core";
+import { CREDENTIAL_FILE_MODE, isNotFound, MachinePaths } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Crypto from "effect/Crypto";
@@ -273,11 +273,34 @@ export const makeDownloadReconciler: Effect.Effect<
         // Written to a fresh temp file in the *same* directory (so the
         // rename below is a same-filesystem, atomic replace rather than a
         // cross-filesystem copy that could itself be interrupted), with the
-        // desired mode set before it ever appears at `target` — so the file
-        // never exists, even momentarily, with the wrong permissions.
+        // desired mode set before it ever appears at `target`.
+        //
+        // The empty temp file is restricted *before* the bytes go into it.
+        // `makeTempFile` creates at the process umask — measured at 0644 on a
+        // default machine, not the 0600 its name suggests — and the temp file
+        // lives in the target's own directory, so restricting only afterwards
+        // leaves the downloaded content world-readable for the duration of
+        // the write, exactly where a reader would look for it. An empty 0644
+        // file leaks nothing; a populated one can.
+        //
+        // It is restricted to 0600 rather than straight to `props.mode`
+        // because the final mode need not be writable by anyone: chmod'ing to
+        // a read-only mode like 0444 first makes the write that follows fail
+        // with EACCES, for the owner too. 0600 is writable by us and readable
+        // by no one else, which is what this window needs; `props.mode` is
+        // applied once the content is in place.
+        // Both chmods are conditional on the same `props.mode`, so a download
+        // that asked for no particular mode still lands at the platform
+        // default exactly as before — the protection is scoped to the case
+        // that needs it rather than quietly tightening every download.
         const tempPath = yield* fs.makeTempFile({ directory: dir });
-        yield* fs.writeFile(tempPath, bytes);
-        if (props.mode !== undefined) yield* fs.chmod(tempPath, props.mode);
+        if (props.mode !== undefined) {
+          yield* fs.chmod(tempPath, CREDENTIAL_FILE_MODE);
+          yield* fs.writeFile(tempPath, bytes);
+          yield* fs.chmod(tempPath, props.mode);
+        } else {
+          yield* fs.writeFile(tempPath, bytes);
+        }
         yield* fs.rename(tempPath, target);
 
         const info = yield* fs.stat(target);

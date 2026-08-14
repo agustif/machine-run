@@ -153,7 +153,13 @@ export const makeFileReconciler: Effect.Effect<
           recursive: true,
           ...(props.directoryMode !== undefined ? { mode: props.directoryMode } : {}),
         });
-        yield* fs.writeFileString(target, props.content);
+        // `mode` is passed on the write *and* chmod'd after, because each
+        // covers what the other cannot: the OS applies `mode` only when the
+        // file is created (so an existing file would keep its old bits and
+        // this reconciler would never converge), while chmod'ing alone would
+        // leave a newly created file readable at the process umask for the
+        // window between the two calls.
+        yield* fs.writeFileString(target, props.content, { mode: props.mode });
         if (props.mode !== undefined) yield* fs.chmod(target, props.mode);
         const info = yield* fs.stat(target);
         return { ...desired, mode: Number(info.mode) & 0o777 };

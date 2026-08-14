@@ -73,6 +73,44 @@ export const statIfPresent = <E>(
  */
 export const posixMode = (info: FileSystem.File.Info): number => Number(info.mode) & 0o777;
 
+/** Mode for a file that may carry a credential: owner read/write only. */
+export const CREDENTIAL_FILE_MODE = 0o600;
+
+/** Mode for a directory created to hold one: owner-only, so the name of a
+ * secret file is not enumerable by other users even when the file itself is
+ * unreadable. */
+export const CREDENTIAL_DIRECTORY_MODE = 0o700;
+
+/**
+ * Writes a file that may carry a credential, at a mode that never exposes it.
+ *
+ * Both halves are load-bearing, and each was measured rather than assumed:
+ *
+ * - `mode` is passed to `writeFileString` so the file is *created* restricted.
+ *   Writing first and chmod'ing after leaves the content readable at the
+ *   process umask (0644 on a default machine) for the window in between, in
+ *   the very directory an attacker would look.
+ * - `chmod` still follows, because the OS applies `mode` *only on creation*.
+ *   Measured directly: writing to an existing 0644 file with `{ mode: 0o600 }`
+ *   leaves it 0644. Without the chmod, a config file some other tool created
+ *   world-readable stays world-readable forever, and a reconciler that
+ *   observes mode never converges.
+ *
+ * `SecretFile` derived this pair correctly on its own; this is that same
+ * discipline made reusable, after the AI backends were found writing MCP
+ * server credentials at 0644 without either half.
+ */
+export const writeCredentialFileString = (
+  fs: FileSystem.FileSystem,
+  target: string,
+  content: string,
+  mode: number = CREDENTIAL_FILE_MODE,
+): Effect.Effect<void, PlatformError> =>
+  Effect.gen(function* () {
+    yield* fs.writeFileString(target, content, { mode });
+    yield* fs.chmod(target, mode);
+  });
+
 /**
  * Creates the parent directory of `target`, recursively, before a caller
  * writes to `target` itself. `mode` is the mode for any directories created

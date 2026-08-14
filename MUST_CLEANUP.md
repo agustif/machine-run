@@ -145,6 +145,47 @@ fix has a failing test waiting for it.
 
 **Fix:** read with `-g` and parse both forms.
 
+### 0.8 Credentials written world-readable — *fixed, with the measurements*
+
+`packages/ai/src/backends/{Claude,OpenCode}.ts`, plus a narrower window in
+`packages/dotfiles/src/{Download,File}.ts`.
+
+Three facts, each measured on this machine rather than assumed, because every
+one of them is the opposite of what the API's shape suggests:
+
+| Measured | Result | Consequence |
+| --- | --- | --- |
+| `writeFileString(p, c)` with no mode | **0644** | at umask 022, world-readable |
+| `writeFileString(p, c, {mode: 0o600})` on an **existing** 0644 file | **stays 0644** | mode applies only on *create*; chmod is still required, or a reconciler observing mode never converges |
+| `makeTempFile()` | **0644** | not the 0600 the name suggests |
+| `chmod(p, 0o400)` then write, as the owner | **EACCES** | the owner is not exempt from their own permission bits |
+
+Against those: both AI backends wrote their config with **no mode and no
+chmod** — so 0644, in a 0755 directory. That file is a credential store *by
+design*: `mcpServers[].env` and `headers` are typed to accept
+`Redacted<string>`, so the API key of every registered MCP server was
+world-readable on every machine this ever ran on. `SecretFile` had derived the
+correct pair on its own — and its comment states exactly what the second row
+above measures — but the discipline lived in one file instead of a shared one.
+
+`Download` additionally carried a comment claiming the file "never exists, even
+momentarily, with the wrong permissions", which row three falsifies: its temp
+file is created 0644 *in the target's own directory* and only restricted after
+the bytes are in it. `File` had the same write-then-chmod window, without the
+false claim.
+
+**Fixed:** `Fs.writeCredentialFileString` in core now encodes both halves
+(mode on create *and* chmod after) with the measurements in its doc comment,
+and both AI backends use it with a 0700 directory. `Download` restricts its
+temp file to 0600 *before* the write and applies `props.mode` after — 0600
+rather than the final mode precisely because of row four, and conditional on
+`props.mode` being set so an unmoded download is not quietly tightened.
+
+Regression tests assert both directions per backend (fresh file, and a file
+another tool already created 0644), the read-only `mode: 0o444` download that
+row four would have broken, and that an unmoded download keeps the platform
+default.
+
 ### 0.5 The pattern behind 0.1–0.4
 
 These are one architectural problem wearing four faces: **the repo has a house

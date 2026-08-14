@@ -102,3 +102,51 @@ it.effect("apply creates the config file and its parent directory when neither e
     expect(written.mcp.first).toEqual({ type: "local", command: ["npx"] });
   }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * The same credential discipline `Claude.test.ts` asserts, for the same
+ * reason: `mcp[].environment` accepts `Redacted<string>`, so this file holds
+ * API keys and must not be written at the process umask. Note the directory
+ * here is `~/.config/opencode`, created by this backend rather than the
+ * user, which makes the 0700 assertion meaningful rather than incidental.
+ */
+it.effect("writes a fresh config at 0600, in a 0700 directory", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+    yield* OpenCodeBackend.mcp!.apply(
+      "localtest",
+      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+      ctx,
+    );
+
+    const fileInfo = yield* fs.stat(configPathOf(path, home));
+    const dirInfo = yield* fs.stat(path.join(home, ".config/opencode"));
+    expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
+    expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("tightens a config another tool already created world-readable", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    yield* fs.makeDirectory(path.join(home, ".config/opencode"), { recursive: true });
+    yield* fs.writeFileString(configPathOf(path, home), REAL_OPENCODE_JSONC);
+    yield* fs.chmod(configPathOf(path, home), 0o644);
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+    yield* OpenCodeBackend.mcp!.apply(
+      "localtest",
+      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+      ctx,
+    );
+
+    const info = yield* fs.stat(configPathOf(path, home));
+    expect(Number(info.mode) & 0o777).toBe(0o600);
+  }).pipe(Effect.provide(layer)),
+);
