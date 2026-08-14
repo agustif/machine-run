@@ -58,4 +58,12 @@ export const shell = Effect.gen(function* () {
     name: "EDITOR",
     value: "nvim",
   });
+
+  // A named function, for the one case `alias` cannot express: a positional
+  // argument. `mkcd` takes `$1` and both makes and enters the directory.
+  yield* Shell.func("func-mkcd", {
+    shell: "zsh",
+    name: "mkcd",
+    body: 'mkdir -p -- "$1" && cd -- "$1"',
+  });
 });

@@ -161,15 +161,20 @@ learned for `installed`/`active`. See `packages/system-services/src/Service.ts`.
 ### Compositions (functions, not resources)
 
 No state of their own; they call the resources above. This is why they are plain
-functions.
+functions. `packages/machine/test/ExampleCoverage.test.ts` enforces this list
+against the source itself — every export a resource-defining package's
+`index.ts` re-exports that resolves (directly, or through another composition)
+to a resource call must appear in `examples/complete-machine`, or the check
+names it and fails.
 
 ```
 git    gitIdentity · gitIgnore · gitAttributes · gitAlias · gitSigning
        gitCredentialHelper · gitHooksPath · gitConfigFile
 shell  envVar · pathEntry · alias · func · hook · ensureLoginShellLoadsRc
-ai     aiSkill · aiConfig
+ai     aiSkill · aiSkills · aiConfig · aiConfigs
 ssh    sshHost
 system-packages  packages(manager, names) → N independent System.Package
+                 repos(specs) → N independent System.Repo
 ```
 
 ---

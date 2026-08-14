@@ -32,4 +32,11 @@ export const packages = Effect.gen(function* () {
   // The common case: a list of packages from one manager. Every entry becomes
   // an independent `System.Package`.
   yield* SystemPackages.packages("brew", ["fd", "jq", "mise"]);
+
+  // `repos` is `packages`' same sugar for `System.Repo` — one call per
+  // manager's repo spec instead of a bundle resource.
+  yield* SystemPackages.repos([
+    { _tag: "Brew", tap: "homebrew/cask-versions" },
+    { _tag: "Dnf", project: "rpmfusion-free" },
+  ]);
 });

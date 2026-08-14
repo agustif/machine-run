@@ -88,6 +88,16 @@ export const git = Effect.gen(function* () {
     },
   });
 
+  // `gitConfigFile` itself, used directly rather than through `gitIgnore`/
+  // `gitAttributes`: a commit message template is the same shape (a config key
+  // naming a file, plus the file's content) but keyed on `commit.template`
+  // rather than `core.excludesFile`/`core.attributesFile`.
+  yield* Git.gitConfigFile("commit-template", {
+    configKey: "commit.template",
+    path: "~/.config/git/commit-template",
+    content: "\n\n# Why, not what.\n",
+  });
+
   // Background maintenance for one repository. `unapply` deliberately runs
   // `git maintenance unregister --force` rather than `git maintenance stop`:
   // `stop` is machine-wide and tears down the shared schedule for *every*

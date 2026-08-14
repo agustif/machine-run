@@ -54,4 +54,10 @@ export const ai = Effect.gen(function* () {
   yield* Ai.aiSkill({ home, vaultDir, tool: "claude" });
   yield* Ai.aiConfig({ home, vaultDir, tool: "claude" });
   yield* Ai.aiSkill({ home, vaultDir, tool: "cursor" });
+
+  // `aiSkills`/`aiConfigs` are sugar over one `aiSkill`/`aiConfig` per tool —
+  // not a bundle resource, the same posture as `system-packages`' `packages`.
+  // Distinct tools from the direct calls above, so no resource id collides.
+  yield* Ai.aiSkills({ home, vaultDir, tools: ["gemini", "grok"] });
+  yield* Ai.aiConfigs({ home, vaultDir, tools: ["codex", "grok"] });
 });
