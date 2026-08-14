@@ -127,6 +127,37 @@ export class SecretReadFailed extends Data.TaggedError("SecretReadFailed")<{
 }
 
 /**
+ * The store was reachable, but no entry exists at this address — as opposed
+ * to being unreachable, locked, or momentarily busy. This is the one
+ * {@link SecretError} member a caller may treat as licence to *create* the
+ * secret it went looking for; treating any of the others that way risks
+ * minting a replacement over a real secret the read merely failed to reach —
+ * see `packages/state/src/DataKey.ts`'s `ensureDataKey`, the consumer this
+ * case exists for.
+ *
+ * Only `backends/Keychain.ts`'s `classify` produces this today, matched on a
+ * real, structural signal rather than message text (`AGENTS.md`
+ * #11's caution against building control flow on CLI wording): `security
+ * find-generic-password` for an entry that does not exist was verified on
+ * this machine (macOS, 2026-08-14) to exit `44` with `security:
+ * SecKeychainSearchCopyNext: The specified item could not be found in the
+ * keychain.` on stderr. A *locked* keychain queried the same way does not
+ * reproduce that signal — verified the same day against a disposable,
+ * throwaway keychain (never the login keychain): querying it locked did not
+ * exit at all inside a 120s window, instead blocking on an interactive
+ * Security Agent prompt, which is exactly why every other failure must
+ * propagate rather than be folded into "absent".
+ */
+export class SecretNotFound extends Data.TaggedError("SecretNotFound")<{
+  source: SecretSource;
+  cause: CommandError | undefined;
+}> {
+  override get message() {
+    return `No entry found for "${describeSecretSource(this.source)}" in ${this.source._tag}.`;
+  }
+}
+
+/**
  * The reference is not in the shape this backend accepts — caught before any
  * command runs, so it carries no `CommandError` cause.
  *
@@ -152,7 +183,8 @@ export type SecretError =
   | SecretCliMissing
   | SecretAuthRequired
   | SecretReadFailed
-  | SecretRefInvalid;
+  | SecretRefInvalid
+  | SecretNotFound;
 
 /**
  * One secret store, narrowed to the one {@link SecretSource} variant it

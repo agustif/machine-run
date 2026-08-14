@@ -77,21 +77,38 @@ const decodeKey = (
   Effect.fromResult(Encoding.decodeBase64(Redacted.value(encoded))).pipe(Effect.map(Redacted.make));
 
 /**
+ * Reads the per-stack key from the keychain without folding away *why* it
+ * failed — {@link ensureDataKey} needs that distinction (a genuinely absent
+ * entry versus every other failure) and {@link readDataKey} deliberately
+ * discards it, so both are built on this rather than on each other.
+ */
+const readRawDataKey = (
+  stack: string,
+  exec: Exec,
+): Effect.Effect<Redacted.Redacted<Uint8Array>, SecretError | Encoding.EncodingError> =>
+  readSecret(keychainSource(stack), exec).pipe(Effect.flatMap(decodeKey));
+
+/**
  * Reads the per-stack data key already in the keychain. Never creates one —
  * that is {@link ensureDataKey}'s job, called only from `set`. A plain read
  * is what `get` needs: manufacturing a key to satisfy a read would produce a
  * key that cannot decrypt anything already on disk, and would mask a
  * genuinely lost key behind a fresh, useless one.
+ *
+ * Every failure — a missing entry, a locked keychain, a momentarily busy
+ * `security`, corrupt base64 — folds into one `DataKeyUnavailable` here,
+ * because `get`'s caller (`EncryptedState.ts`'s `decodeRow`) treats all of
+ * them identically: degrade the row to absent and log a warning. That
+ * folding is exactly what must *not* happen before deciding whether to mint
+ * a replacement key, which is why {@link ensureDataKey} reads through
+ * {@link readRawDataKey} instead of this function.
  */
 export const readDataKey = (
   stack: string,
   exec: Exec,
 ): Effect.Effect<Redacted.Redacted<Uint8Array>, DataKeyUnavailable> =>
-  readSecret(keychainSource(stack), exec).pipe(
-    Effect.flatMap(decodeKey),
-    Effect.catch((cause: SecretError | Encoding.EncodingError) =>
-      Effect.fail(new DataKeyUnavailable({ stack, cause })),
-    ),
+  readRawDataKey(stack, exec).pipe(
+    Effect.catch((cause) => Effect.fail(new DataKeyUnavailable({ stack, cause }))),
   );
 
 /**
@@ -127,22 +144,30 @@ const persistDataKey = (
  * would otherwise race to generate and overwrite a *different* random key —
  * Alchemy applies with `concurrency: "unbounded"` — leaving earlier rows in
  * the same run encrypted under a key the last write clobbered.
+ *
+ * Minting is gated on `SecretNotFound` specifically — a genuine "no key yet"
+ * signal, verified against the real keychain (see
+ * `@machine-run/secrets`'s `backends/Keychain.ts`) — rather than on any read
+ * failure. A locked keychain, "user interaction is not allowed" (the
+ * headless case), or `security` being momentarily busy all surface as some
+ * other `SecretError`, and must reach `set` as a `DataKeyUnavailable`
+ * instead of being misread as "no key exists yet": minting in response would
+ * persist a fresh key over the real one (`persistDataKey`'s `-U` updates in
+ * place), permanently orphaning every row already encrypted under it. This
+ * is the fix for that data-loss bug — see `MUST_CLEANUP.md` 0.1.
  */
 export const ensureDataKey = (
   stack: string,
   exec: Exec,
   crypto: CryptoService,
 ): Effect.Effect<Redacted.Redacted<Uint8Array>, DataKeyUnavailable> =>
-  readDataKey(stack, exec).pipe(
-    Effect.catch(() =>
+  readRawDataKey(stack, exec).pipe(
+    Effect.catchTag("SecretNotFound", () =>
       Effect.gen(function* () {
-        const raw = yield* crypto
-          .randomBytes(KEY_BYTES)
-          .pipe(Effect.catch((cause) => Effect.fail(new DataKeyUnavailable({ stack, cause }))));
-        yield* persistDataKey(stack, Redacted.make(Encoding.encodeBase64(raw)), exec).pipe(
-          Effect.catch((cause) => Effect.fail(new DataKeyUnavailable({ stack, cause }))),
-        );
+        const raw = yield* crypto.randomBytes(KEY_BYTES);
+        yield* persistDataKey(stack, Redacted.make(Encoding.encodeBase64(raw)), exec);
         return Redacted.make(raw);
       }),
     ),
+    Effect.catch((cause) => Effect.fail(new DataKeyUnavailable({ stack, cause }))),
   );
