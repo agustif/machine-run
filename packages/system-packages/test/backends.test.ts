@@ -100,6 +100,35 @@ it.effect("brew backend list uses --full-name so a tap-qualified name matches", 
   }),
 );
 
+it.effect("brew-cask backend parses real `brew list --cask` output (this machine, read-only)", () =>
+  Effect.gen(function* () {
+    // Real captured output from this machine's own `brew list --cask` — a
+    // plain list, one bare cask token per line, no header and no version
+    // column the way `brew list --formula` (without `--full-name`) also has
+    // none. Unlike formulae, cask tokens never carry a tap prefix here
+    // because every one of these happens to come from `homebrew/cask`, but
+    // the parser doesn't special-case that either way: it's the same
+    // `lines()` used for plain `brew list --formula`.
+    const backend = makeBrewCaskBackend();
+    const installed = yield* backend.list(fakeExec(fixture("brew-list-cask.txt")));
+    expect(installed).toEqual([
+      "android-commandlinetools",
+      "ghostree",
+      "ghostty",
+      "jdownloader",
+      "macterm",
+      "markedit",
+      "mori",
+      "muxy",
+      "orbstack",
+      "slack",
+      "stolendata-mpv",
+      "transmission",
+      "visual-studio-code",
+    ]);
+  }),
+);
+
 it.effect("brew-cask backend uses `brew install --cask`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
@@ -531,22 +560,22 @@ it.effect("go-install backend install shells out to `go install <name>@latest`",
 
 it.effect("mas backend parses real `mas list` output, taking the numeric App Store id", () =>
   Effect.gen(function* () {
-    // Real captured output from this machine's own (signed-in) `mas list` —
-    // the id column's width varies (leading-space-padded), so this is also
-    // a real exercise of `firstTokens` after `lines()`'s trim, not a
-    // fixed-width parse.
+    // Real captured output from this machine's own (signed-in) `mas list`,
+    // re-captured this session as `test/fixtures/mas-list.txt` (now seven
+    // apps, up from three) — the id column's width varies
+    // (leading-space-padded), so this is also a real exercise of
+    // `firstTokens` after `lines()`'s trim, not a fixed-width parse.
     const backend = makeMasBackend();
-    const installed = yield* backend.list(
-      fakeExec(
-        [
-          " 937984704  Amphetamine  (5.3.2)",
-          " 640199958  Developer    (11.0.2)",
-          "6757482822  VVTerm       (2.14)",
-          "",
-        ].join("\n"),
-      ),
-    );
-    expect(installed).toEqual(["937984704", "640199958", "6757482822"]);
+    const installed = yield* backend.list(fakeExec(fixture("mas-list.txt")));
+    expect(installed).toEqual([
+      "937984704",
+      "640199958",
+      "361304891",
+      "490179405",
+      "361309726",
+      "899247664",
+      "6757482822",
+    ]);
   }),
 );
 
@@ -652,14 +681,28 @@ it.effect(
     }),
 );
 
-it.effect("snap backend list drops the header row and returns [] on an empty listing", () =>
+it.effect("snap backend list returns [] on a real empty listing", () =>
   Effect.gen(function* () {
-    // UNVERIFIED beyond the empty case — see Snap.ts's doc comment. Only
-    // the trivial empty-stdout path is exercised here, not a populated
-    // listing's shape, since no real populated output was captured.
+    // Real captured behaviour from a genuinely booted systemd+snapd
+    // container (docker run --privileged --cgroupns=host, see Snap.ts's doc
+    // comment): a fresh install's "No snaps are installed yet." message goes
+    // to stderr, never stdout, so `exec`'s stdout really is empty here.
     const backend = makeSnapBackend();
     const installed = yield* backend.list(fakeExec(""));
     expect(installed).toEqual([]);
+  }),
+);
+
+it.effect("snap backend list parses real `snap list` output (systemd-booted container)", () =>
+  Effect.gen(function* () {
+    // Real captured output after `snap install hello-world` in the same
+    // container — see Snap.ts's doc comment for the full session, including
+    // snapd's own first-install bootstrap (pulling the `snapd`/`core` base
+    // snaps and restarting itself mid-install) and confirmation that the
+    // installed snap actually ran (`snap run hello-world` → "Hello World!").
+    const backend = makeSnapBackend();
+    const installed = yield* backend.list(fakeExec(fixture("snap-list.txt")));
+    expect(installed).toEqual(["core", "hello-world", "snapd"]);
   }),
 );
 

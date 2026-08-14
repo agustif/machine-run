@@ -165,8 +165,9 @@ comment still says *unverified*. The Windows runner type-checks only — see
       but the plan is never empty. `winget export` emits JSON with full
       identifiers. It writes to a file rather than stdout, so this needs a temp
       path through the `exec` seam.
-- [ ] `mas`, and the `defaults` read path, against a real macOS runner.
-- [ ] `snap` — needs systemd, so a container is not enough.
+- [x] `mas`, and the `defaults` read path, against a real macOS runner.
+- [x] `snap` — a privileged, systemd-booted container reaches `snapd` fine;
+      see [MAP.md](./MAP.md#4-the-eight-backend-seams).
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).
 - [ ] `tailscale status --json`'s real shape.
 - [ ] `Git.Signing` end to end — nothing in the repo signs anything yet.

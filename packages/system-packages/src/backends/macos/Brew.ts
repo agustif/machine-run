@@ -44,6 +44,22 @@ export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
     exec({ command: Sh.sh("brew", "tap", repo.tap), shell: true }).pipe(Effect.asVoid),
 });
 
+/**
+ * Verified read-only against this real machine's real cask installs
+ * (`test/fixtures/brew-list-cask.txt`, thirteen casks, no `brew install`
+ * run to produce it — every one was already installed). `brew list --cask`
+ * prints exactly one bare cask token per line: no header, no version
+ * column, no tap qualifier the way an unqualified `brew list --formula`
+ * lacks one too — casks don't get the tap-name ambiguity formulae do here
+ * because every installed cask happens to come from the default
+ * `homebrew/cask` tap, so the same plain `lines()` parser formula's
+ * unqualified case would use is exactly right, unlike formula's
+ * `--full-name` fix. Installing a cask can additionally need a GUI prompt
+ * or admin password (notarization/Gatekeeper, or a pkg installer some casks
+ * shell out to) that this backend's `install` cannot satisfy unattended —
+ * a real difference from a formula install, worth knowing even though nothing
+ * here installs anything to prove it.
+ */
 export const makeBrewCaskBackend = (): PackageManagerBackend => ({
   id: "brew-cask",
   list: (exec) =>

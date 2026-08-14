@@ -1,0 +1,13 @@
+android-commandlinetools
+ghostree
+ghostty
+jdownloader
+macterm
+markedit
+mori
+muxy
+orbstack
+slack
+stolendata-mpv
+transmission
+visual-studio-code
