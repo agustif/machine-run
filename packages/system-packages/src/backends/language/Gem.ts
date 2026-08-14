@@ -91,7 +91,10 @@ export const parseGemList = (stdout: string): PackageEntry[] => {
     const name = match[1];
     const versions = match[2];
     if (name === undefined || versions === undefined) continue;
-    const first = versions.split(",")[0]?.trim().replace(/^default:\s*/, "");
+    const first = versions
+      .split(",")[0]
+      ?.trim()
+      .replace(/^default:\s*/, "");
     entries.push(first !== undefined && first.length > 0 ? { name, version: first } : { name });
   }
   return entries;
@@ -99,10 +102,15 @@ export const parseGemList = (stdout: string): PackageEntry[] => {
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const gemTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+const gemTimeouts: PackageTimeouts = {
+  install: Timeouts.languagePackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeGemBackend = (): PackageManagerBackend => ({
   id: "gem",
+  executable: "gem",
+  shell: "posix",
   versions: gemVersionSupport,
   timeouts: gemTimeouts,
   list: (exec) =>

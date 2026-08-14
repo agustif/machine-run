@@ -80,10 +80,15 @@ export const parseMasList = (stdout: string): PackageEntry[] => {
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const masTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const masTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeMasBackend = (): PackageManagerBackend => ({
   id: "mas",
+  executable: "mas",
+  shell: "posix",
   versions: NO_VERSION_SUPPORT,
   timeouts: masTimeouts,
   list: (exec) =>

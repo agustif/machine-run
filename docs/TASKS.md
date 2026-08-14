@@ -172,12 +172,11 @@ CI runs on `ubuntu`, `macos` and `windows` runners, which removed the last
 comment still says *unverified*. The Windows runner type-checks only — see
 "Windows" under P2 for the 16 tests that fail there and why.
 
-- [ ] **`winget export` instead of `winget list`.** The remaining winget gap.
-      Truncated ids are unrecoverable from the table, so those packages read as
-      not installed and get a no-op `winget install` on every deploy — correct,
-      but the plan is never empty. `winget export` emits JSON with full
-      identifiers. It writes to a file rather than stdout, so this needs a temp
-      path through the `exec` seam.
+- [x] **`winget export` instead of `winget list`.** Inventory now uses the
+      real nested `Sources[].Packages[]` JSON shape through a typed temporary
+      file capability; the old captured table parser remains only as a
+      regression/diagnostic parser. Winget install behavior is still explicitly
+      unverified on a Windows runner.
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).
 - [ ] `tailscale status --json`'s real shape.
 - [ ] `Git.Signing` end to end — nothing in the repo signs anything yet.

@@ -49,10 +49,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("apt", aptVersionSupport);
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const aptTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const aptTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeAptBackend = (): PackageManagerBackend => ({
   id: "apt",
+  executable: "apt-get",
+  shell: "posix",
   versions: aptVersionSupport,
   timeouts: aptTimeouts,
   /**

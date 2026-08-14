@@ -158,9 +158,9 @@ produce, or accept the current gap as deliberate and say so in
 whoever owns `packages/secrets/src`, not something to fix silently under a
 test-only task.
 
-## 4. `KeychainBackend.read` silently returns hex garbage for any secret with a non-printable byte
+## 4. Resolved: `KeychainBackend.read` once returned hex text for non-printable bytes
 
-`packages/secrets/src/backends/Keychain.ts`, `read`:
+`packages/secrets/src/backends/Keychain.ts`, `read` (the original finding):
 
 ```ts
 Effect.map((result) => Redacted.make(result.stdout.replace(/\n$/, ""))),
@@ -187,17 +187,15 @@ output alone after the fact: a hex-looking string is inherently ambiguous
 between "this is the fallback encoding" and "this genuinely is the secret,
 and it happens to look like hex."
 
-Fix sketch (not applied — out of scope for the session that found this):
+The fix is now applied:
 `security find-generic-password -g` disambiguates the two cases
 (`password: 0x<hex>` for the raw-byte fallback vs. a bare `password:
 "quoted string"` for the printable case, confirmed against the same two
-entries), so `read` should switch from `-w` to `-g` and parse both of its
-forms, rather than relying on `-w`'s output being unambiguous, which it
-is not.
+entries). `read` now switches from `-w` to `-g`, parses both forms, and the
+regression suite verifies the decoded value is byte-exact and remains redacted.
 
-Pinned by: `packages/secrets/test/Keychain.test.ts` ›
-`"BUG: read returns the hex-encoded fallback, not the real value, for a
-secret with an embedded newline (real security find-generic-password -w
-output)"`. See also `docs/notes/secrets-keychain-notes.md` and
+Pinned by: `packages/secrets/test/Keychain.test.ts` and
+`packages/secrets/test/fixtures/keychain-g-flag-transcript.txt`. See also
+`docs/notes/secrets-keychain-notes.md` and
 `packages/secrets/test/fixtures/keychain-multiline-hex-stdout.txt` for the
-full captured session.
+original captured session.

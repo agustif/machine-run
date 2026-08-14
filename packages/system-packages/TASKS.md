@@ -13,11 +13,10 @@ real tool and what hasn't.
 - [ ] **MacPorts against a real `port`.** Not installed here, no Docker
       image; verify the `port installed` header/column shape and a pin
       syntax (none declared yet).
-- [ ] **`winget export` rather than `winget list`.** `list` truncates a long
-      id with an ellipsis that eats the column padding, so that package
-      reads as not-installed and gets a no-op reinstall every deploy.
-      `export` emits full ids as JSON but writes to a file, not stdout —
-      needs a temp path through the `exec` seam.
+- [x] **`winget export` rather than `winget list`.** Inventory uses the real
+      nested `Sources[].Packages[]` JSON shape through a scoped temporary-file
+      capability. The old table parser remains only as a regression/diagnostic
+      parser; install flags are still unverified.
 - [ ] **`winget install` / `choco install` flags are unverified.** Only
       `list` has been exercised against a real Windows target (CI); nothing
       has installed a package via either backend.

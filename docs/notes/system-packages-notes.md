@@ -215,21 +215,27 @@ specific commands and captured output. Summary:
 
 ## Winget (`src/backends/windows/Winget.ts`)
 
-No Windows/`winget` install available to verify against.
+No Windows/`winget` install is available in this development environment, so
+install behavior remains explicitly unverified. The inventory path is now
+grounded in the real export schema and captured output:
 
-- `winget list --accept-source-agreements` — widely documented; needed so a
-  first run doesn't block on an interactive source-agreement prompt.
+- [`winget export`](https://learn.microsoft.com/en-us/windows/package-manager/winget/export)
+  with `--output <temp-file> --include-versions --accept-source-agreements
+  --disable-interactivity` is the documented machine-readable export surface.
+  The backend allocates the file through the generic package-list context,
+  reads it with Effect's filesystem service, and deletes its temp directory
+  after every listing.
+- The export JSON nests entries under `Sources[].Packages[]`; each entry's
+  `PackageIdentifier` and optional `Version` are schema-decoded. Unknown
+  metadata is ignored, and malformed output fails as `BackendParseError` rather
+  than becoming an empty inventory.
+- `winget list` remains parsed only for the captured-output regression test.
+  Its fixed-width ellipsis behavior is not safe as the production inventory,
+  because a truncated identifier is unrecoverable.
 - `winget install --id <id> --exact --accept-package-agreements
   --accept-source-agreements --silent --disable-interactivity` — the
-  documented combination for a non-interactive install. `--exact` is used
-  deliberately (not fuzzy name matching) because `parseWingetList`'s
-  fixed-width table parse is itself unverified — an `--exact` id match means a
-  parse mistake fails loudly (unknown id) rather than installing the wrong
-  package.
-- winget has no `--json`/machine-readable list output as far as the
-  documentation shows; `parseWingetList` parses the human-readable table
-  instead (see its doc comment for the parsing approach and its failure
-  modes).
+  documented combination for a non-interactive install. `--exact` remains
+  deliberate, but the command itself still needs a real Windows verification.
 
 ## Chocolatey (`src/backends/Choco.ts`)
 

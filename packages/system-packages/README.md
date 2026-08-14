@@ -81,18 +81,16 @@ not per package — this package's 19 ids are at very different points:
 | -------- | ------------------------------------------------------ | ------------------------ | ------------------ |
 | macOS    | `brew`, `brew-cask`, `mas` (list only)                 | `port` (MacPorts)        |                    |
 | Linux    | `apt`, `dnf`, `pacman`, `yay`, `flatpak`, `snap`       | `paru`                   |                    |
-| Windows  | `choco`                                                |                          | `winget`           |
+| Windows  | `winget` (inventory), `choco`                          |                          |                    |
 | language | `cargo`, `npm`, `pipx`, `uv-tool`, `gem`, `go-install` |                          |                    |
 
 Three backends are worth calling out specifically:
 
-- **`winget` (`!`)** — its `list` parser is verified against real Windows
-  runner output, and that verification found a real, only-partly-fixable bug:
-  `winget list` truncates an over-long id with an ellipsis that eats the
-  column padding, so a truncated id simply isn't recoverable from the table.
-  Those packages read as _not installed_ and get re-installed on every apply.
-  The real fix is `winget export`, which emits full ids as JSON — not started
-  (`docs/TASKS.md`). `winget install` itself has never been run against a real
+- **`winget` (inventory only)** — reconciliation now uses the real nested
+  `winget export` JSON surface through a scoped temporary file, so the
+  fixed-width table's truncated identifiers cannot make installed packages
+  look absent. The old `list` parser remains as a captured-output regression
+  diagnostic; `winget install` itself has never been run against a real
   package.
 - **`paru` (`~`)** — attempted twice. `paru-bin` built and installed cleanly
   but failed to _run_ (`libalpm.so.15` missing, a real ABI mismatch). Building

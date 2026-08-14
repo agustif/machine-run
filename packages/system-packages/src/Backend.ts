@@ -5,6 +5,7 @@ import * as Boolean from "effect/Boolean";
 import type * as Duration from "effect/Duration";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import type * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 export class BackendParseError extends Data.TaggedError("BackendParseError")<{
@@ -72,7 +73,8 @@ export class CannotDowngrade extends Data.TaggedError("CannotDowngrade")<{
 }> {
   override get message() {
     const comparison = Boolean.match(this.direction === "Ahead", {
-      onTrue: () => `is installed at "${this.installed}", which is newer than the pinned "${this.desired}"`,
+      onTrue: () =>
+        `is installed at "${this.installed}", which is newer than the pinned "${this.desired}"`,
       onFalse: () =>
         `is installed at "${this.installed}", which cannot be ordered against the pinned "${this.desired}"`,
     });
@@ -80,7 +82,7 @@ export class CannotDowngrade extends Data.TaggedError("CannotDowngrade")<{
   }
 }
 
-export type BackendError = CommandError | BackendParseError;
+export type BackendError = CommandError | BackendParseError | PlatformError.PlatformError;
 
 /**
  * Prefixes `sudo` onto `argv` when `execution.privilege` asks for it, argv
@@ -106,6 +108,40 @@ export const elevated = (
 export interface PackageEntry {
   readonly name: string;
   readonly version?: string;
+}
+
+/**
+ * The host shell used to answer "is this manager installed?".
+ *
+ * `command -v` is a POSIX shell builtin and is not a Windows command. Keeping
+ * this fact on the backend makes executable discovery part of the backend
+ * contract instead of a hidden assumption in the generic reconciler.
+ */
+export type BackendShell = "posix" | "powershell";
+
+/**
+ * The filesystem capability a listing backend may use for a machine-readable
+ * export. It is deliberately narrower than `FileSystem`: a backend receives
+ * an opaque path and a lazy read operation, never a home directory or a raw
+ * filesystem service.
+ */
+export interface PackageListFile {
+  readonly path: string;
+  readonly read: Effect.Effect<string, PlatformError.PlatformError>;
+}
+
+/**
+ * A scoped temporary-artifact capability for package-manager listings.
+ *
+ * Only backends whose real CLI writes a listing to a file (currently Winget)
+ * use it. The generic resource owns allocation and cleanup, so a backend cannot
+ * leak a file into the operator's home or repository. The higher-rank callback
+ * keeps the context reusable for any error type the backend itself returns.
+ */
+export interface PackageListContext {
+  readonly withTemporaryFile: <A, E>(
+    use: (file: PackageListFile) => Effect.Effect<A, E>,
+  ) => Effect.Effect<A, E | PlatformError.PlatformError>;
 }
 
 /**
@@ -220,10 +256,18 @@ export const rejectUnsupportedVersionSpec =
  */
 export interface PackageManagerBackend {
   readonly id: string;
+  /** Binary or command name this backend invokes for both probing and work. */
+  readonly executable: string;
+  /** Shell in which the executable can be probed. */
+  readonly shell: BackendShell;
   /** See {@link PackageVersionSupport}. */
   readonly versions: PackageVersionSupport;
   readonly timeouts: PackageTimeouts;
-  readonly list: (exec: Exec) => Effect.Effect<PackageEntry[], BackendError>;
+  readonly list: (
+    exec: Exec,
+    /** Required by file-exporting backends; absent only for direct legacy calls. */
+    context?: PackageListContext,
+  ) => Effect.Effect<PackageEntry[], BackendError>;
   /**
    * `version` is always the full `VersionSpec | undefined` a recipe wrote —
    * never pre-filtered by `versions.accepts` — so every implementation is
@@ -249,7 +293,10 @@ export interface PackageManagerBackend {
    * `gem`, `go install`), or where refreshing is a real, separate,
    * unaddressed gap — see each backend's own doc comment.
    */
-  readonly refreshIndex?: (exec: Exec, execution: ExecutionContext) => Effect.Effect<void, BackendError>;
+  readonly refreshIndex?: (
+    exec: Exec,
+    execution: ExecutionContext,
+  ) => Effect.Effect<void, BackendError>;
 }
 
 /**

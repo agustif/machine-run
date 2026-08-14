@@ -81,10 +81,15 @@ export const parsePipxList = (stdout: string): PackageEntry[] => {
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const pipxTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+const pipxTimeouts: PackageTimeouts = {
+  install: Timeouts.languagePackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makePipxBackend = (): PackageManagerBackend => ({
   id: "pipx",
+  executable: "pipx",
+  shell: "posix",
   versions: pipxVersionSupport,
   timeouts: pipxTimeouts,
   list: (exec) =>

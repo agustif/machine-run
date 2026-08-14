@@ -63,10 +63,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("pacman", pacmanVersionSupport);
  */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const pacmanTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const pacmanTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makePacmanBackend = (): PackageManagerBackend => ({
   id: "pacman",
+  executable: "pacman",
+  shell: "posix",
   versions: pacmanVersionSupport,
   timeouts: pacmanTimeouts,
   /**

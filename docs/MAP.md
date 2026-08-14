@@ -196,19 +196,17 @@ new resource kind, never a special case inside a resource.
 macOS    ✓ brew        ✓ brew-cask   ~ port(MacPorts)   ✓ mas (list only)
 Linux    ✓ apt         ✓ dnf         ✓ pacman           ✓ yay   ~ paru
          ✓ flatpak     ✓ snap
-Windows  ! winget      ✓ choco
+Windows  ✓ winget      ✓ choco
 language ✓ cargo  ✓ npm  ✓ pipx  ✓ uv-tool  ✓ gem  ✓ go-install
 ```
 
-`! winget` — the `list` path is verified against real runner output and the
-verification found a real bug that is only partly fixable. winget truncates an
-over-long cell with an ellipsis that eats the column padding; the parser now
-slices by header column offsets (fixture:
-`system-packages/test/fixtures/winget-list.txt`), but a truncated id is simply
-not in the output. Those packages read as *not installed*, so `apply` re-runs a
-no-op `winget install` forever. `winget export` emits JSON with full ids and is
-the real fix — `✗`, not started. winget's *install* flags remain unverified:
-nothing here has ever installed a Windows package.
+`✓ winget` — the inventory path now uses the real `winget export --output ...`
+JSON surface, with a platform-native temporary file and schema decoding. This
+avoids the fixed-width `winget list` table's truncated identifiers; the old
+table parser remains pinned against its captured fixture for diagnosis, but is
+not used by reconciliation. The export parser is pinned against a real export
+fixture at `system-packages/test/fixtures/winget-export.json`. Winget's install
+flags remain unverified: nothing here has ever installed a Windows package.
 
 `✓ brew-cask` — read-only verified against this real machine's actual
 `brew list --cask` (thirteen installed casks, fixture:
@@ -249,7 +247,7 @@ doc comment for the full transcript.
 ### `SecretBackend` — 5 ids, `secrets`
 
 ```
-✓ env   ✓ pass   ~ 1password (op)   ~ doppler   ! keychain (security)
+✓ env   ✓ pass   ~ 1password (op)   ~ doppler   ✓ keychain (security)
 ```
 
 **`✓ pass`** — the one CLI-backed backend in this seam a container can fully
@@ -281,21 +279,13 @@ the real captured text — see `docs/notes/secrets-op-notes.md` and
 `docs/notes/secrets-doppler-notes.md`. Classification fixed; a real vault
 read is still unverified, so both stay `~`.
 
-**`! keychain`** — downgraded from `~`, not upgraded to `✓`: its
-missing-entry classification (`SecretNotFound`, exit `44`) is genuinely
-verified and correct, but its successful-read path is now *known* to be
-wrong for a real, common case. `security find-generic-password -w` — the
-flag `KeychainBackend.read` uses — silently returns the ASCII-hex encoding
-of the stored bytes, not the bytes themselves, whenever a secret contains a
-non-printable byte (verified on real macOS with an embedded newline and,
-separately, an embedded tab): exactly the shape of an SSH private key, a PEM
-certificate, or any multi-line secret — precisely what `Machine.SecretFile`
-most needs to get right — comes back corrupted, with exit code `0` and no
-signal that anything went wrong. See `docs/notes/secrets-keychain-notes.md`
-and `docs/notes/test-findings.md` #4.
-
-This remains the least-verified seam in the repo, and it is the one that
-writes files with `0o600` on the strength of being right.
+**`✓ keychain`** — verified on real macOS with a disposable keychain, both
+for missing-entry classification and for successful printable, multi-line,
+tab, PEM-shaped, quoted, backslash, and UTF-8 values. The implementation uses
+`security find-generic-password -g`, decodes its explicit `0x<hex>` form, and
+keeps the value redacted. The original `-w` corruption finding and its fix are
+recorded in `docs/notes/secrets-keychain-notes.md` and
+`docs/notes/test-findings.md` #4.
 
 ### `SettingsBackend` — 2 ids, `system-settings`
 
@@ -492,8 +482,6 @@ reasoning and the judgement calls.
       ([notes/windows-permissions.md](./notes/windows-permissions.md),
       `packages/core/src/windows/`) but not called by any resource yet — see
       [TASKS.md](./TASKS.md)'s "Windows" entry for exactly what's left.
-✗ P2  winget export instead of winget list
-
 ✗ P3  Doctor / drift report — "what no longer matches", without applying
 ✗ P3  Import an existing machine — `list` on System.Package
 ✗ P3  Finish the unmanage story (20 of 23 kinds have no unapply)

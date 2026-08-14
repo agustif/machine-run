@@ -126,6 +126,8 @@ const goTimeouts: PackageTimeouts = { install: Timeouts.toolchain, refresh: Time
 
 export const makeGoBackend = (): PackageManagerBackend => ({
   id: "go-install",
+  executable: "go",
+  shell: "posix",
   versions: goVersionSupport,
   timeouts: goTimeouts,
   list: (exec) =>

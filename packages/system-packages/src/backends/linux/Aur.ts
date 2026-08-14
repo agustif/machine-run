@@ -105,6 +105,8 @@ export const aurVersionSupport: PackageVersionSupport = {
  */
 const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
   id: bin,
+  executable: bin,
+  shell: "posix",
   versions: aurVersionSupport,
   timeouts: aurTimeouts,
   // `-Qm` (without `-q`) reports `<name> <version>` pairs for foreign
@@ -169,7 +171,10 @@ const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const aurTimeouts: PackageTimeouts = { install: Timeouts.toolchain, refresh: Timeouts.indexRefresh };
+const aurTimeouts: PackageTimeouts = {
+  install: Timeouts.toolchain,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeYayBackend = (): PackageManagerBackend => makeAurHelperBackend("yay");
 export const makeParuBackend = (): PackageManagerBackend => makeAurHelperBackend("paru");

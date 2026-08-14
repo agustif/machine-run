@@ -92,23 +92,16 @@ the access-control path.)
 Full raw bytes are saved as
 `packages/secrets/test/fixtures/keychain-multiline-hex-stdout.txt`.
 
-## What this means for `KeychainBackend.read`
+## Resolution
 
-This is a real, reproducible gap, not a corner case invented for this note:
-any secret containing a byte outside `isprint()`'s range — which includes
-every multi-line value, e.g. an SSH private key, a PEM certificate, or any
-JSON/YAML blob with embedded newlines, exactly the shapes `Machine.SecretFile`
-exists to write — comes back from `KeychainBackend.read` as an ASCII-hex
-string instead of its real value, silently, with exit code `0`. There is no
-way to reliably reverse this from `-w`'s output alone: a hex-looking string
-is ambiguous between "this is what a hex-encoded fallback looks like" and
-"this genuinely is the secret, and it happens to look like hex" — the fix
-belongs in `-g`'s parsing instead (its `0x<hex>` marker makes the two cases
-distinguishable), which is a real change to `KeychainBackend.read`'s
-implementation, not a documentation fix, and is out of this session's
-scope (see `packages/secrets/TASKS.md`).
+The `-w` result above was a real corruption finding. It is now fixed in
+`KeychainBackend.read`: the command uses `-g`, and the parser distinguishes the
+explicit `password: 0x<hex>` raw-byte form from the printable quoted form.
+The hex form is decoded byte-for-byte before being wrapped in `Redacted`, so a
+multi-line secret cannot silently become its ASCII representation.
 
-`keychain` moves from `~` to `!` in [MAP.md](../MAP.md), not `✓` — its
-missing-entry classification (`SecretNotFound`) is genuinely verified and
-correct, but its successful-read path is now *known* to silently corrupt any
-value containing a non-printable byte, which is worse than merely unverified.
+The regression cases are in `packages/secrets/test/Keychain.test.ts`, with the
+captured transcripts in `packages/secrets/test/fixtures/`. The current
+inventory is therefore `✓ keychain` in [MAP.md](../MAP.md); the remaining
+limitation is the already documented possibility of an interactive macOS
+Keychain access-control prompt, not a silent successful-read corruption.

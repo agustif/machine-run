@@ -32,10 +32,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("port", portVersionSupport);
 /** MacPorts — the second real option on macOS, alongside Homebrew. Install commands need `sudo` (MacPorts, unlike brew, expects root). */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const macPortsTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const macPortsTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makePortBackend = (): PackageManagerBackend => ({
   id: "port",
+  executable: "port",
+  shell: "posix",
   versions: portVersionSupport,
   timeouts: macPortsTimeouts,
   list: (exec) =>
