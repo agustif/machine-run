@@ -15,7 +15,7 @@ reconciled, plus a first deploy against a real, live machine.
 `Machine`/`System` split stopped meaning anything once both became
 reconcilers. Not release-gating (Alchemy's `Resource(type, { aliases })`
 carries pre-rename names, so a rename doesn't break state), but worth
-settling. TASKS.md P2.
+settling. TASKS.md P1.
 
 **Directory props.** Two ways to express a directory — `directoryMode` props
 versus `Machine.Directory` — is one too many.

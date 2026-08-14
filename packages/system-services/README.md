@@ -74,19 +74,12 @@ repo crosses. This is a recorded scope decision, not an oversight; see
 [TASKS.md](./TASKS.md)'s "Scope decision" section for the reasoning behind not
 bolting a `sudo: boolean` onto this resource.
 
-**This package's own [TASKS.md](./TASKS.md) is out of date on aggregation**:
-it and the doc comment in `examples/complete-machine/recipes/services.ts` both
-say this package is "not yet folded into `@machine-run/machine`'s aggregate
-`providers()`". That is no longer true — `packages/machine/src/Providers.ts`
-already merges `SystemServices.providers()` and lists this package in its
-`package.json` dependencies. `docs/MAP.md` §1 ("NOT YET AGGREGATED:
-system-services") is stale for the same reason.
-
 ## What it deliberately does not do
 
-- **No `unapply`.** Same conservative default as 16 of the other 17 resource
-  kinds in this repo — disabling and stopping a service something else may
-  depend on is not obviously the right response to a recipe line disappearing.
+- **No `unapply`.** Only 3 of this repo's 23 resource kinds implement
+  `unapply` (`Shell.Login`, `Git.Maintenance`, `System.Setting`) — disabling
+  and stopping a service something else may depend on is not obviously the
+  right response to a recipe line disappearing.
 - **Does not touch launchd's persistent enable/disable override**
   (`launchctl enable`/`disable`, distinct from "currently loaded"). A recipe
   that hits a job carrying that override gets an honest `CommandError` from a

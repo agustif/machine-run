@@ -35,7 +35,7 @@ deployed".
                                           │ depends on
    ┌──────────────────────────────────────┴──────────────────────────────────┐
    │                          examples/                                      │
-   │  example-machine ─── a recipe meant to run (6 resource kinds)            │
+   │  example-machine ─── a recipe meant to run (5 resource kinds)            │
    │  complete-machine ── all 23 kinds as compiled reference code             │
    │                      enforced by machine/test/ExampleCoverage.test.ts    │
    └──────────────────────────────────────┬──────────────────────────────────┘
@@ -157,7 +157,7 @@ failing.
 split stopped meaning anything once both became reconcilers. Not a
 state-schema break — Alchemy's `Resource(type, { aliases })` carries
 pre-rename names, so renaming doesn't gate release — but still worth
-settling; tracked in TASKS.md P2.
+settling; tracked in TASKS.md P1.
 
 `System.Service` keeps its three facts — `installed`, `enabled`, `running` —
 separate rather than one status, the same lesson `Runtime.Tool` already

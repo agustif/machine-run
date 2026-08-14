@@ -8,7 +8,7 @@ pluggable backend seam like `secrets` or `system-packages`.
 
 | Export                                   | What it's for                                                                                                                           |
 | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `Tailscale.Connection` (`Connection.ts`) | Tailnet membership: connects (`tailscale up`) if not already on the tailnet, updates the advertised hostname (`tailscale set`) if it is |
+| `TailscaleConnection` (`Tailscale.Connection`) | Tailnet membership: connects (`tailscale up`) if not already on the tailnet, updates the advertised hostname (`tailscale set`) if it is |
 
 ## Example
 

@@ -8,7 +8,7 @@ five interactive shells with genuinely different syntax.
 
 | Resource      | Reconciles                                                                        |
 | ------------- | --------------------------------------------------------------------------------- |
-| `Shell.Login` | the login shell (`chsh`), including its own `unapply` — the only one in this repo |
+| `Shell.Login` | the login shell (`chsh`), including its own `unapply` — one of three in this repo |
 
 | Composition               | What it does                                                                                                                                        |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -79,10 +79,12 @@ Windows, where its profile path differs (`Documents\PowerShell` vs.
 
 ## What it deliberately does not do
 
-- **`Shell.Login` is the only resource in this repo with `unapply`.** It
-  restores whatever shell `observe` recorded before this resource's first
-  apply — but that `unapply` itself has never run under a real `destroy`,
-  because no `destroy` has ever run against a real Alchemy engine.
+- **`Shell.Login` is one of three resources in this repo with `unapply`**
+  (with `Git.Maintenance` and `System.Setting`). It restores whatever shell
+  `observe` recorded before this resource's first apply. `plan`/`deploy`/
+  `destroy` all work against a real Alchemy engine now, but `Shell.Login`
+  is not among the resource kinds `scripts/deploy-check.sh` exercises, so
+  this specific `unapply` has not itself been run under a real `destroy`.
 - **No completion registration, prompt, or theme.** Every shell here has a
   completions mechanism and nothing models it; starship/oh-my-zsh/oh-my-posh
   are each their own ecosystem and are deliberately out of scope so far.

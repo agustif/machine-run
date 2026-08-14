@@ -70,8 +70,9 @@ for `Ssh.Key` (nothing mocked). The first-match-wins ordering `sshHost`'s
 confirmed that first-match-wins is per-_keyword_, not per-_block_, using a
 hand-written fixture. Not yet re-verified: the exact block `sshHost()` itself
 renders (multiple hostnames, `extra`, `ProxyCommand`) hasn't separately been
-run through `ssh -G`. Like every resource in this repo, none of this has been
-exercised by a real `alchemy plan`/`deploy` — see
+run through `ssh -G`. `plan`/`deploy`/`destroy` all work against a real
+Alchemy engine, but `Ssh.Key` and `Ssh.KnownHost` are not among the seven
+resource kinds actually exercised by `scripts/deploy-check.sh` — see
 [../../docs/MAP.md](../../docs/MAP.md).
 
 ## What it deliberately does not do

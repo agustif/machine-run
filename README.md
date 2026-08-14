@@ -27,8 +27,8 @@ A reconciler answers a different question — *does the machine match the recipe
 right now* — and converges only what doesn't:
 
 ```sh
-npm run plan     # preview; changes nothing
-npm run deploy   # converge
+node_modules/.bin/alchemy plan   <recipe.ts>          # preview; changes nothing
+node_modules/.bin/alchemy deploy <recipe.ts> --yes    # converge
 ```
 
 Every resource observes live state, so a file you hand-edited after machine-run

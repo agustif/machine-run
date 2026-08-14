@@ -42,6 +42,36 @@ yield * SystemPackages.Package("ripgrep", { manager: "brew", name: "ripgrep" });
 yield * SystemPackages.packages("brew", ["fd", "jq", "mise"]);
 ```
 
+## Version pinning
+
+`Package`'s `version` prop takes `@machine-run/core`'s `VersionSpec` —
+`Exact`, `AtLeast`, `Channel`, or `Digest` — and `updatePolicy` takes its
+`UpdatePolicy` — `Never` (default: install once, then leave drift alone),
+`ToSpec` (reinstall on any mismatch), or `Latest` (always resolve to
+whatever the manager considers newest). Neither field is required; omitting
+`version` keeps the original "whatever the manager resolves as current"
+behaviour.
+
+Not every manager accepts every spec, and each backend declares its own
+accepted subset via `Backend.ts`'s `PackageVersionSupport` — `snap` only
+takes `Channel`, `mas` takes no version at all, pacman's official repos only
+ever satisfy `Exact` when it names the version already current. Naming a
+spec a backend can't honour fails loudly with `UnsupportedVersionSpec`
+rather than installing unpinned; asking for a downgrade a backend can't
+perform fails with `CannotDowngrade` (which carries a `direction`).
+
+```ts
+import * as SystemPackages from "@machine-run/system-packages";
+
+yield *
+  SystemPackages.Package("ripgrep-pinned", {
+    manager: "brew",
+    name: "ripgrep",
+    version: { _tag: "Exact", version: "14.1.0" },
+    updatePolicy: { _tag: "ToSpec" },
+  });
+```
+
 ## Verification status
 
 Per [docs/MAP.md](../../docs/MAP.md) §4, verification is tracked per backend,
@@ -76,12 +106,12 @@ Three backends are worth calling out specifically:
 hello-world` ran snapd's real first-install bootstrap and the installed
   snap actually executed. See `docs/notes/system-packages-notes.md`.
 
+`System.Package` is also the one resource kind in this package to have gone
+through an actual `plan`/`deploy`/second-plan-is-empty/`destroy` cycle
+end-to-end (`scripts/deploy-check.sh`); `System.Repo` has not.
+
 ## What it deliberately does not do
 
-- **No version pinning.** `PackageProps` has no `version` field — "install
-  ripgrep" cannot yet mean a particular ripgrep. `matches` is membership
-  ("is it installed"), not a version comparison. Tracked in
-  [TASKS.md](./TASKS.md).
 - **No `list`/inventory.** A real machine can't yet be scanned into a starting
   recipe; every resource address has to be written by hand.
 - **No `unapply`.** Uninstalling a package someone else may now depend on is
