@@ -104,8 +104,8 @@ export const detectLineEnding = (content: string): LineEnding => {
   if (newlineCount === 0) return "lf";
   const crlfCount = (content.match(/\r\n/g) ?? []).length;
   return Boolean.match(crlfCount * 2 > newlineCount, {
-    onTrue: () => "crlf" as const,
-    onFalse: () => "lf" as const,
+    onTrue: (): LineEnding => "crlf",
+    onFalse: (): LineEnding => "lf",
   });
 };
 

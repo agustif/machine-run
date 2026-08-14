@@ -5,10 +5,15 @@ import * as nodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import type { RuntimeScope } from "../src/Backend.ts";
 import { makeAsdfBackend } from "../src/backends/Asdf.ts";
 import { makeMiseBackend } from "../src/backends/Mise.ts";
 import { makeRustupBackend } from "../src/backends/Rustup.ts";
 import { makeUvBackend } from "../src/backends/Uv.ts";
+
+/** Renders a fixture as JSON text — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 /**
  * A command runner returning fixed output — the same fixture pattern as
@@ -25,19 +30,19 @@ const capturingExec = (
   stdout: string,
   calls: Array<{ command: string; cwd: string | undefined }>,
 ): Exec =>
-  ((props) => {
+  (props) => {
     calls.push({ command: props.command, cwd: props.cwd });
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
-  }) as Exec;
+  };
 
 /** Queues a distinct fixture per call, for backends that shell out more than once per `observe`. */
 const sequencedExec = (outputs: readonly string[]): Exec => {
   let i = 0;
-  return (() => {
+  return () => {
     const stdout = outputs[i] ?? "";
     i += 1;
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
-  }) as Exec;
+  };
 };
 
 const HOME = "/home/test";
@@ -49,8 +54,8 @@ const HOME = "/home/test";
  */
 const p = (...segments: readonly string[]): string => nodePath.join(...segments);
 
-const GLOBAL = { _tag: "Global" as const };
-const dir = (path: string) => ({ _tag: "Directory" as const, path });
+const GLOBAL: RuntimeScope = { _tag: "Global" };
+const dir = (path: string): RuntimeScope => ({ _tag: "Directory", path });
 
 // ---------------------------------------------------------------------------
 // mise
@@ -67,7 +72,7 @@ it.effect("mise backend: observe reads installed+active from `mise ls <tool> --j
       { tool: "node", version: "20" },
       GLOBAL,
       fakeExec(
-        JSON.stringify([
+        toJsonText([
           {
             version: "20.20.2",
             requested_version: "20.20.2",
@@ -96,7 +101,7 @@ it.effect(
         { tool: "node", version: "22" },
         GLOBAL,
         fakeExec(
-          JSON.stringify([
+          toJsonText([
             { version: "22.23.2", install_path: "/x/22.23.2", installed: true, active: false },
             {
               version: "26.7.0",
@@ -414,7 +419,7 @@ it.effect(
 // ---------------------------------------------------------------------------
 
 /** Real captured output: `uv python list --only-installed --output-format json` on this machine. */
-const UV_PYTHON_LIST_ONLY_INSTALLED = JSON.stringify([
+const UV_PYTHON_LIST_ONLY_INSTALLED = toJsonText([
   {
     key: "cpython-3.14.6-macos-aarch64-none",
     version: "3.14.6",

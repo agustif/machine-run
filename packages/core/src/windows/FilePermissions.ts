@@ -192,7 +192,7 @@ export const WELL_KNOWN_PRINCIPALS = {
   owner: "*S-1-3-4",
   group: "*S-1-5-32-545",
   other: "*S-1-1-0",
-} as const;
+} satisfies Record<"owner" | "group" | "other", string>;
 
 /** One principal's grant: a Sid (or `icacls` Sid-string) and its rights. */
 export interface WindowsGrant {
@@ -230,7 +230,7 @@ const PRINCIPAL_CLASSES = [
   [WELL_KNOWN_PRINCIPALS.owner, "owner"],
   [WELL_KNOWN_PRINCIPALS.group, "group"],
   [WELL_KNOWN_PRINCIPALS.other, "other"],
-] as const;
+] satisfies ReadonlyArray<readonly [string, "owner" | "group" | "other"]>;
 
 /** Translates a mode's intent into the `icacls` plan that best approximates it. */
 export const toWindowsAclPlan = (permissions: FilePermissions): WindowsAclPlan => ({

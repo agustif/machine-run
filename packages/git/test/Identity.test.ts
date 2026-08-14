@@ -3,7 +3,10 @@ import { spawnSync } from "node:child_process";
 import * as Fs from "node:fs";
 import * as Os from "node:os";
 import * as Path from "node:path";
+import * as Schema from "effect/Schema";
 import { renderGhAccountSwitchCommand } from "../src/Identity.ts";
+
+const quoteAsShellString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
 // --- renderGhAccountSwitchCommand: shape ---
 
@@ -32,7 +35,7 @@ it("single-quotes a ghAccount carrying shell metacharacters", () => {
 /** A stub `gh` that logs the argv it was invoked with, one per line, to `logPath`. */
 const installGhStub = (binDir: string, logPath: string) => {
   const stubPath = Path.join(binDir, "gh");
-  Fs.writeFileSync(stubPath, `#!/bin/sh\nprintf '%s\\n' "$@" > ${JSON.stringify(logPath)}\n`);
+  Fs.writeFileSync(stubPath, `#!/bin/sh\nprintf '%s\\n' "$@" > ${quoteAsShellString(logPath)}\n`);
   Fs.chmodSync(stubPath, 0o755);
 };
 
@@ -46,10 +49,12 @@ const installGhStub = (binDir: string, logPath: string) => {
  * to run at all.
  */
 const runThroughRealShell = (command: string, binDir: string, cwd: string) => {
-  spawnSync("/bin/sh", ["-c", command], {
-    cwd,
-    env: { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` },
-  });
+  // The whole point of this test is a real `/bin/sh` finding a stub `gh` on
+  // `PATH` ahead of the real one — inheriting the actual process environment
+  // and prepending to its actual `PATH` is the mechanism, not a convenience.
+  // oxlint-disable-next-line effect/noGlobals -- process boundary: spawning a real shell for real, not through Effect's platform.
+  const env = { ...process.env, PATH: `${binDir}:${process.env["PATH"] ?? ""}` };
+  spawnSync("/bin/sh", ["-c", command], { cwd, env });
 };
 
 it("keeps a metacharacter-laden ghAccount inert against a real shell: gh sees it as one argument, and no injected command runs", () => {

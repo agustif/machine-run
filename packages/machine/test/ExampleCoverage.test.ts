@@ -2,6 +2,13 @@ import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import * as Path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as Schema from "effect/Schema";
+
+/** A package manifest's `name` field — `Schema.Json` codecs rather than `JSON.parse`. */
+const packageNameOf = (manifestPath: string): string =>
+  Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ name: Schema.String })))(
+    Fs.readFileSync(manifestPath, "utf8"),
+  ).name;
 
 /**
  * `examples/complete-machine` has to exercise every resource kind this repo
@@ -81,7 +88,7 @@ const declaredResources = (): readonly ResourceKind[] => {
       // forgot its resources. Crashing here would turn an unrelated in-progress
       // change into a failure of this check.
       if (!Fs.existsSync(srcDir) || !Fs.existsSync(manifest)) return [];
-      const pkg = JSON.parse(Fs.readFileSync(manifest, "utf8")).name as string;
+      const pkg = packageNameOf(manifest);
       return tsFilesIn(srcDir).flatMap((file) => {
         const source = Fs.readFileSync(file, "utf8");
         return [...source.matchAll(/export const (\w+) = Resource<[^>]*>\(\s*"([^"]+)"/g)].map(
@@ -164,7 +171,7 @@ const resourceDefiningPackages = (): readonly ResourcePackage[] => {
         /export const \w+ = Resource<[^>]*>\(/.test(Fs.readFileSync(file, "utf8")),
       );
       if (!definesResource) return [];
-      const name = JSON.parse(Fs.readFileSync(manifest, "utf8")).name as string;
+      const name = packageNameOf(manifest);
       return [{ name, dir }];
     });
 };

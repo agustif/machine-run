@@ -1,4 +1,4 @@
-import type { CommandError } from "alchemy/Command";
+import { CommandError, UnexpectedExit } from "alchemy/Command";
 import { MachinePathsLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { Exec } from "@machine-run/engine";
@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import { makeBrewServicesBackend } from "../src/backends/macos/BrewServices.ts";
 import { makeLaunchdBackend } from "../src/backends/macos/Launchd.ts";
 import { makeSystemdUserBackend } from "../src/backends/linux/SystemdUser.ts";
@@ -23,15 +24,12 @@ const fakeExec =
 const failingExec =
   (exitCode: number, stderr: string): Exec =>
   (props) =>
-    Effect.fail({
-      _tag: "CommandError" as const,
-      // Widened to plain `string`: `CommandError` (a real Alchemy class) has
-      // no `ShellCommand` field to overlap with, so keeping the brand here
-      // would make this fake object incomparable to it.
-      command: String(props.command),
-      reason: { _tag: "UnexpectedExit" as const, exitCode, stderr, message: stderr },
-      message: `Failed to execute command "${props.command}": ${stderr}`,
-    } as CommandError);
+    Effect.fail(
+      new CommandError({
+        command: String(props.command),
+        reason: new UnexpectedExit({ exitCode, stderr }),
+      }),
+    );
 
 /** A queued `Exec` fake and the commands it was actually asked to run. */
 interface QueuedExec {
@@ -50,18 +48,12 @@ const queuedExec = (
     const outcome = outcomes[i] ?? { stdout: "" };
     i += 1;
     if ("exitCode" in outcome) {
-      return Effect.fail({
-        _tag: "CommandError" as const,
-        // See `failingExec` above for why this is widened to `string`.
-        command: String(props.command),
-        reason: {
-          _tag: "UnexpectedExit" as const,
-          exitCode: outcome.exitCode,
-          stderr: outcome.stderr,
-          message: outcome.stderr,
-        },
-        message: `Failed to execute command "${props.command}": ${outcome.stderr}`,
-      } as CommandError);
+      return Effect.fail(
+        new CommandError({
+          command: String(props.command),
+          reason: new UnexpectedExit({ exitCode: outcome.exitCode, stderr: outcome.stderr }),
+        }),
+      );
     }
     return Effect.succeed({ exitCode: 0, stdout: outcome.stdout, stderr: "" });
   };
@@ -389,12 +381,15 @@ it.effect("systemd-user backend: converge issues enable/disable and start/stop i
 // backends/macos/BrewServices.ts
 // ---------------------------------------------------------------------------
 
+/** Renders a fixture as JSON text — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
 /**
  * Real, captured `brew services info transmission-cli --json` — a formula
  * installed on this machine via Homebrew with a service stanza, never
  * started (read-only; this backend was never asked to mutate it).
  */
-const BREW_INFO_NEVER_STARTED = JSON.stringify([
+const BREW_INFO_NEVER_STARTED = toJsonText([
   {
     name: "transmission-cli",
     service_name: "homebrew.mxcl.transmission-cli",
@@ -428,7 +423,7 @@ const BREW_INFO_NEVER_STARTED = JSON.stringify([
  * was started to get them, per this task's read-only constraint.
  */
 const brewInfoWith = (registered: boolean, loaded: boolean, running: boolean): string =>
-  JSON.stringify([{ registered, loaded, running }]);
+  toJsonText([{ registered, loaded, running }]);
 
 it.effect(
   "brew-services backend: observe maps registered/loaded/running to installed/enabled/running",

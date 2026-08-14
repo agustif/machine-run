@@ -4,6 +4,20 @@ import { CommandError, UnexpectedExit } from "alchemy/Command";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+
+/** Narrows a captured env value to `Redacted`, failing loudly if the test's own premise is wrong. */
+const redactedEnvValue = (
+  value: string | Redacted.Redacted<string> | undefined,
+): Redacted.Redacted<string> =>
+  Result.getOrThrow(
+    Result.liftPredicate(
+      value,
+      (v): v is Redacted.Redacted<string> => v !== undefined && Redacted.isRedacted(v),
+      () => "expected a captured env value to be Redacted, got a plain string or nothing",
+    ),
+  );
 import {
   makeTailscaleConnectionReconciler,
   TailscaleNotInstalled,
@@ -11,7 +25,7 @@ import {
 } from "../src/Connection.ts";
 
 const props: TailscaleConnectionProps = {
-  authKey: { _tag: "Env", variable: "TS_KEY" } as const,
+  authKey: { _tag: "Env", variable: "TS_KEY" },
 };
 
 const fakeExecOk = (stdout: string) => ({
@@ -81,7 +95,12 @@ it.effect("observe reports the connected state, including hostname, for a live d
     const reconciler = yield* makeTailscaleConnectionReconciler;
     const observed = yield* reconciler.observe(
       props,
-      fakeExecOk(JSON.stringify({ BackendState: "Running", Self: { HostName: "my-mac" } })),
+      fakeExecOk(
+        Schema.encodeSync(Schema.fromJsonString(Schema.Json))({
+          BackendState: "Running",
+          Self: { HostName: "my-mac" },
+        }),
+      ),
     );
     // The status decoder takes the command's stdout, not the whole
     // `{ exitCode, stdout, stderr }` result. Handing it the result object
@@ -137,7 +156,7 @@ it.effect(
       expect(seen[0]!.command).toContain("$TS_AUTHKEY");
       const authKey = seen[0]!.env?.TS_AUTHKEY;
       expect(authKey).toBeDefined();
-      expect(Redacted.value(authKey as Redacted.Redacted<string>)).toBe("tskey-secret-value");
+      expect(Redacted.value(redactedEnvValue(authKey))).toBe("tskey-secret-value");
     }),
 );
 

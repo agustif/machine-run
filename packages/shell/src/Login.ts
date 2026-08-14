@@ -139,7 +139,7 @@ export const makeLoginReconcilerAt = (
     const allowedShells = () =>
       fs.readFileString(shellsPath).pipe(
         Effect.map(parseEtcShells),
-        Effect.orElseSucceed(() => [] as string[]),
+        Effect.orElseSucceed((): string[] => []),
       );
 
     return {

@@ -173,9 +173,9 @@ export const Setting = Resource<Setting>("System.Setting");
 const backendIdFor = (props: SettingProps): SettingsBackendId =>
   Match.value(props).pipe(
     Match.tagsExhaustive({
-      Gsettings: () => "gsettings" as const,
-      GsettingsRelocatable: () => "gsettings" as const,
-      Dconf: () => "dconf" as const,
+      Gsettings: (): SettingsBackendId => "gsettings",
+      GsettingsRelocatable: (): SettingsBackendId => "gsettings",
+      Dconf: (): SettingsBackendId => "dconf",
     }),
   );
 

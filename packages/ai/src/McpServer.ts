@@ -135,6 +135,13 @@ export const McpServer = Resource<McpServer>("Ai.McpServer");
 
 const isSecretRef = (value: McpEnvValue): value is SecretSource => typeof value !== "string";
 
+/**
+ * A two-element tuple, typed from its own arguments rather than `as const` —
+ * the return type annotation is what gives `Object.fromEntries` a real
+ * `readonly [K, V]` instead of a widened `(K | V)[]`.
+ */
+const entry = <K, V>(key: K, value: V): readonly [K, V] => [key, value];
+
 /** Every declared key, sorted — both literal and secret-sourced, since either kind existing or not existing is real drift. */
 const declaredKeys = (entries: Record<string, McpEnvValue> | undefined): string[] =>
   Object.keys(entries ?? {}).sort();
@@ -143,7 +150,7 @@ const declaredKeys = (entries: Record<string, McpEnvValue> | undefined): string[
 const declaredLiteral = (entries: Record<string, McpEnvValue> | undefined) =>
   Object.fromEntries(
     Object.entries(entries ?? {}).flatMap(([key, value]) =>
-      typeof value === "string" ? [[key, value] as const] : [],
+      typeof value === "string" ? [entry(key, value)] : [],
     ),
   );
 
@@ -160,13 +167,13 @@ const observedKeysAndLiteral = (
   // a secret-sourced key contributes its presence but never its value, which
   // is why the live value is read only on the literal branch.
   const present = Object.entries(declared ?? {}).flatMap(([key, value]) =>
-    live !== undefined && key in live ? [[key, value] as const] : [],
+    live !== undefined && key in live ? [entry(key, value)] : [],
   );
   return {
     keys: present.map(([key]) => key).sort(),
     literal: Object.fromEntries(
       present.flatMap(([key, value]) =>
-        isSecretRef(value) ? [] : [[key, live?.[key] ?? ""] as const],
+        isSecretRef(value) ? [] : [entry(key, live?.[key] ?? "")],
       ),
     ),
   };
@@ -265,8 +272,8 @@ export const makeMcpServerReconciler: Effect.Effect<
         // `Remote` must still be reported honestly so `matches` (below) can
         // see the mismatch, rather than being silently coerced into agreement.
         const transport: McpTransportState | undefined = UndefinedOr.match(live.command, {
-          onDefined: (command) => ({
-            _tag: "Stdio" as const,
+          onDefined: (command): Extract<McpTransportState, { _tag: "Stdio" }> => ({
+            _tag: "Stdio",
             command,
             ...(live.args !== undefined ? { args: [...live.args] } : {}),
             ...(env.keys.length > 0 ? { envKeys: env.keys } : {}),
@@ -274,8 +281,8 @@ export const makeMcpServerReconciler: Effect.Effect<
           }),
           onUndefined: () =>
             UndefinedOr.match(live.url, {
-              onDefined: (url) => ({
-                _tag: "Remote" as const,
+              onDefined: (url): Extract<McpTransportState, { _tag: "Remote" }> => ({
+                _tag: "Remote",
                 url,
                 ...(headers.keys.length > 0 ? { headerKeys: headers.keys } : {}),
                 ...(Object.keys(headers.literal).length > 0

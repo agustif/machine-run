@@ -5,6 +5,21 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import { jsonRecordOr } from "../../src/backends/jsonConfigFile.ts";
+
+/** Decodes a written config file's raw text as JSON — `Schema.Json` rather than `JSON.parse`. */
+const decodeWrittenDocument = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
+);
+
+/**
+ * Reads one field out of a decoded document by successive keys, narrowing
+ * one level at a time. Every call site below only hands the result to
+ * `expect(...).toEqual`/`toBe`, which accept any value.
+ */
+const field = (doc: Schema.Json, ...path: readonly string[]): Schema.Json =>
+  path.reduce((current, key) => jsonRecordOr(current, {})[key] ?? null, doc);
 
 /**
  * A real `opencode.jsonc`, verified by running the actual, installed
@@ -13,27 +28,23 @@ import * as Path from "effect/Path";
  * see docs/ai-notes.md. `plugins`/`providers` are the same shape this
  * machine's real `~/.config/opencode/opencode.jsonc` carries.
  */
-const REAL_OPENCODE_JSONC = JSON.stringify(
-  {
-    $schema: "https://opencode.ai/config.json",
-    plugins: ["./plugin/lmstudio-v2.ts", "./plugin/restart-command.ts"],
-    providers: {
-      lmstudio: {
-        name: "LM Studio",
-        npm: "@ai-sdk/openai-compatible",
-        options: { baseURL: "http://127.0.0.1:1234/v1" },
-      },
-    },
-    mcp: {
-      existing: {
-        type: "remote",
-        url: "https://example.com/mcp",
-      },
+const REAL_OPENCODE_JSONC = Schema.encodeSync(Schema.fromJsonString(Schema.Json, { space: 2 }))({
+  $schema: "https://opencode.ai/config.json",
+  plugins: ["./plugin/lmstudio-v2.ts", "./plugin/restart-command.ts"],
+  providers: {
+    lmstudio: {
+      name: "LM Studio",
+      npm: "@ai-sdk/openai-compatible",
+      options: { baseURL: "http://127.0.0.1:1234/v1" },
     },
   },
-  null,
-  2,
-);
+  mcp: {
+    existing: {
+      type: "remote",
+      url: "https://example.com/mcp",
+    },
+  },
+});
 
 const layer = NodeServices.layer;
 
@@ -59,15 +70,25 @@ it.effect(
         ctx,
       );
 
-      const written = JSON.parse(yield* fs.readFileString(configPathOf(path, home)));
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(configPathOf(path, home)),
+      );
 
-      expect(written.plugins).toEqual(["./plugin/lmstudio-v2.ts", "./plugin/restart-command.ts"]);
-      expect(written.providers.lmstudio.options.baseURL).toBe("http://127.0.0.1:1234/v1");
-      expect(written.mcp.existing).toEqual({ type: "remote", url: "https://example.com/mcp" });
+      expect(field(written, "plugins")).toEqual([
+        "./plugin/lmstudio-v2.ts",
+        "./plugin/restart-command.ts",
+      ]);
+      expect(field(written, "providers", "lmstudio", "options", "baseURL")).toBe(
+        "http://127.0.0.1:1234/v1",
+      );
+      expect(field(written, "mcp", "existing")).toEqual({
+        type: "remote",
+        url: "https://example.com/mcp",
+      });
 
       // opencode's own real shape: the whole argv as one `command` array,
       // and `environment`, not `env`.
-      expect(written.mcp.localtest).toEqual({
+      expect(field(written, "mcp", "localtest")).toEqual({
         type: "local",
         command: ["npx", "-y", "my-mcp-server"],
         environment: { API_KEY: "xxx" },
@@ -98,8 +119,8 @@ it.effect("apply creates the config file and its parent directory when neither e
     const ctx: AiToolContext = { exec: dieExec, fs, path, home };
     yield* OpenCodeBackend.mcp!.apply("first", { command: "npx" }, ctx);
 
-    const written = JSON.parse(yield* fs.readFileString(configPathOf(path, home)));
-    expect(written.mcp.first).toEqual({ type: "local", command: ["npx"] });
+    const written = yield* decodeWrittenDocument(yield* fs.readFileString(configPathOf(path, home)));
+    expect(field(written, "mcp", "first")).toEqual({ type: "local", command: ["npx"] });
   }).pipe(Effect.provide(layer)),
 );
 

@@ -75,6 +75,10 @@ const PlistDateSchema = Schema.Struct({ $date: Schema.String });
  */
 export const PlistValueSchema: Schema.Codec<PlistValue> = Schema.suspend(
   (): Schema.Codec<PlistValue> =>
+    // The recursive union cannot be expressed without the assertion on this
+    // expression's closing line: see this constant's doc comment, which records
+    // the "type instantiation is excessively deep" failure it avoids.
+    // oxlint-disable-next-line effect/noAs
     Schema.Union([
       Schema.Boolean,
       Schema.Number,
@@ -114,6 +118,8 @@ const asDate = Schema.decodeUnknownOption(PlistDateSchema);
 const isRecord = (value: unknown): value is object =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+
+
 /**
  * Every conversion below returns a {@link Result} rather than throwing.
  *
@@ -123,6 +129,14 @@ const isRecord = (value: unknown): value is object =>
  * failure in the type, lets the caller lift it into an Effect at one place, and
  * keeps the whole module testable without a runtime.
  */
+/**
+ * A two-element tuple typed from its own arguments, so `Object.fromEntries`
+ * receives a real `readonly [K, V]` rather than a widened `(K | V)[]`. The same
+ * helper `Ai.McpServer` uses for the same reason — the alternative is a
+ * `as const` on every pair.
+ */
+const entry = <K, V>(key: K, value: V): readonly [K, V] => [key, value];
+
 const traverse = <A, B>(
   items: ReadonlyArray<A>,
   f: (item: A) => Result.Result<B, PlistDecodeError>,
@@ -185,7 +199,14 @@ const toNative = (value: PlistValue): Result.Result<NativePlistValue, PlistDecod
     // is left alone.
     const entries = Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
     const converted = traverse(entries, ([key, inner]) =>
-      toNative(inner as PlistValue).pipe(Result.map((native) => [key, native] as const)),
+      // `inner as PlistValue`: `isRecord` above narrows by *excluding* `object`
+      // on its false branch, which is what lets this function's tail return
+      // `boolean | number | string` — a guard narrowing to `PlistDict` instead
+      // would leave `PlistArray`/`PlistData`/`PlistDate` in that tail even
+      // though the branches above handle them, so `isRecord` earns its
+      // `value is object` and `Object.entries` yields `unknown` values here.
+      // oxlint-disable-next-line effect/noAs -- see the comment above.
+      toNative(inner as PlistValue).pipe(Result.map((native) => entry(key, native))),
     );
     return Result.map(converted, (pairs) => Object.fromEntries(pairs));
   }
@@ -200,7 +221,7 @@ const fromNative = (value: unknown): Result.Result<PlistValue, PlistDecodeError>
   if (Array.isArray(value)) return traverse(value, fromNative);
   if (isRecord(value)) {
     const converted = traverse(Object.entries(value), ([key, inner]) =>
-      fromNative(inner).pipe(Result.map((plist) => [key, plist] as const)),
+      fromNative(inner).pipe(Result.map((plist) => entry(key, plist))),
     );
     return Result.map(converted, (pairs) => Object.fromEntries(pairs));
   }

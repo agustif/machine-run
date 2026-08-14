@@ -103,6 +103,15 @@ import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
  * the parts every machine resource shares. Both kinds compose in the same
  * stack, because both are just providers.
  */
+/**
+ * The one shape Alchemy's `diff` uses to say "this resource needs applying".
+ * A named constant rather than an inline literal with `as const`. `satisfies`
+ * rather than a declared type: it checks the shape while still letting
+ * inference keep `action` as `"update"` instead of widening it to `string`,
+ * which a declared anonymous target type would discard.
+ */
+const NEEDS_UPDATE = { action: "update" } satisfies { readonly action: "update" };
+
 export const toProvider = <Res extends ResourceLike, E, R>(
   cls: ResourceClassLike<Res>,
   /**
@@ -153,10 +162,10 @@ export const toProvider = <Res extends ResourceLike, E, R>(
           if (!isResolved(news)) return undefined;
 
           const observed = yield* reconciler.observe(news, observeCtx);
-          if (observed === undefined) return { action: "update" as const };
+          if (observed === undefined) return NEEDS_UPDATE;
 
           const desired = yield* reconciler.desired(news);
-          return reconciler.matches(observed, desired) ? undefined : { action: "update" as const };
+          return reconciler.matches(observed, desired) ? undefined : NEEDS_UPDATE;
         }),
 
         reconcile: Effect.fn(function* ({

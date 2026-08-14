@@ -166,6 +166,9 @@ export const wrapState = (
     // a single expression is exactly what `noChainedTypeAssertions` exists to
     // flag, since it discards the ability to reason about either step alone.
     const localSetUntyped: unknown = local.set;
+    // The disk deliberately holds an `Envelope` where the interface says
+    // `PersistedState` — see the comment above for why.
+    // oxlint-disable-next-line effect/noAs
     const setEnvelope = localSetUntyped as (request: {
       stack: string;
       stage: string;
@@ -198,7 +201,9 @@ export const wrapState = (
         // is the one place a state-store adapter is expected to reach for the
         // global directly — see the rule's own message ("platform adapters
         // may disable this rule explicitly").
-        // oxlint-disable-next-line effect/noGlobals -- see comment above
+        // A third-party reviver is the only thing that can rebuild these
+        // markers, and it is typed `any`, so its result has to be asserted once.
+        // oxlint-disable-next-line effect/noGlobals, effect/noAs
         return JSON.parse(new TextDecoder().decode(plaintext), reviveState) as PersistedState;
       });
 

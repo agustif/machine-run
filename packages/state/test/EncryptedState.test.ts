@@ -10,9 +10,25 @@ import {
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
 import type { Exec } from "../src/DataKey.ts";
 import { wrapState } from "../src/EncryptedState.ts";
-import type { Envelope } from "../src/Envelope.ts";
+import { Envelope } from "../src/Envelope.ts";
+
+/**
+ * Renders an arbitrary stored row as JSON text for a substring check —
+ * `Schema.Json` codecs rather than `JSON.stringify`. `decodeUnknownSync`
+ * parses the boundary (a row genuinely is `unknown` here, read back out of a
+ * fake in-memory store) before `encodeSync` serializes it.
+ */
+const toJsonText = (value: unknown): string =>
+  Schema.encodeSync(Schema.fromJsonString(Schema.Json))(Schema.decodeUnknownSync(Schema.Json)(value));
+
+/** Narrows a read-back `PersistedState` to the `"created"` case a test expects it to be. */
+const isCreatedResourceState = (
+  state: PersistedState | undefined,
+): state is CreatedResourceState => state !== undefined && "status" in state && state.status === "created";
 
 /**
  * A tiny in-memory `StateService`, standing in for `LocalState`.
@@ -41,6 +57,11 @@ const makeFakeUnderlying = () => {
         [...rows.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)),
       );
     },
+    // `StateService.get` promises `PersistedState`, but `wrapState` (the thing
+    // under test) stores an `Envelope` in this same slot instead — a real
+    // boundary mismatch between what the interface declares and what this
+    // fake actually holds once encryption is in the loop, not a convenience.
+    // oxlint-disable-next-line effect/noAs -- see comment above; `rows` is genuinely untyped storage.
     get: (request) => Effect.succeed(rows.get(key(request)) as PersistedState | undefined),
     set: (request) =>
       Effect.sync(() => {
@@ -209,13 +230,14 @@ it.effect("the plaintext secret does not appear in what gets written to the unde
     yield* state.set({ stack: "s", stage: "dev", fqn: "MyResource", value });
 
     const stored = rows.get("s/dev/MyResource");
-    expect(JSON.stringify(stored)).not.toContain(secret);
+    expect(toJsonText(stored)).not.toContain(secret);
 
     // And the row is still recoverable — this isn't corruption, it's encryption.
     const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
-    expect(
-      Redacted.value((read as CreatedResourceState).attr.privateKey as Redacted.Redacted<string>),
-    ).toBe(secret);
+    const created = Result.getOrThrow(
+      Result.liftPredicate(read, isCreatedResourceState, () => "expected a CreatedResourceState"),
+    );
+    expect(Redacted.value(created.attr.privateKey)).toBe(secret);
   }),
 );
 
@@ -227,7 +249,7 @@ it.effect("a modified ciphertext fails to decrypt: get degrades to undefined, no
 
     yield* state.set({ stack: "s", stage: "dev", fqn: "MyResource", value: row() });
 
-    const stored = rows.get("s/dev/MyResource") as Envelope;
+    const stored = Schema.decodeUnknownSync(Envelope)(rows.get("s/dev/MyResource"));
     const tampered = {
       ...stored,
       ciphertext: `${stored.ciphertext.slice(0, -1)}${stored.ciphertext.at(-1) === "A" ? "B" : "A"}`,

@@ -26,19 +26,17 @@ const applyCtx = {
 };
 const observeCtx = { exec: () => Effect.die("not used") };
 
-/** Unwraps a render that is expected to succeed. */
+/**
+ * Unwraps a render that is expected to succeed, throwing the real
+ * `ManagedBlockMalformed` tagged error — it already carries its own
+ * `message` — rather than wrapping it in a generic `Error`.
+ */
 const render = (
   existing: string,
   marker: string,
   content: string,
   options?: Parameters<typeof renderFile>[3],
-): string => {
-  const result = renderFile(existing, marker, content, options);
-  if (Result.isFailure(result)) {
-    throw new Error(`expected a successful render, got: ${result.failure.detail}`);
-  }
-  return result.success;
-};
+): string => Result.getOrThrow(renderFile(existing, marker, content, options));
 
 it("inserts a region into an empty file", () => {
   expect(render("", "example", "line one")).toBe(

@@ -25,19 +25,17 @@ const applyCtx = {
 };
 const observeCtx = { exec: () => Effect.die("not used") };
 
-/** Unwraps a render that is expected to succeed. */
+/**
+ * Unwraps a render that is expected to succeed, throwing the real
+ * `LineInFileMalformed` tagged error — it already carries its own
+ * `message` — rather than wrapping it in a generic `Error`.
+ */
 const render = (
   existing: string,
   match: string,
   line: string,
   options?: Parameters<typeof renderLine>[3],
-) => {
-  const result = renderLine(existing, match, line, options);
-  if (Result.isFailure(result)) {
-    throw new Error(`expected a successful render, got: ${result.failure.detail}`);
-  }
-  return result.success;
-};
+) => Result.getOrThrow(renderLine(existing, match, line, options));
 
 it("inserts a new line at the end of an empty file", () => {
   expect(render("", "^export FOO=", "export FOO=bar")).toBe("export FOO=bar\n");

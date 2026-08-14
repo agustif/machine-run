@@ -10,13 +10,12 @@ import {
   render,
 } from "../src/Value.ts";
 
-/** Unwraps a conversion the test expects to succeed. */
-const ok = <A>(result: Result.Result<A, PlistDecodeError>): A => {
-  if (Result.isFailure(result)) {
-    throw new Error(`expected success, got: ${result.failure.message}`);
-  }
-  return result.success;
-};
+/**
+ * Unwraps a conversion the test expects to succeed, throwing the real
+ * `PlistDecodeError` — already a proper tagged error with its own `message`
+ * — rather than wrapping it in a generic `Error`.
+ */
+const ok = <A>(result: Result.Result<A, PlistDecodeError>): A => Result.getOrThrow(result);
 
 const xml = (value: PlistValue): string => ok(render(value));
 

@@ -250,13 +250,15 @@ const scopeEquals = (a: RuntimeScope, b: RuntimeScope): boolean => {
  * same two facts, whether the underlying concept is a version or a channel.
  */
 const resolveVersion = (requested: string, observation: RuntimeObservation): string | undefined => {
-  const activeSatisfies =
-    observation.active !== undefined && versionSatisfies(requested, observation.active);
-  const matchingInstalled = observation.installed.find((candidate) =>
-    versionSatisfies(requested, candidate),
-  );
-  if (!activeSatisfies && matchingInstalled === undefined) return undefined;
-  return activeSatisfies ? (observation.active as string) : (matchingInstalled as string);
+  // Returned from inside each narrowing check rather than computed up front and
+  // selected afterwards. The previous shape held the answer in an
+  // `activeSatisfies` boolean, which carries no type evidence, so both branches
+  // needed `as string` to re-assert what the boolean already implied. Checking
+  // and returning in the same statement lets the compiler see it.
+  if (observation.active !== undefined && versionSatisfies(requested, observation.active)) {
+    return observation.active;
+  }
+  return observation.installed.find((candidate) => versionSatisfies(requested, candidate));
 };
 
 /**

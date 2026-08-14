@@ -1,6 +1,8 @@
+import { CommandError, UnexpectedExit } from "alchemy/Command";
 import type { Exec } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import type { GsettingsRelocatableIdentity } from "../src/Backend.ts";
 import { DconfBackend } from "../src/backends/Dconf.ts";
 import { GsettingsBackend } from "../src/backends/Gsettings.ts";
 
@@ -20,12 +22,12 @@ const fakeExec =
 const failingExec =
   (stderr: string): Exec =>
   (props) =>
-    Effect.fail({
-      _tag: "CommandError" as const,
-      command: props.command,
-      reason: { _tag: "UnexpectedExit" as const, exitCode: 1, stderr, message: stderr },
-      message: `Failed to execute command "${props.command}": ${stderr}`,
-    } as never);
+    Effect.fail(
+      new CommandError({
+        command: props.command,
+        reason: new UnexpectedExit({ exitCode: 1, stderr }),
+      }),
+    );
 
 /** The same, but recording the command strings it was asked to run. */
 const capturingExec =
@@ -171,8 +173,8 @@ it.effect(
 
 it.effect("gsettings backend write/reset also address a relocatable schema as `schema:path`", () =>
   Effect.gen(function* () {
-    const identity = {
-      _tag: "GsettingsRelocatable" as const,
+    const identity: GsettingsRelocatableIdentity = {
+      _tag: "GsettingsRelocatable",
       schema: "org.example.relocatable",
       path: "/org/example/testpath1/",
       key: "greeting",

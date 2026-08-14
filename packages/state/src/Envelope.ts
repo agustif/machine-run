@@ -24,7 +24,7 @@ export const Envelope = Schema.Struct({
 
 export type Envelope = typeof Envelope.Type;
 
-export const ENVELOPE_VERSION = 1 as const;
+export const ENVELOPE_VERSION: 1 = 1;
 
 /** AES-256 key material, in bytes. */
 export const KEY_BYTES = 32;

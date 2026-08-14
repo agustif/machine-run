@@ -38,7 +38,7 @@ const LINUX_FAMILIES = [
   { marker: "/etc/debian_version", manager: "apt" },
   { marker: "/etc/redhat-release", manager: "dnf" },
   { marker: "/etc/arch-release", manager: "pacman" },
-] as const satisfies ReadonlyArray<{ marker: string; manager: PackageManagerId }>;
+] satisfies ReadonlyArray<{ marker: string; manager: PackageManagerId }>;
 
 const linuxManager = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -47,7 +47,7 @@ const linuxManager = Effect.gen(function* () {
   }
   // Homebrew on Linux is a real and common answer for distros outside those
   // families, unlike on Windows where it does not exist at all.
-  return "brew" as const;
+  return "brew" satisfies PackageManagerId;
 });
 
 /**

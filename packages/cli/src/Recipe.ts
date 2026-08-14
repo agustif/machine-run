@@ -60,10 +60,13 @@ export class RecipeImportFailed extends Data.TaggedError("RecipeImportFailed")<{
  * dynamic import has one obvious home.
  */
 const importRecipeModule = (absolutePath: string): Promise<{ default?: unknown }> =>
-  import(`file://${absolutePath}`) as Promise<{ default?: unknown }>;
+  import(`file://${absolutePath}`);
 
 /** Recipe filenames looked for when none is given, in order. */
-const DEFAULT_NAMES = ["alchemy.run.ts", "machine.run.ts"] as const;
+const DEFAULT_NAMES: readonly ["alchemy.run.ts", "machine.run.ts"] = [
+  "alchemy.run.ts",
+  "machine.run.ts",
+];
 
 /**
  * Resolves the recipe path: the one given, or the first default name present
@@ -125,6 +128,7 @@ export const loadRecipe = (
       // dynamically imported value is one. What *is* checked above is every
       // property that can be: present, and of a shape that could be an Effect.
       // Anything past that is Alchemy's to judge, and it does, loudly.
+      // oxlint-disable-next-line effect/noAs -- genuinely unavoidable boundary cast, see comment above.
       return Effect.succeed(exported as Recipe);
     }),
   );

@@ -1,16 +1,21 @@
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
-import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { CREDENTIAL_DIRECTORY_MODE, writeCredentialFileString } from "@machine-run/core";
+import * as UndefinedOr from "effect/UndefinedOr";
 import {
   AiToolConfigMalformed,
   type AiMcpServerDesired,
   type AiMcpServerSpec,
   type AiToolBackend,
   type AiToolContext,
-  type AiToolError,
 } from "../Backend.ts";
+import {
+  type JsonConfigDocument,
+  jsonRecordOr,
+  readJsonDocument,
+  unwrapRecord,
+  writeJsonDocument,
+} from "./jsonConfigFile.ts";
 
 /**
  * One entry under `mcpServers` in Claude Code's own config — re-verified this
@@ -46,9 +51,6 @@ type McpServerEntry = typeof McpServerEntry.Type;
 const McpServers = Schema.Record(Schema.String, McpServerEntry);
 const decodeMcpServers = Schema.decodeUnknownEffect(McpServers);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * `~/.claude.json` is Claude Code's whole client-side state file — onboarding
  * flags, cached feature data, per-project settings, and (at user scope, which
@@ -56,59 +58,17 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * would mean re-declaring dozens of fields this package has no business
  * knowing about, and would silently drop any it got wrong. Instead only the
  * one key this backend owns is decoded; everything else round-trips as
- * opaque `unknown` — read, never inspected, written back byte-for-byte.
+ * opaque `Schema.Json` — read, never inspected, written back byte-for-byte.
  */
+/** The file this backend's registrations live in — also this resource's
+ * `address`, so a `Machine.File` on the same path shares its lock. */
 const configFile = (home: string, path: Path.Path) => path.join(home, ".claude.json");
 
-const readDocument = (
-  configPath: string,
-  ctx: AiToolContext,
-): Effect.Effect<Record<string, unknown>, AiToolError> =>
-  Effect.gen(function* () {
-    const present = yield* ctx.fs.exists(configPath);
-    if (!present) return {};
-    const text = yield* ctx.fs.readFileString(configPath);
-    const parsed = yield* Effect.try({
-      try: () => JSON.parse(text) as unknown,
-      catch: (cause) => new AiToolConfigMalformed({ tool: "claude", path: configPath, cause }),
-    });
-    if (!isRecord(parsed)) {
-      return yield* Effect.fail(
-        new AiToolConfigMalformed({
-          tool: "claude",
-          path: configPath,
-          cause: "top-level JSON value is not an object",
-        }),
-      );
-    }
-    return parsed;
-  });
+const readDocument = (configPath: string, ctx: AiToolContext) =>
+  readJsonDocument("claude", configPath, ctx, {});
 
-/**
- * `mcpServers[].env` accepts `Redacted<string>` — carrying an API key into
- * this file is the documented use, not an accident — so the file is written
- * with the credential discipline rather than at the process umask.
- */
-const writeDocument = (configPath: string, doc: Record<string, unknown>, ctx: AiToolContext) =>
-  Effect.gen(function* () {
-    yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), {
-      recursive: true,
-      mode: CREDENTIAL_DIRECTORY_MODE,
-    });
-    yield* writeCredentialFileString(ctx.fs, configPath, `${JSON.stringify(doc, null, 2)}\n`);
-  });
-
-const unwrap = (value: string | Redacted.Redacted<string>): string =>
-  Redacted.isRedacted(value) ? Redacted.value(value) : value;
-
-const unwrapRecord = (
-  values: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined,
-): Record<string, string> | undefined => {
-  if (values === undefined) return undefined;
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(values)) out[key] = unwrap(value);
-  return out;
-};
+const writeDocument = (configPath: string, doc: JsonConfigDocument, ctx: AiToolContext) =>
+  writeJsonDocument("claude", configPath, doc, ctx);
 
 const specToEntry = (spec: AiMcpServerDesired): McpServerEntry => {
   if (spec.url !== undefined) {
@@ -171,22 +131,21 @@ export const ClaudeBackend: AiToolBackend = {
       Effect.gen(function* () {
         const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
-        const raw = isRecord(doc.mcpServers) ? doc.mcpServers : {};
+        const raw = jsonRecordOr(doc.mcpServers ?? null, {});
         const servers = yield* decodeMcpServers(raw).pipe(
           Effect.catchTag(
             "SchemaError",
             (cause) => new AiToolConfigMalformed({ tool: "claude", path: configPath, cause }),
           ),
         );
-        const entry = servers[name];
-        return entry === undefined ? undefined : entryToSpec(entry);
+        return UndefinedOr.map(servers[name], entryToSpec);
       }),
 
     apply: (name, desired, ctx) =>
       Effect.gen(function* () {
         const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
-        const raw = isRecord(doc.mcpServers) ? doc.mcpServers : {};
+        const raw = jsonRecordOr(doc.mcpServers ?? null, {});
         yield* writeDocument(
           configPath,
           { ...doc, mcpServers: { ...raw, [name]: specToEntry(desired) } },
