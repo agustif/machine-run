@@ -48,6 +48,40 @@ hand-rolled mutual exclusion, `Clock` over `new Date()`, `Schema` over
 
 ---
 
+## 0b. Maximum type safety, always
+
+The compiler is the only reviewer that never gets tired, and every time this
+repo has widened a type to quiet it, the widening was hiding a real defect.
+`as never` at the engine seam hid a reconciler whose state was never tied to its
+resource's declared attributes. `Sh` returning a bare `string` hid a
+caller-supplied prop interpolated raw into a shell command. A `catch` that took
+every failure hid an encryption key being destroyed by a transient read error.
+
+So:
+
+- **No `as never`, no `as unknown as`, no widening to `unknown`** to make code
+  compile. If something will not type, that is information about the model, not
+  an obstacle. `as never` currently appears nowhere in `packages/*/src`; keep it
+  that way.
+- **A cast that is genuinely unavoidable must be named, bounded to the narrowest
+  possible type, and documented with why.** `withoutEvalStackInternals` in
+  `@machine-run/cli` is the shape: it accepts exactly the two services Alchemy
+  provides internally, so a third appearing later is a compile error rather than
+  something silently absorbed.
+- **No lint overrides.** Not in the root config, not per package. A rule that is
+  wrong is wrong for everyone and should be argued about; a rule that is right
+  should not be switched off for the file that finds it inconvenient. Where a
+  platform boundary genuinely cannot satisfy a rule, the exception is inline at
+  the line, with a reason, so it is visible to the next reader instead of buried
+  in a glob.
+- **Prefer a type over a convention.** Three disciplines in this repo were
+  written into doc comments, ignored by the next package, and cost real bugs:
+  telling absent from unreadable, confirming a write, and collapsing only
+  verified exit codes. Two are now `core` helpers and one is a brand. Prose does
+  not transmit; signatures do.
+
+---
+
 ## 1. Alchemy is a dependency, not a fork
 
 Do not vendor `alchemy` or `alchemy-test`. A vendored copy puts a second set of

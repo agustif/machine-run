@@ -33,7 +33,7 @@ debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       [docs/MAP.md](../../docs/MAP.md).
 - [x] **`env` verified with no account and no CLI at all.** `Config.redacted`
       against the real, unmocked default `ConfigProvider` inside `docker run
-  --rm -e MACHINE_RUN_TEST_SECRET=... node:22-slim` (this repo's pinned
+--rm -e MACHINE_RUN_TEST_SECRET=... node:22-slim` (this repo's pinned
       `effect@4.0.0-rc.108`): a set variable round-tripped its exact literal
       value, an unset one failed with a real `ConfigError`. See
       `docs/notes/secrets-env-notes.md`. `env` is `✓` in
@@ -41,8 +41,8 @@ debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
 - [x] **`op`/`doppler`'s `SecretAuthRequired` classification checked against
       real, unauthenticated CLIs — and both had a real gap, now fixed.**
       `op read` with zero accounts configured (`docker run --rm
-  debian:stable` + the official 1Password apt repo) produces `No
-  accounts configured for use with 1Password CLI.`, which matched none
+debian:stable` + the official 1Password apt repo) produces `No
+accounts configured for use with 1Password CLI.`, which matched none
       of `classify`'s three original substrings. `doppler secrets get` with
       no token produces `Doppler Error: you must provide a token`, which
       likewise matched neither of its two. Both real "not authenticated"
