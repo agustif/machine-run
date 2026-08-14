@@ -1,3 +1,4 @@
+import type * as Core from "@machine-run/core";
 import type { CommandRunProps } from "alchemy/Command";
 import type { CommandError } from "alchemy/Command";
 import type * as Effect from "effect/Effect";
@@ -12,12 +13,24 @@ export interface CommandOutput {
 }
 
 /**
+ * {@link CommandRunProps} with `command` narrowed to `ShellCommand`.
+ *
+ * Alchemy's own type has `command: string`, which cannot tell a value built by
+ * `Sh.sh`/`Sh.pwsh` (or deliberately escaped via `Sh.unsafeRaw`) apart from a
+ * raw template literal. Narrowing it here is what makes the brand load-bearing
+ * at the one place every reconciler actually runs a command.
+ */
+export type ExecProps = Omit<CommandRunProps, "command"> & {
+  readonly command: Core.Sh.ShellCommand;
+};
+
+/**
  * Runs a command and returns its output.
  *
  * Which status session the command reports to is bound by the engine, per
  * phase, so nothing downstream has to know a session exists.
  */
-export type Exec = (props: CommandRunProps) => Effect.Effect<CommandOutput, CommandError>;
+export type Exec = (props: ExecProps) => Effect.Effect<CommandOutput, CommandError>;
 
 /**
  * What a reconciler is allowed to do while *looking* at the machine.

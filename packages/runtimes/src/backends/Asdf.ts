@@ -75,7 +75,7 @@ export const makeAsdfBackend = (deps: {
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
 
-      const plugins = yield* exec({ command: "asdf plugin list", cwd });
+      const plugins = yield* exec({ command: Sh.sh("asdf", "plugin", "list"), cwd });
       if (!lines(plugins.stdout).includes(tool)) {
         return { installed: [], active: undefined } satisfies RuntimeObservation;
       }

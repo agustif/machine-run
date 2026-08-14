@@ -28,7 +28,7 @@ import { lines } from "../../parse.ts";
 export const makePacmanBackend = (): PackageManagerBackend => ({
   id: "pacman",
   list: (exec) =>
-    exec({ command: "pacman -Qq" }).pipe(Effect.map((result) => lines(result.stdout))),
+    exec({ command: Sh.sh("pacman", "-Qq") }).pipe(Effect.map((result) => lines(result.stdout))),
   install: (name, exec) =>
     exec({
       command: Sh.sh("sudo", "pacman", "-S", "--noconfirm", name),

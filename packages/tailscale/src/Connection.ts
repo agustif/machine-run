@@ -107,7 +107,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
   address: () => "tailscale:connection",
 
   observe: (_props, ctx) =>
-    ctx.exec({ command: "tailscale status --json" }).pipe(
+    ctx.exec({ command: Sh.sh("tailscale", "status", "--json") }).pipe(
       Effect.flatMap((result) => decodeStatus(result.stdout)),
       Effect.map((status) =>
         status.BackendState === "Running"
@@ -139,22 +139,34 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
 
   apply: ({ props, observed, desired }, ctx) =>
     Effect.gen(function* () {
-      const hostnameFlag = desired.hostname !== undefined ? ` --hostname="$TS_HOSTNAME"` : "";
+      const hostnameFlag = UndefinedOr.match(desired.hostname, {
+        onUndefined: () => "",
+        onDefined: () => ` --hostname=${Sh.ref("TS_HOSTNAME")}`,
+      });
       // Typed as the record `CommandProps.env` expects, so a conditionally
       // absent key stays absent rather than becoming an explicit `undefined`
       // value the index signature rejects.
-      const hostnameEnv: Record<string, string | Redacted.Redacted<string>> =
-        desired.hostname !== undefined ? { TS_HOSTNAME: desired.hostname } : {};
+      const hostnameEnv: Record<string, string | Redacted.Redacted<string>> = UndefinedOr.match(
+        desired.hostname,
+        { onUndefined: () => ({}), onDefined: (hostname) => ({ TS_HOSTNAME: hostname }) },
+      );
 
       if (observed === undefined) {
         const authKey = yield* readSecret(props.authKey, ctx.exec);
 
         yield* ctx.exec({
-          // The key reaches the process through `env` as a `Redacted`, never
-          // through the command string: an interpolated key is visible in `ps`
-          // output and in any `CommandError` message, while Alchemy's redactor
-          // scrubs values passed this way.
-          command: `tailscale up --authkey="$TS_AUTHKEY"${hostnameFlag}`,
+          // The key and hostname reach the process through `env` (a
+          // `Redacted` for the key), never through the command string: an
+          // interpolated value is visible in `ps` output and in any
+          // `CommandError` message, while Alchemy's redactor scrubs values
+          // passed this way. `Sh.sh`'s argv quoting cannot express a `"$VAR"`
+          // reference either — it would single-quote the `$` and suppress
+          // the very expansion this needs — so this is `Sh.ref` spliced into
+          // an explicit `Sh.unsafeRaw`, not a value being interpolated.
+          command: Sh.unsafeRaw(
+            `tailscale up --authkey=${Sh.ref("TS_AUTHKEY")}${hostnameFlag}`,
+            "references $TS_AUTHKEY/$TS_HOSTNAME via env so neither reaches the command string; Sh.sh's argv quoting would single-quote the $ and break the expansion",
+          ),
           shell: true,
           env: { TS_AUTHKEY: authKey, ...hostnameEnv },
           timeout: "2 minutes",
@@ -164,10 +176,14 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
 
       // Already on the tailnet, so only the hostname needs moving.
       yield* ctx.exec({
-        command:
-          desired.hostname !== undefined
-            ? `tailscale set --hostname="$TS_HOSTNAME"`
-            : Sh.sh("tailscale", "set", "--hostname="),
+        command: UndefinedOr.match(desired.hostname, {
+          onUndefined: () => Sh.sh("tailscale", "set", "--hostname="),
+          onDefined: () =>
+            Sh.unsafeRaw(
+              `tailscale set --hostname=${Sh.ref("TS_HOSTNAME")}`,
+              "references $TS_HOSTNAME via env; same reason as tailscale up above",
+            ),
+        }),
         shell: true,
         env: hostnameEnv,
         timeout: "1 minute",

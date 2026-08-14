@@ -62,7 +62,14 @@ export const makeNpmBackend = (): PackageManagerBackend => ({
   list: (exec) =>
     Effect.gen(function* () {
       const result = yield* exec({
-        command: "npm ls -g --depth=0 --json; true",
+        // `; true` neutralises npm's own `ELSPROBLEMS` exit code (see the doc
+        // comment above) — a compound statement, not argv: `Sh.sh` would
+        // quote the `;` as literal text rather than a statement separator.
+        // No untrusted value is interpolated here.
+        command: Sh.unsafeRaw(
+          "npm ls -g --depth=0 --json; true",
+          "compound statement; trailing `; true` neutralizes npm's own nonzero ELSPROBLEMS exit code, not expressible as a single argv-quoted command",
+        ),
         shell: true,
       });
       const parsed = yield* decodeNpmLs(result.stdout).pipe(

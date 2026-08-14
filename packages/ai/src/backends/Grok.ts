@@ -91,7 +91,17 @@ export const GrokBackend: AiToolBackend = {
         }
 
         yield* ctx
-          .exec({ command: parts.join(" "), shell: true, env })
+          .exec({
+            // Same escape hatch as `Codex.ts`: a user-named binary with
+            // user-supplied args (the config being installed), each already
+            // quoted individually above via `Sh.quote`/`metaToken`.
+            command: Sh.unsafeRaw(
+              parts.join(" "),
+              "Ai.McpServer launches a user-named binary with user-supplied args, individually quoted above",
+            ),
+            shell: true,
+            env,
+          })
           .pipe(
             Effect.catchTag("CommandError", (error) => classifyCliError("grok", "grok", error)),
           );

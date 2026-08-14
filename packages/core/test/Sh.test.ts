@@ -1,6 +1,6 @@
 import { expect, it } from "@effect/vitest";
 import type { ShellCommand } from "../src/Sh.ts";
-import { pwsh, quote, quotePwsh, ref, sh, unsafeRaw } from "../src/Sh.ts";
+import { pipe, pwsh, quote, quotePwsh, ref, sh, unsafeRaw } from "../src/Sh.ts";
 
 /**
  * `ShellCommand` exists so a command string built by ordinary template-literal
@@ -80,6 +80,22 @@ it("sh and pwsh both return a usable ShellCommand", () => {
   const windows: ShellCommand = pwsh("choco", "install", "ripgrep");
   expect(posix).toBe("brew install ripgrep");
   expect(windows).toBe("'choco' 'install' 'ripgrep'");
+});
+
+it("pipe joins two ShellCommands with a POSIX pipe", () => {
+  const piped: ShellCommand = pipe(
+    sh("defaults", "export", "com.apple.dock", "-"),
+    sh("plutil", "-extract", "tilesize", "xml1", "-o", "-", "-"),
+  );
+  expect(piped).toBe("defaults export com.apple.dock - | plutil -extract tilesize xml1 -o - -");
+});
+
+it("pipe cannot be confused with a value carrying its own literal '|'", () => {
+  // A hostile value survives `quote` inside its own single quotes, so the
+  // `|` this test asserts on is unambiguously the pipe `pipe` inserted, not
+  // one smuggled in through either side's own argument.
+  const piped = pipe(sh("echo", "a | rm -rf /"), sh("cat"));
+  expect(piped).toBe("echo 'a | rm -rf /' | cat");
 });
 
 it("unsafeRaw builds a ShellCommand from an unquoted string, for the two documented escape hatches", () => {

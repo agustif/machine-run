@@ -86,7 +86,7 @@ export const makeUvBackend = (deps: {
   const observe: RuntimeBackend<UvToolIdentity>["observe"] = (_identity, scope, exec) =>
     Effect.gen(function* () {
       const result = yield* exec({
-        command: "uv python list --only-installed --output-format json",
+        command: Sh.sh("uv", "python", "list", "--only-installed", "--output-format", "json"),
       });
       const entries = yield* decodeUvPythonList(result.stdout).pipe(
         Effect.catchTag("SchemaError", (cause) =>

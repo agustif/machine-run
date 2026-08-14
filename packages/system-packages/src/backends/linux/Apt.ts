@@ -17,9 +17,10 @@ const SEPARATOR = "###machine-run:deb822###";
 export const makeAptBackend = (): PackageManagerBackend => ({
   id: "apt",
   list: (exec) =>
-    exec({ command: "dpkg-query -f '${binary:Package}\\n' -W", shell: true }).pipe(
-      Effect.map((result) => lines(result.stdout)),
-    ),
+    exec({
+      command: Sh.sh("dpkg-query", "-f", "${binary:Package}\\n", "-W"),
+      shell: true,
+    }).pipe(Effect.map((result) => lines(result.stdout))),
   install: (name, exec) =>
     exec({
       command: Sh.sh("sudo", "apt-get", "install", "-y", name),
@@ -43,12 +44,21 @@ export const makeAptRepoBackend = (): RepoBackend<AptRepo> => ({
    */
   listRepos: (exec) =>
     exec({
-      command: [
-        "cat /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null",
-        `echo '${SEPARATOR}'`,
-        "cat /etc/apt/sources.list.d/*.sources 2>/dev/null",
-        "true",
-      ].join("; "),
+      // A fixed, multi-statement shell script: two unquoted globs that must
+      // expand, a fixed `SEPARATOR` sentinel (not a caller-supplied value),
+      // and a trailing `true` so an unpopulated glob's exit code doesn't fail
+      // the whole read (see the doc comment above). `Sh.sh` cannot express
+      // this — its per-argument quoting would quote the globs and the `;`
+      // separators right out of meaning.
+      command: Sh.unsafeRaw(
+        [
+          "cat /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null",
+          `echo '${SEPARATOR}'`,
+          "cat /etc/apt/sources.list.d/*.sources 2>/dev/null",
+          "true",
+        ].join("; "),
+        "fixed multi-statement shell script joining two glob reads with a fixed sentinel; not expressible as a single argv-quoted command",
+      ),
       shell: true,
     }).pipe(
       Effect.map((result) => {

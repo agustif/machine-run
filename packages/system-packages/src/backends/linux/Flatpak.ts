@@ -38,7 +38,7 @@ import { firstTokens, lines } from "../../parse.ts";
 export const makeFlatpakBackend = (): PackageManagerBackend => ({
   id: "flatpak",
   list: (exec) =>
-    exec({ command: "flatpak list --app --columns=application" }).pipe(
+    exec({ command: Sh.sh("flatpak", "list", "--app", "--columns=application") }).pipe(
       Effect.map((result) => firstTokens(lines(result.stdout))),
     ),
   install: (name, exec) =>
@@ -97,7 +97,7 @@ export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
    * no spelling of `location` both converges *and* stays secure.
    */
   listRepos: (exec) =>
-    exec({ command: "flatpak remotes --columns=name,url", shell: true }).pipe(
+    exec({ command: Sh.sh("flatpak", "remotes", "--columns=name,url"), shell: true }).pipe(
       Effect.map((result) => {
         const repos: FlatpakRepo[] = [];
         for (const line of lines(result.stdout)) {

@@ -114,8 +114,31 @@ export const pwsh = (...argv: readonly string[]): ShellCommand =>
 export const refPwsh = (envVar: string): string => `$env:${envVar}`;
 
 /**
- * The explicit escape hatch for the two legitimate cases where a command is
- * not built from {@link sh}/{@link pwsh} argv quoting:
+ * Composes two commands into one POSIX pipeline, `a | b`.
+ *
+ * Gluing two {@link ShellCommand}s with a template literal (`` `${a} | ${b}` ``)
+ * produces a plain `string` — concatenation is not one of the operations that
+ * proves the result is safe, so the brand cannot survive it. This is the
+ * narrow, named exception: it takes two values that are *already* known to be
+ * safe (each built by {@link sh}/{@link pwsh}, or deliberately escaped via
+ * {@link unsafeRaw}) and joins them with the one POSIX operator, `|`, that
+ * cannot appear inside either side's own quoting (a literal `|` in an
+ * argument is always inside `'...'` quotes once `quote` has run over it), so
+ * concatenation cannot be misread as anything but a pipe between the two
+ * commands.
+ *
+ * `defaults export | plutil -extract` (`macos-defaults/src/Default.ts`) is the
+ * motivating case: two independently-built `Sh.sh` commands need to compose
+ * into one pipeline, and neither `sh` nor `pwsh` can express "run two argv
+ * lists and pipe one into the other" on their own.
+ */
+export const pipe = (a: ShellCommand, b: ShellCommand): ShellCommand =>
+  asShellCommand(`${a} | ${b}`);
+
+/**
+ * The explicit escape hatch for commands that are not built from
+ * {@link sh}/{@link pwsh} argv quoting. Two cases were known when
+ * `ShellCommand` was designed:
  *
  * - `Machine.Exec` runs an operator-authored shell command by design — that
  *   is its entire purpose, not a bug to route around.
@@ -123,14 +146,33 @@ export const refPwsh = (envVar: string): string => `$env:${envVar}`;
  *   that are themselves the configuration being installed, not values being
  *   interpolated into a fixed command shape.
  *
- * Both are correct today and must stay possible. What was missing is that
+ * Requiring `ShellCommand` at every `exec({ command })` (see `@machine-run/
+ * engine`'s `ExecProps`) surfaced two more legitimate shapes argv quoting
+ * genuinely cannot express, neither of them a value that needed quoting and
+ * didn't get it:
+ *
+ * - A fixed, multi-statement shell script — `;` as a statement separator, an
+ *   unquoted glob meant to expand, `$(...)` command substitution — where
+ *   `sh`'s per-argument quoting would quote the syntax itself right out of
+ *   meaning (`system-packages`'s `Go.ts`/`Npm.ts` `list`, `Apt.ts`'s
+ *   `listRepos`).
+ * - A command that must reference an environment variable via a literal
+ *   `"$VAR"` so a secret never enters the command string (see {@link ref}):
+ *   `sh` would single-quote the `$`, which suppresses exactly the expansion
+ *   this needs (`Tailscale.Connection`, `state/src/DataKey.ts`'s
+ *   `persistDataKey`).
+ *
+ * All four are correct today and must stay possible. What was missing is that
  * they had to say so: before `ShellCommand` existed, a raw template-literal
- * command and one of these two deliberate cases were typed identically, so
- * the accidental interpolation this repo actually shipped (a prop spliced
- * into a command later written into a shell rc file) compiled without
- * comment. `reason` is required so every call site names, at the call site,
- * which of these it is — it is never read at runtime and does not affect the
- * resulting command; the requirement to supply it is the entire mechanism.
+ * command and one of these deliberate cases were typed identically, so the
+ * accidental interpolation this repo actually shipped (a prop spliced into a
+ * command later written into a shell rc file) compiled without comment.
+ * `reason` is required so every call site names, at the call site, which of
+ * these it is — it is never read at runtime and does not affect the resulting
+ * command; the requirement to supply it is the entire mechanism. A fifth
+ * shape turning up here should be treated as suspicious until it's clearly
+ * one of "operator-authored", "user-named binary", "fixed compound script" or
+ * "env-var reference" — not a reason to reach for this reflexively.
  */
 export const unsafeRaw = (command: string, reason: string): ShellCommand => {
   void reason;

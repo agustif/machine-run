@@ -70,8 +70,17 @@ export const makeGoBackend = (): PackageManagerBackend => ({
   id: "go-install",
   list: (exec) =>
     exec({
-      command:
+      // A fixed, multi-statement shell script — conditional fallback,
+      // command substitution, an unquoted glob that must expand, and a
+      // trailing `; true` to keep an empty/missing bin dir from failing the
+      // whole command (see the doc comment above). None of that is argv:
+      // `Sh.sh`'s per-argument quoting would quote the glob and the `$(...)`
+      // substitutions right out of meaning, so this is `Sh.unsafeRaw` rather
+      // than a bug — there is no untrusted value interpolated here at all.
+      command: Sh.unsafeRaw(
         'bin="$(go env GOBIN)"; [ -n "$bin" ] || bin="$(go env GOPATH)/bin"; go version -m "$bin"/* 2>/dev/null; true',
+        "fixed multi-statement shell script (conditional, command substitution, glob); not expressible as a single argv-quoted command",
+      ),
       shell: true,
     }).pipe(Effect.map((result) => parseGoVersionM(result.stdout))),
   // `@latest` is appended here, not left to the recipe, so `name` stays the
