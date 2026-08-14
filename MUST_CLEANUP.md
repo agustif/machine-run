@@ -321,6 +321,26 @@ which the doc comment already says.
 
 ### 2.5 `Sh` returns `string`, so quoting is a convention rather than a type
 
+> **FIXED.** `ExecProps` (`engine/src/Reconciler.ts`) and `state/src/DataKey.ts`'s
+> local `Exec` now require `command: Sh.ShellCommand` instead of `string`, so a raw
+> template literal no longer compiles at the one place every reconciler actually
+> runs a command. Every non-`Sh.sh`/`Sh.pwsh` site the compiler then rejected was
+> resolved as one of: routed through `Sh.sh` (the fixed literal commands with no
+> untrusted interpolation — `brew list --formula --full-name` and its many
+> siblings across `system-packages`/`runtimes`/`tailscale`), or `Sh.unsafeRaw`
+> with a named reason. `Machine.Exec` and `Ai.McpServer` are the two escape
+> hatches this entry already named; three more turned up in the doing and are now
+> named too: a fixed multi-statement shell script (`;`, an unquoted glob, command
+> substitution) that argv-quoting cannot represent at all (`Go.ts`'s `list`,
+> `Npm.ts`'s `list`, `Apt.ts`'s `listRepos`), a command that must reference an
+> env var via `"$VAR"` for secrecy — `Sh.sh` would single-quote the `$` and
+> suppress the very expansion needed (`Tailscale.Connection`, `DataKey.persistDataKey`),
+> and gluing two already-safe `ShellCommand`s into one pipeline, now `Sh.pipe`
+> (`macos-defaults/src/Default.ts`'s `defaults export | plutil -extract`, the
+> case this entry's own fix note anticipated). None of these three are the
+> accidental kind 0.6 found — each is a real command shape `Sh.sh`'s per-argument
+> quoting cannot express, not a value that needed quoting and didn't get it.
+
 `Sh.sh()` and `Sh.pwsh()` exist to make shell interpolation safe, and return a
 bare `string` — indistinguishable from an unquoted one. Nothing stops
 `command: \`...${x}...\``, and 0.6 is that gap being taken.

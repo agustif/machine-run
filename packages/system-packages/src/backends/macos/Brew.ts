@@ -21,7 +21,7 @@ export const makeBrewBackend = (): PackageManagerBackend => ({
    * that names a core formula without a tap.
    */
   list: (exec) =>
-    exec({ command: "brew list --formula --full-name" }).pipe(
+    exec({ command: Sh.sh("brew", "list", "--formula", "--full-name") }).pipe(
       Effect.map((result) => lines(result.stdout)),
     ),
   install: (name, exec) =>
@@ -37,7 +37,7 @@ const toBrewRepo = (tap: string): BrewRepo => ({ _tag: "Brew", tap });
 /** `brew tap`'s repo half — see `Repo.ts`'s `RepoSpec` for the `tap` field's `owner/name` shape. */
 export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
   listRepos: (exec) =>
-    exec({ command: "brew tap" }).pipe(
+    exec({ command: Sh.sh("brew", "tap") }).pipe(
       Effect.map((result) => lines(result.stdout).map(toBrewRepo)),
     ),
   addRepo: (repo, exec) =>
@@ -47,7 +47,9 @@ export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
 export const makeBrewCaskBackend = (): PackageManagerBackend => ({
   id: "brew-cask",
   list: (exec) =>
-    exec({ command: "brew list --cask" }).pipe(Effect.map((result) => lines(result.stdout))),
+    exec({ command: Sh.sh("brew", "list", "--cask") }).pipe(
+      Effect.map((result) => lines(result.stdout)),
+    ),
   install: (name, exec) =>
     exec({
       command: Sh.sh("brew", "install", "--cask", name),

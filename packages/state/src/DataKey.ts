@@ -17,7 +17,7 @@ import { KEY_BYTES } from "./Envelope.ts";
  * — see this package's `TASKS.md` for the fuller dependency-direction note.
  */
 export type Exec = (
-  props: CommandRunProps,
+  props: Omit<CommandRunProps, "command"> & { readonly command: Sh.ShellCommand },
 ) => Effect.Effect<{ exitCode: number; stdout: string; stderr: string }, CommandError>;
 
 type CryptoService = typeof Crypto.Crypto.Service;
@@ -128,7 +128,15 @@ const persistDataKey = (
   exec: Exec,
 ): Effect.Effect<void, DataKeyPersistFailed> =>
   exec({
-    command: `${Sh.sh("security", "add-generic-password", "-s", KEYCHAIN_SERVICE, "-a", stack)} -w "$${DATA_KEY_ENV_VAR}" -U`,
+    // `-w` takes the key through `$MACHINE_RUN_STATE_KEY`, never inlined —
+    // see the doc comment above. `Sh.sh`'s argv quoting cannot express that:
+    // it would single-quote the `$`, and single quotes suppress exactly the
+    // expansion this needs, so the reference is spliced in via `Sh.ref` and
+    // the whole command is an explicit `Sh.unsafeRaw`.
+    command: Sh.unsafeRaw(
+      `${Sh.sh("security", "add-generic-password", "-s", KEYCHAIN_SERVICE, "-a", stack)} -w ${Sh.ref(DATA_KEY_ENV_VAR)} -U`,
+      "references $MACHINE_RUN_STATE_KEY via env so the key never enters the command string; Sh.sh's argv quoting would single-quote the $ and break the expansion",
+    ),
     shell: true,
     env: { [DATA_KEY_ENV_VAR]: key },
   }).pipe(

@@ -77,7 +77,7 @@ import { lines } from "../../parse.ts";
 const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
   id: bin,
   list: (exec) =>
-    exec({ command: "pacman -Qmq" }).pipe(Effect.map((result) => lines(result.stdout))),
+    exec({ command: Sh.sh("pacman", "-Qmq") }).pipe(Effect.map((result) => lines(result.stdout))),
   install: (name, exec) =>
     exec({
       command: Sh.sh(bin, "-S", "--noconfirm", name),

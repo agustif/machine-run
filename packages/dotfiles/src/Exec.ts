@@ -1,4 +1,4 @@
-import { MachinePaths } from "@machine-run/core";
+import { MachinePaths, Sh } from "@machine-run/core";
 import { type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -139,7 +139,14 @@ export const makeExecReconciler: Effect.Effect<
       if (props.unless !== undefined) {
         const succeeded = yield* ctx
           .exec({
-            command: props.unless,
+            // `Machine.Exec` runs an operator-authored shell command by
+            // design — that is its entire purpose, not a value being
+            // interpolated into a fixed command shape. See `Sh.unsafeRaw`'s
+            // doc comment for the two cases this covers.
+            command: Sh.unsafeRaw(
+              props.unless,
+              "Machine.Exec runs operator-authored shell by design",
+            ),
             shell: true,
             ...(props.cwd !== undefined ? { cwd: paths.expand(props.cwd) } : {}),
           })
@@ -183,7 +190,12 @@ export const makeExecReconciler: Effect.Effect<
     apply: ({ props }, ctx) =>
       Effect.gen(function* () {
         yield* ctx.exec({
-          command: props.command,
+          // Same escape hatch as `unless` above — this resource's entire job
+          // is running an arbitrary, operator-authored command.
+          command: Sh.unsafeRaw(
+            props.command,
+            "Machine.Exec runs operator-authored shell by design",
+          ),
           shell: true,
           ...(props.cwd !== undefined ? { cwd: paths.expand(props.cwd) } : {}),
           ...(props.env !== undefined ? { env: props.env } : {}),

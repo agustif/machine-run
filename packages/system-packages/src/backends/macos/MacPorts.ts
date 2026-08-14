@@ -7,7 +7,7 @@ import { firstTokens, lines } from "../../parse.ts";
 export const makePortBackend = (): PackageManagerBackend => ({
   id: "port",
   list: (exec) =>
-    exec({ command: "port installed", shell: true }).pipe(
+    exec({ command: Sh.sh("port", "installed"), shell: true }).pipe(
       Effect.map((result) =>
         firstTokens(
           // `port installed` prints a "The following ports are currently

@@ -155,7 +155,21 @@ export const CodexBackend: AiToolBackend = {
         }
 
         yield* ctx
-          .exec({ command: parts.join(" "), shell: true, env })
+          .exec({
+            // `Ai.McpServer` launches a user-named binary with user-supplied
+            // arguments that are themselves the configuration being
+            // installed, not values being interpolated into a fixed command
+            // shape — each piece above is already quoted individually via
+            // `Sh.quote`/`metaToken`, so `unsafeRaw` names this as the second
+            // documented escape hatch rather than re-quoting an already-safe
+            // string.
+            command: Sh.unsafeRaw(
+              parts.join(" "),
+              "Ai.McpServer launches a user-named binary with user-supplied args, individually quoted above",
+            ),
+            shell: true,
+            env,
+          })
           .pipe(
             Effect.catchTag("CommandError", (error) => classifyCliError("codex", "codex", error)),
           );

@@ -18,9 +18,10 @@ import { lines } from "../../parse.ts";
 export const makeDnfBackend = (): PackageManagerBackend => ({
   id: "dnf",
   list: (exec) =>
-    exec({ command: "dnf repoquery --userinstalled --qf '%{name}\\n'", shell: true }).pipe(
-      Effect.map((result) => lines(result.stdout)),
-    ),
+    exec({
+      command: Sh.sh("dnf", "repoquery", "--userinstalled", "--qf", "%{name}\\n"),
+      shell: true,
+    }).pipe(Effect.map((result) => lines(result.stdout))),
   install: (name, exec) =>
     exec({
       command: Sh.sh("sudo", "dnf", "install", "-y", name),
@@ -51,7 +52,7 @@ export const makeDnfRepoBackend = (): RepoBackend<DnfRepo> => ({
    * without this backend needing bespoke matching logic.
    */
   listRepos: (exec) =>
-    exec({ command: "dnf copr list", shell: true }).pipe(
+    exec({ command: Sh.sh("dnf", "copr", "list"), shell: true }).pipe(
       Effect.map((result) => {
         const repos: DnfRepo[] = [];
         for (const line of lines(result.stdout)) {

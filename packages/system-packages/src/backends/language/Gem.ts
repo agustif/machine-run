@@ -41,7 +41,7 @@ import { firstTokens, lines } from "../../parse.ts";
 export const makeGemBackend = (): PackageManagerBackend => ({
   id: "gem",
   list: (exec) =>
-    exec({ command: "gem list --local" }).pipe(
+    exec({ command: Sh.sh("gem", "list", "--local") }).pipe(
       Effect.map((result) => firstTokens(lines(result.stdout))),
     ),
   install: (name, exec) =>

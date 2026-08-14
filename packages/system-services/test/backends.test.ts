@@ -25,7 +25,10 @@ const failingExec =
   (props) =>
     Effect.fail({
       _tag: "CommandError" as const,
-      command: props.command,
+      // Widened to plain `string`: `CommandError` (a real Alchemy class) has
+      // no `ShellCommand` field to overlap with, so keeping the brand here
+      // would make this fake object incomparable to it.
+      command: String(props.command),
       reason: { _tag: "UnexpectedExit" as const, exitCode, stderr, message: stderr },
       message: `Failed to execute command "${props.command}": ${stderr}`,
     } as CommandError);
@@ -49,7 +52,8 @@ const queuedExec = (
     if ("exitCode" in outcome) {
       return Effect.fail({
         _tag: "CommandError" as const,
-        command: props.command,
+        // See `failingExec` above for why this is widened to `string`.
+        command: String(props.command),
         reason: {
           _tag: "UnexpectedExit" as const,
           exitCode: outcome.exitCode,

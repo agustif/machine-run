@@ -43,7 +43,9 @@ export const parseSnapList = (stdout: string): string[] => {
 export const makeSnapBackend = (): PackageManagerBackend => ({
   id: "snap",
   list: (exec) =>
-    exec({ command: "snap list" }).pipe(Effect.map((result) => parseSnapList(result.stdout))),
+    exec({ command: Sh.sh("snap", "list") }).pipe(
+      Effect.map((result) => parseSnapList(result.stdout)),
+    ),
   install: (name, exec) =>
     exec({
       command: Sh.sh("sudo", "snap", "install", name),

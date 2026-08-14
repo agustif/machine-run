@@ -22,7 +22,7 @@ import { firstTokens } from "../../parse.ts";
 export const makeCargoBackend = (): PackageManagerBackend => ({
   id: "cargo",
   list: (exec) =>
-    exec({ command: "cargo install --list" }).pipe(
+    exec({ command: Sh.sh("cargo", "install", "--list") }).pipe(
       Effect.map((result) =>
         firstTokens(
           result.stdout

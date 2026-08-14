@@ -106,7 +106,7 @@ export const makeRustupBackend = (deps: {
   const observe: RuntimeBackend<RustupToolIdentity>["observe"] = (_identity, scope, exec) =>
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
-      const result = yield* exec({ command: "rustup show", cwd });
+      const result = yield* exec({ command: Sh.sh("rustup", "show"), cwd });
       const parsed = parseRustupShow(result.stdout);
       if (parsed === undefined) {
         return yield* Effect.fail(

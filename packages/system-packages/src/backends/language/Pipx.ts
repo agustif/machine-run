@@ -38,7 +38,7 @@ export const parsePipxList = (stdout: string): string[] => {
 export const makePipxBackend = (): PackageManagerBackend => ({
   id: "pipx",
   list: (exec) =>
-    exec({ command: "pipx list --short" }).pipe(
+    exec({ command: Sh.sh("pipx", "list", "--short") }).pipe(
       Effect.map((result) => parsePipxList(result.stdout)),
     ),
   install: (name, exec) =>

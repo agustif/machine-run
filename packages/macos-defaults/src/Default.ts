@@ -73,15 +73,10 @@ export const makeMacDefaultReconciler: Effect.Effect<
   observe: (props, ctx) =>
     ctx
       .exec({
-        command: `${Sh.sh("defaults", "export", props.domain, "-")} | ${Sh.sh(
-          "plutil",
-          "-extract",
-          props.key,
-          "xml1",
-          "-o",
-          "-",
-          "-",
-        )}`,
+        command: Sh.pipe(
+          Sh.sh("defaults", "export", props.domain, "-"),
+          Sh.sh("plutil", "-extract", props.key, "xml1", "-o", "-", "-"),
+        ),
         shell: true,
       })
       .pipe(
