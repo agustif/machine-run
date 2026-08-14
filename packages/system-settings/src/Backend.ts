@@ -182,7 +182,10 @@ export interface SettingsBackend<Identity> {
    * state to converge from, not a failure. See `docs/settings-notes.md` for
    * the container output this is verified against.
    */
-  readonly read: (identity: Identity, exec: Exec) => Effect.Effect<string | undefined, SettingsError>;
+  readonly read: (
+    identity: Identity,
+    exec: Exec,
+  ) => Effect.Effect<string | undefined, SettingsError>;
   /** Writes `value` (GVariant text) to `identity`. Does not itself verify the write stuck — see `Setting.ts`. */
   readonly write: (
     identity: Identity,

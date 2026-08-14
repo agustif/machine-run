@@ -52,19 +52,12 @@ import { versionSatisfies } from "./version.ts";
  *
  * ## One case per manager, not `{ manager, tool }`
  *
- * The previous shape was `{ manager: RuntimeManagerId, tool: Schema.String,
- * version: Schema.String }` — a manager selector plus a `tool` name the type
- * system let be *anything*, even though rustup only ever manages `"rust"` and
- * uv only ever manages `"python"`. That combination was never actually legal;
- * it was only ever checked, at runtime, by a dedicated `RuntimeToolMismatch`
- * error every `observe`/`apply` call had to raise off `RuntimeBackend`'s
- * `fixedTool`. A runtime error whose entire job is policing a prop
- * combination the type system permits is evidence the props were under-typed,
- * not evidence the check was doing useful work — so this is a `Schema.
- * TaggedUnion`, one case per manager, and `RuntimeToolMismatch` no longer
- * exists: `Rustup`'s case has no `tool` field for a caller to get wrong, and
- * `Uv`'s has none either. Only `Mise` and `Asdf` have a `tool` field at all,
- * because only they manage more than one fixed thing. `Rustup`'s identifying
+ * One case per manager, because the managers are not the same shape. rustup
+ * manages exactly one toolchain and uv exactly one, so their cases carry no
+ * `tool` field for a caller to get wrong; only `Mise` and `Asdf` have one,
+ * because only they manage more than one thing. Naming a tool for rustup is a
+ * compile error rather than something a runtime check has to catch on every
+ * `observe` and `apply`. `Rustup`'s identifying
  * field is `channel`, not `version` — rustup's own vocabulary (`rustup
  * toolchain install`, `rustup default`, `rustup override set`) takes a
  * *channel* (`stable`, `beta`, `nightly`) or a pinned version like `1.79`,
@@ -197,11 +190,10 @@ export const RuntimeTool = Resource<RuntimeTool>("Runtime.Tool");
  * command doesn't recognize — and is surfaced rather than silently retried or
  * guessed past, per rule 11 in `AGENTS.md`.
  *
- * Carries the whole `props` (rather than separate `manager`/`tool`/`version`
- * fields, the previous shape) because the identifying field differs by
- * case — `Rustup` has `channel`, not `tool`/`version` — and `Match.
- * tagsExhaustive` below is what makes a future fifth manager a compile error
- * here rather than a silently-wrong message.
+ * Carries the whole `props` rather than separate name and version fields,
+ * because the identifying field differs by case — `Rustup` has `channel`, not
+ * `tool`/`version` — and `Match.tagsExhaustive` below is what makes a future
+ * fifth manager a compile error here rather than a silently-wrong message.
  */
 export class RuntimeNotConverged extends Data.TaggedError("RuntimeNotConverged")<{
   props: RuntimeToolProps;

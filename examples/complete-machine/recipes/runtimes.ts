@@ -13,14 +13,14 @@ export const runtimes = Effect.gen(function* () {
   // A global default. `version` is a request, not an exact pin — `"22"` is
   // satisfied by any 22.x already installed.
   yield* Runtimes.RuntimeTool("node-global", {
-    manager: "mise",
+    _tag: "Mise",
     tool: "node",
     version: "22",
   });
 
   // Pinned inside one directory, which is where a project's version belongs.
   yield* Runtimes.RuntimeTool("node-project", {
-    manager: "mise",
+    _tag: "Mise",
     tool: "node",
     version: "20.11.0",
     scope: { _tag: "Directory", path: "~/code/legacy-service" },
@@ -28,7 +28,7 @@ export const runtimes = Effect.gen(function* () {
 
   // Installed but deliberately not activated.
   yield* Runtimes.RuntimeTool("python-available", {
-    manager: "mise",
+    _tag: "Mise",
     tool: "python",
     version: "3.12",
     active: false,
@@ -36,17 +36,17 @@ export const runtimes = Effect.gen(function* () {
 
   // asdf names things in its own namespace: node is `nodejs` here.
   yield* Runtimes.RuntimeTool("ruby-asdf", {
-    manager: "asdf",
+    _tag: "Asdf",
     tool: "ruby",
     version: "3.3",
   });
 
-  // rustup and uv each manage exactly one fixed toolchain, so `tool` has to
-  // name that toolchain — anything else is a `RuntimeToolMismatch`, caught
-  // rather than silently installing the wrong thing. `version` is a channel.
+  // rustup manages exactly one toolchain, so its variant has no `tool` field
+  // to get wrong — naming one is a compile error rather than a runtime check.
+  // It takes a *channel*, which is rustup's own vocabulary and not the same
+  // concept as a version.
   yield* Runtimes.RuntimeTool("rust-stable", {
-    manager: "rustup",
-    tool: "rust",
-    version: "stable",
+    _tag: "Rustup",
+    channel: "stable",
   });
 });

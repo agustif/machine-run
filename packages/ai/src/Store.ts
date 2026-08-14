@@ -16,8 +16,8 @@ import { OpenCodeBackend } from "./backends/OpenCode.ts";
 
 /**
  * The registry of AI tool backends, keyed by id — the same seam
- * `system-packages`' `packageManagerBackends` and `secrets`' `secretBackends`
- * use. `satisfies Record<AiToolId, AiToolBackend>` means every id in
+ * `system-packages`' `packageManagerBackends` uses.
+ * `satisfies Record<AiToolId, AiToolBackend>` means every id in
  * {@link AiToolId} must have an entry here, checked at compile time rather
  * than discovered as a runtime "unknown tool" failure.
  */

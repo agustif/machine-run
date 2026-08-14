@@ -100,11 +100,7 @@ export const makeAsdfBackend = (deps: {
       });
     }).pipe(Effect.asVoid);
 
-  const activate: RuntimeBackend<AsdfToolIdentity>["activate"] = (
-    { tool, version },
-    scope,
-    exec,
-  ) =>
+  const activate: RuntimeBackend<AsdfToolIdentity>["activate"] = ({ tool, version }, scope, exec) =>
     // `-u`/`--home` targets `$HOME`'s file regardless of cwd; its absence
     // writes into (or creates) cwd's own file — verified directly, including
     // that a fresh directory with no `.tool-versions` gets one created

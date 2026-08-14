@@ -472,7 +472,11 @@ it.effect("uv backend: observe reads the active version from the pin file it wri
     // request, not a resolved patch version.
     yield* fs.writeFileString(pathSvc.join(projectDir, ".python-version"), "3.11\n");
 
-    const observation = yield* backend.observe({ version: "3.11" }, dir(projectDir), fakeExec("[]"));
+    const observation = yield* backend.observe(
+      { version: "3.11" },
+      dir(projectDir),
+      fakeExec("[]"),
+    );
     expect(observation.active).toBe("3.11");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -484,7 +488,11 @@ it.effect("uv backend: observe reports no active version when the pin file does 
     const backend = makeUvBackend({ home: HOME, path: pathSvc, fs, configDirOverride: undefined });
     const projectDir = yield* fs.makeTempDirectoryScoped();
 
-    const observation = yield* backend.observe({ version: "3.11" }, dir(projectDir), fakeExec("[]"));
+    const observation = yield* backend.observe(
+      { version: "3.11" },
+      dir(projectDir),
+      fakeExec("[]"),
+    );
     expect(observation.active).toBeUndefined();
   }).pipe(Effect.provide(NodeServices.layer)),
 );

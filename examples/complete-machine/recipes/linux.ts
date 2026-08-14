@@ -15,33 +15,37 @@ import * as Effect from "effect/Effect";
  * Only meaningful on a Linux desktop — omit this recipe elsewhere.
  */
 export const linux = Effect.gen(function* () {
-  // `gsettings` addresses as `schema-id:key-name`. Note the quotes inside the
+  // `gsettings` names a schema and a key as separate fields, so they cannot be
+  // confused with dconf's single absolute path. Note the quotes inside the
   // value: a GVariant string carries them, and dropping them is the mistake
   // above.
   yield* SystemSettings.Setting("clock-format", {
-    backend: "gsettings",
-    key: "org.gnome.desktop.interface:clock-format",
+    _tag: "Gsettings",
+    schema: "org.gnome.desktop.interface",
+    key: "clock-format",
     value: "'24h'",
   });
 
   yield* SystemSettings.Setting("color-scheme", {
-    backend: "gsettings",
-    key: "org.gnome.desktop.interface:color-scheme",
+    _tag: "Gsettings",
+    schema: "org.gnome.desktop.interface",
+    key: "color-scheme",
     value: "'prefer-dark'",
   });
 
   // An array value, spelled the way a read prints it.
   yield* SystemSettings.Setting("close-window-binding", {
-    backend: "gsettings",
-    key: "org.gnome.desktop.wm.keybindings:close",
+    _tag: "Gsettings",
+    schema: "org.gnome.desktop.wm.keybindings",
+    key: "close",
     value: "['<Super>q']",
   });
 
-  // `dconf` addresses by absolute path, and reaches keys with no schema —
+  // `dconf` addresses by absolute path and reaches keys with no schema at all —
   // which is also why it has no validation to catch a typo for you.
   yield* SystemSettings.Setting("terminal-audible-bell", {
-    backend: "dconf",
-    key: "/org/gnome/desktop/interface/enable-animations",
+    _tag: "Dconf",
+    path: "/org/gnome/desktop/interface/enable-animations",
     value: "false",
   });
 });

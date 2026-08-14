@@ -72,13 +72,13 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       and changes `matches` from membership to comparison.
 - [x] **Flatpak remotes have no `System.Repo` support.** Implemented and
       container-verified 2026-08-14 (`docs/notes/system-packages-notes.md`):
-      `RepoManagerId` now includes `"flatpak"`, and `Flatpak.ts` grew
-      `listRepos`/`addRepo`. `props.repo` is `"<name> <location>"` (one
-      opaque string, split on the first space — the same shape convention
-      `dnf`'s COPR shorthand already uses). Real captured `flatpak remotes`
-      output is committed as `test/fixtures/flatpak-remotes{-empty,}.txt`
-      and pinned by `test/backends.test.ts`, following the exact
-      `languageBackends.test.ts` pattern.
+      `RepoSpec`'s `Flatpak` tag (`Backend.ts`) carries `name` and an
+      optional `location`, and `Flatpak.ts` grew a dedicated
+      `makeFlatpakRepoBackend`'s `listRepos`/`addRepo`. Real captured
+      `flatpak remotes` output is committed as
+      `test/fixtures/flatpak-remotes{-empty,}.txt` and pinned by
+      `test/backends.test.ts`, following the exact `languageBackends.test.ts`
+      pattern.
 
       One real, documented limitation, not a bug: `flatpak remote-add`'s
       standard bootstrap URL (the one every Flathub tutorial gives) resolves
@@ -86,10 +86,36 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       afterward, so a `System.Repo` written with the bootstrap form will
       `apply` correctly every time but never `matches` — every plan reports
       it as needing an update, forever, though harmlessly thanks to
-      `--if-not-exists`. Using the resolved URL directly instead avoids that
-      but fails GPG signature verification without `--no-gpg-verify`, a real
-      security downgrade this backend does not add a flag for. See
-      `Flatpak.ts`'s `listRepos` doc comment for the full reasoning.
+      `--if-not-exists`. Using the resolved location directly instead avoids
+      that but fails GPG signature verification without `--no-gpg-verify`, a
+      real security downgrade this backend does not add a flag for. See
+      `Flatpak.ts`'s `listRepos` doc comment for the full reasoning. Pinned
+      by `test/backends.test.ts`'s "a real bootstrap-URL repo never matches a
+      live listing" case.
+
+- [x] **`RepoProps`/`RepoState` were `{ manager: RepoManagerId, repo: Schema.String }`**
+      — one opaque string whose grammar depended entirely on `manager`
+      (a brew tap, an apt PPA, a dnf COPR project, or Flatpak's
+      `"<name> <location>"` crammed into one string), so `{ manager: "dnf",
+repo: "flathub https://..." }` type-checked despite being nonsense for
+      every backend. Fixed: `RepoSpec` (`Backend.ts`) is now a
+      `Schema.TaggedUnion` — `Brew { tap }`, `Apt { ppa }`, `Dnf { project }`,
+      `Flatpak { name, location? }` — nested as `RepoProps`/`RepoState`'s
+      `repo` field (the same reason `runtimes/src/Backend.ts`'s `RuntimeScope`
+      is nested under `RuntimeToolProps.scope` rather than being a resource's
+      whole `Props`: Alchemy's `Resource<Type, Props, Attributes>` needs a
+      single object type with statically known members, not a bare union).
+      `Repo.ts` dispatches to each manager's own `RepoBackend<Spec>` with
+      `Match.tagsExhaustive`, so adding a fifth manager without wiring it into
+      every dispatch site is a compile error. `PackageManagerBackend`'s
+      `listRepos?`/`addRepo?` moved out into their own `RepoBackend<Spec>`
+      interface for the same reason — a Brew tap and a Flatpak remote no
+      longer have to fit through one `(repo: string) => ...` signature.
+      `UnsupportedRepoManager` is gone: every tag in the now-closed `RepoSpec`
+      union has a full `RepoBackend`, so the runtime "neither listRepos nor
+      addRepo" guard it existed for can no longer occur. This is a
+      props-and-state schema break — nothing here has ever been deployed, so
+      nothing needed migrating.
 
 ## Correctness
 

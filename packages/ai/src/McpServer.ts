@@ -4,10 +4,12 @@ import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Match from "effect/Match";
 import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import type { AiToolContext, AiToolError } from "./Backend.ts";
+import * as UndefinedOr from "effect/UndefinedOr";
+import type { AiMcpServerDesired, AiToolContext, AiToolError } from "./Backend.ts";
 import { AiToolMcpUnsupported } from "./Backend.ts";
 import { aiToolBackend } from "./Store.ts";
 
@@ -24,7 +26,7 @@ export type AiMcpToolId = typeof AiMcpToolId.Type;
 
 /**
  * One env or header value: a literal string, or a reference into a secret
- * backend resolved only at apply time.
+ * store resolved only at apply time.
  *
  * `Machine.SecretFile`'s doc comment lays out why this distinction has to
  * exist rather than accepting a plain string everywhere: Alchemy persists
@@ -33,31 +35,62 @@ export type AiMcpToolId = typeof AiMcpToolId.Type;
  * `Machine.File.content` warns about. A literal string is still accepted —
  * plenty of MCP server env vars (`LOG_LEVEL`, `NODE_ENV`) are not secrets,
  * and forcing every one through a vault would be its own kind of friction —
- * but anything credential-shaped should use the `{ source, ref }` form
- * instead, resolved through the exact same `@machine-run/secrets` seam
+ * but anything credential-shaped should use a {@link SecretSource} instead,
+ * resolved through the exact same `@machine-run/secrets` seam
  * `Machine.SecretFile` and `Tailscale.Connection` already use.
  */
 export const McpEnvValue = Schema.Union([Schema.String, SecretSource]);
 
 export type McpEnvValue = typeof McpEnvValue.Type;
 
+/**
+ * How one MCP server is launched — `command` and `url` used to sit side by
+ * side as two independently `optionalKey` props, which meant `{}` (neither)
+ * and `{ command, url }` (both) each type-checked despite being documented
+ * as mutually exclusive. A tagged union makes both illegal states
+ * unrepresentable: naming a transport is naming exactly the fields it needs,
+ * nothing more and nothing that contradicts it. `env` lives only on `Stdio`
+ * (it configures the spawned process) and `headers` only on `Remote` (only
+ * honoured by tools whose remote-server support takes arbitrary headers —
+ * see each backend's own doc comment) — each was already documented as
+ * belonging to one side only; this is the first thing that actually enforces it.
+ *
+ * This is a props-and-state schema break from the flat, independently-optional
+ * shape `Ai.McpServer` shipped with previously. That shape never reached a
+ * real deployment, so there is no persisted state anywhere to migrate.
+ */
+export const McpTransport = Schema.Union([
+  Schema.TaggedStruct("Stdio", {
+    /** The binary to launch. */
+    command: Schema.String,
+    args: Schema.optionalKey(Schema.Array(Schema.String)),
+    env: Schema.optionalKey(Schema.Record(Schema.String, McpEnvValue)),
+  }),
+  Schema.TaggedStruct("Remote", {
+    /** The remote server's endpoint. */
+    url: Schema.String,
+    headers: Schema.optionalKey(Schema.Record(Schema.String, McpEnvValue)),
+  }),
+]);
+
+export type McpTransport = typeof McpTransport.Type;
+
 export const McpServerProps = Schema.Struct({
   tool: AiMcpToolId,
   /** This server's name within the tool's own config — what `claude mcp list` etc. would show. */
   name: Schema.String,
-  /** The binary to launch, for a stdio server. Mutually exclusive with `url`. */
-  command: Schema.optionalKey(Schema.String),
-  args: Schema.optionalKey(Schema.Array(Schema.String)),
-  env: Schema.optionalKey(Schema.Record(Schema.String, McpEnvValue)),
-  /** A remote server's endpoint. Mutually exclusive with `command`. */
-  url: Schema.optionalKey(Schema.String),
-  /** Only honoured by tools whose remote-server support takes arbitrary headers — see each backend's own doc comment. */
-  headers: Schema.optionalKey(Schema.Record(Schema.String, McpEnvValue)),
+  transport: McpTransport,
 });
 
 export type McpServerProps = typeof McpServerProps.Type;
 
 /**
+ * `McpTransport`'s observed counterpart. `transport` is `optionalKey` here —
+ * unlike on `McpServerProps`, where a recipe must always commit to one — so
+ * that a live registration this backend cannot cleanly read as either
+ * `Stdio` or `Remote` (neither field present) reports as "nothing observed"
+ * rather than forcing an arbitrary tag onto data that doesn't support one.
+ *
  * Never carries a resolved secret value, by construction: `envLiteral` and
  * `headerLiteral` only ever hold the subset of entries whose prop value was
  * already a plain string (never secret-shaped), and `envKeys`/`headerKeys`
@@ -66,22 +99,32 @@ export type McpServerProps = typeof McpServerProps.Type;
  *
  * The honest consequence, the same one `Machine.SecretFileState`'s doc
  * comment states for the same reason: a secret rotated behind an unchanged
- * `ref` is undetectable by this resource, because detecting it would mean
+ * source is undetectable by this resource, because detecting it would mean
  * comparing a resolved secret value inside `matches` — exactly what must
  * never happen. Changing *which* key exists, or any literal value, is real
  * drift and is caught; changing what a secret-sourced key's value resolves
- * to, without touching its `ref`, is not.
+ * to, without touching its source, is not.
  */
+export const McpTransportState = Schema.Union([
+  Schema.TaggedStruct("Stdio", {
+    command: Schema.String,
+    args: Schema.optionalKey(Schema.Array(Schema.String)),
+    envKeys: Schema.optionalKey(Schema.Array(Schema.String)),
+    envLiteral: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+  Schema.TaggedStruct("Remote", {
+    url: Schema.String,
+    headerKeys: Schema.optionalKey(Schema.Array(Schema.String)),
+    headerLiteral: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  }),
+]);
+
+export type McpTransportState = typeof McpTransportState.Type;
+
 export const McpServerState = Schema.Struct({
   tool: AiMcpToolId,
   name: Schema.String,
-  command: Schema.optionalKey(Schema.String),
-  args: Schema.optionalKey(Schema.Array(Schema.String)),
-  url: Schema.optionalKey(Schema.String),
-  envKeys: Schema.optionalKey(Schema.Array(Schema.String)),
-  envLiteral: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
-  headerKeys: Schema.optionalKey(Schema.Array(Schema.String)),
-  headerLiteral: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  transport: Schema.optionalKey(McpTransportState),
 });
 
 export type McpServerState = typeof McpServerState.Type;
@@ -147,6 +190,22 @@ const recordsEqual = (
   return arraysEqual(aKeys, bKeys) && aKeys.every((key) => a[key] === b[key]);
 };
 
+/** `props.transport`'s declared `env`, or `undefined` when `transport` is `Remote` (which has no `env`). */
+const declaredEnv = (transport: McpTransport): Record<string, McpEnvValue> | undefined =>
+  Match.value(transport).pipe(
+    Match.tag("Stdio", (t) => t.env),
+    Match.tag("Remote", () => undefined),
+    Match.exhaustive,
+  );
+
+/** `props.transport`'s declared `headers`, or `undefined` when `transport` is `Stdio` (which has no `headers`). */
+const declaredHeaders = (transport: McpTransport): Record<string, McpEnvValue> | undefined =>
+  Match.value(transport).pipe(
+    Match.tag("Stdio", () => undefined),
+    Match.tag("Remote", (t) => t.headers),
+    Match.exhaustive,
+  );
+
 export const makeMcpServerReconciler: Effect.Effect<
   Reconciler<McpServerProps, McpServerState, AiToolError | AiToolMcpUnsupported | SecretError>,
   never,
@@ -179,19 +238,40 @@ export const makeMcpServerReconciler: Effect.Effect<
         const live = yield* mcp.observe(props.name, toolCtx);
         if (live === undefined) return undefined;
 
-        const env = observedKeysAndLiteral(props.env, live.env);
-        const headers = observedKeysAndLiteral(props.headers, live.headers);
+        const env = observedKeysAndLiteral(declaredEnv(props.transport), live.env);
+        const headers = observedKeysAndLiteral(declaredHeaders(props.transport), live.headers);
+
+        // Discriminated by what the live registration actually holds, not by
+        // what `props` asked for — `observe` reads the machine, and a
+        // registration that turned out `Stdio` while the recipe wants
+        // `Remote` must still be reported honestly so `matches` (below) can
+        // see the mismatch, rather than being silently coerced into agreement.
+        const transport: McpTransportState | undefined = UndefinedOr.match(live.command, {
+          onDefined: (command) => ({
+            _tag: "Stdio" as const,
+            command,
+            ...(live.args !== undefined ? { args: [...live.args] } : {}),
+            ...(env.keys.length > 0 ? { envKeys: env.keys } : {}),
+            ...(Object.keys(env.literal).length > 0 ? { envLiteral: env.literal } : {}),
+          }),
+          onUndefined: () =>
+            UndefinedOr.match(live.url, {
+              onDefined: (url) => ({
+                _tag: "Remote" as const,
+                url,
+                ...(headers.keys.length > 0 ? { headerKeys: headers.keys } : {}),
+                ...(Object.keys(headers.literal).length > 0
+                  ? { headerLiteral: headers.literal }
+                  : {}),
+              }),
+              onUndefined: () => undefined,
+            }),
+        });
 
         return {
           tool: props.tool,
           name: props.name,
-          ...(live.command !== undefined ? { command: live.command } : {}),
-          ...(live.args !== undefined ? { args: [...live.args] } : {}),
-          ...(live.url !== undefined ? { url: live.url } : {}),
-          ...(env.keys.length > 0 ? { envKeys: env.keys } : {}),
-          ...(Object.keys(env.literal).length > 0 ? { envLiteral: env.literal } : {}),
-          ...(headers.keys.length > 0 ? { headerKeys: headers.keys } : {}),
-          ...(Object.keys(headers.literal).length > 0 ? { headerLiteral: headers.literal } : {}),
+          ...(transport !== undefined ? { transport } : {}),
         };
       }),
 
@@ -199,31 +279,71 @@ export const makeMcpServerReconciler: Effect.Effect<
       Effect.succeed({
         tool: props.tool,
         name: props.name,
-        ...(props.command !== undefined ? { command: props.command } : {}),
-        ...(props.args !== undefined ? { args: [...props.args] } : {}),
-        ...(props.url !== undefined ? { url: props.url } : {}),
-        ...(declaredKeys(props.env).length > 0 ? { envKeys: declaredKeys(props.env) } : {}),
-        ...(Object.keys(declaredLiteral(props.env)).length > 0
-          ? { envLiteral: declaredLiteral(props.env) }
-          : {}),
-        ...(declaredKeys(props.headers).length > 0
-          ? { headerKeys: declaredKeys(props.headers) }
-          : {}),
-        ...(Object.keys(declaredLiteral(props.headers)).length > 0
-          ? { headerLiteral: declaredLiteral(props.headers) }
-          : {}),
+        transport: Match.value(props.transport).pipe(
+          Match.tag(
+            "Stdio",
+            (t): McpTransportState => ({
+              _tag: "Stdio",
+              command: t.command,
+              ...(t.args !== undefined ? { args: [...t.args] } : {}),
+              ...(declaredKeys(t.env).length > 0 ? { envKeys: declaredKeys(t.env) } : {}),
+              ...(Object.keys(declaredLiteral(t.env)).length > 0
+                ? { envLiteral: declaredLiteral(t.env) }
+                : {}),
+            }),
+          ),
+          Match.tag(
+            "Remote",
+            (t): McpTransportState => ({
+              _tag: "Remote",
+              url: t.url,
+              ...(declaredKeys(t.headers).length > 0
+                ? { headerKeys: declaredKeys(t.headers) }
+                : {}),
+              ...(Object.keys(declaredLiteral(t.headers)).length > 0
+                ? { headerLiteral: declaredLiteral(t.headers) }
+                : {}),
+            }),
+          ),
+          Match.exhaustive,
+        ),
       }),
 
     matches: (observed, desired) =>
       observed.tool === desired.tool &&
       observed.name === desired.name &&
-      observed.command === desired.command &&
-      arraysEqual(observed.args, desired.args) &&
-      observed.url === desired.url &&
-      arraysEqual(observed.envKeys, desired.envKeys) &&
-      recordsEqual(observed.envLiteral, desired.envLiteral) &&
-      arraysEqual(observed.headerKeys, desired.headerKeys) &&
-      recordsEqual(observed.headerLiteral, desired.headerLiteral),
+      UndefinedOr.match(desired.transport, {
+        // `transport` is `optionalKey` on `McpServerState` only so `observe`
+        // can honestly report "couldn't tell" (see its doc comment) — a
+        // `desired` this reconciler builds itself always sets it. Two
+        // "couldn't tell" sides are the closest this can come to agreeing.
+        onUndefined: () => observed.transport === undefined,
+        onDefined: (d) =>
+          Match.value(d).pipe(
+            Match.tag("Stdio", (d) => {
+              const o = observed.transport;
+              return (
+                o !== undefined &&
+                o._tag === "Stdio" &&
+                o.command === d.command &&
+                arraysEqual(o.args, d.args) &&
+                arraysEqual(o.envKeys, d.envKeys) &&
+                recordsEqual(o.envLiteral, d.envLiteral)
+              );
+            }),
+            Match.tag("Remote", (d) => {
+              const o = observed.transport;
+              return (
+                o !== undefined &&
+                o._tag === "Remote" &&
+                o.url === d.url &&
+                arraysEqual(o.headerKeys, d.headerKeys) &&
+                recordsEqual(o.headerLiteral, d.headerLiteral)
+              );
+            }),
+            Match.exhaustive,
+          ),
+      }),
 
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
@@ -238,20 +358,30 @@ export const makeMcpServerReconciler: Effect.Effect<
             return out;
           });
 
-        const env = yield* resolve(props.env);
-        const headers = yield* resolve(props.headers);
-
-        yield* mcp.apply(
-          props.name,
-          {
-            ...(props.command !== undefined ? { command: props.command } : {}),
-            ...(props.args !== undefined ? { args: props.args } : {}),
-            ...(Object.keys(env).length > 0 ? { env } : {}),
-            ...(props.url !== undefined ? { url: props.url } : {}),
-            ...(Object.keys(headers).length > 0 ? { headers } : {}),
-          },
-          { exec: ctx.exec, fs, path, home: paths.home },
+        const spec: AiMcpServerDesired = yield* Match.value(props.transport).pipe(
+          Match.tag("Stdio", (t) =>
+            Effect.gen(function* () {
+              const env = yield* resolve(t.env);
+              return {
+                command: t.command,
+                ...(t.args !== undefined ? { args: t.args } : {}),
+                ...(Object.keys(env).length > 0 ? { env } : {}),
+              };
+            }),
+          ),
+          Match.tag("Remote", (t) =>
+            Effect.gen(function* () {
+              const headers = yield* resolve(t.headers);
+              return {
+                url: t.url,
+                ...(Object.keys(headers).length > 0 ? { headers } : {}),
+              };
+            }),
+          ),
+          Match.exhaustive,
         );
+
+        yield* mcp.apply(props.name, spec, { exec: ctx.exec, fs, path, home: paths.home });
 
         return desired;
       }),

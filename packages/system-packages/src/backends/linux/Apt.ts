@@ -1,6 +1,6 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
+import type { AptRepo, PackageManagerBackend, RepoBackend } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 import { parseAllSources } from "./apt/sources.ts";
 
@@ -26,6 +26,12 @@ export const makeAptBackend = (): PackageManagerBackend => ({
       shell: true,
       timeout: "10 minutes",
     }).pipe(Effect.asVoid),
+});
+
+const toAptRepo = (ppa: string): AptRepo => ({ _tag: "Apt", ppa });
+
+/** apt's PPA half — see `Repo.ts`'s `RepoSpec` for the `ppa` field's shape. */
+export const makeAptRepoBackend = (): RepoBackend<AptRepo> => ({
   /**
    * Reads the files apt is configured from, in both of its formats.
    *
@@ -49,12 +55,12 @@ export const makeAptBackend = (): PackageManagerBackend => ({
         const index = result.stdout.indexOf(SEPARATOR);
         const oneLine = index === -1 ? result.stdout : result.stdout.slice(0, index);
         const deb822 = index === -1 ? "" : result.stdout.slice(index + SEPARATOR.length);
-        return parseAllSources(oneLine, deb822);
+        return parseAllSources(oneLine, deb822).map(toAptRepo);
       }),
     ),
   addRepo: (repo, exec) =>
     exec({
-      command: Sh.sh("sudo", "add-apt-repository", "-y", repo),
+      command: Sh.sh("sudo", "add-apt-repository", "-y", repo.ppa),
       shell: true,
     }).pipe(Effect.asVoid),
 });

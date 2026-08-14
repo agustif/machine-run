@@ -65,7 +65,7 @@ this package: the tool reports success for a write that did not happen.
 
 - [x] **`SettingProps` is a `Schema.TaggedUnion`** (`Gsettings` /
       `GsettingsRelocatable` / `Dconf`), not `{ backend: SettingsBackendId,
-      key: Schema.String, value: Schema.String }`. The old shape spelled every
+key: Schema.String, value: Schema.String }`. The old shape spelled every
       key as one opaque string, split apart at runtime by each backend's own
       regex — `dconf`'s backend could in principle be handed a
       `gsettings`-shaped string and the mismatch surfaced only as a late

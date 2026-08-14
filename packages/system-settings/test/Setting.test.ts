@@ -99,9 +99,9 @@ it.effect(
           value: "'hi'",
         }),
       ).toBe("gsettings:org.example.relocatable:/org/example/testpath1/:greeting");
-      expect(
-        reconciler.address({ _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" }),
-      ).toBe("dconf:/test/mypath");
+      expect(reconciler.address({ _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" })).toBe(
+        "dconf:/test/mypath",
+      );
     }),
 );
 
@@ -141,53 +141,53 @@ it.effect(
     }),
 );
 
-it.effect(
-  "Setting reconciler observe: a relocatable schema reports schema/path/key together",
-  () =>
-    Effect.gen(function* () {
-      const reconciler = yield* makeSettingReconciler;
-      const observed = yield* reconciler.observe(
-        {
-          _tag: "GsettingsRelocatable",
-          schema: "org.example.relocatable",
-          path: "/org/example/testpath1/",
-          key: "greeting",
-          value: "'hi there'",
-        },
-        planCtx(fakeExec("'hi there'\n")),
-      );
-      expect(observed).toEqual({
-        variant: "GsettingsRelocatable",
+it.effect("Setting reconciler observe: a relocatable schema reports schema/path/key together", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSettingReconciler;
+    const observed = yield* reconciler.observe(
+      {
+        _tag: "GsettingsRelocatable",
         schema: "org.example.relocatable",
         path: "/org/example/testpath1/",
         key: "greeting",
         value: "'hi there'",
-      });
-    }),
+      },
+      planCtx(fakeExec("'hi there'\n")),
+    );
+    expect(observed).toEqual({
+      variant: "GsettingsRelocatable",
+      schema: "org.example.relocatable",
+      path: "/org/example/testpath1/",
+      key: "greeting",
+      value: "'hi there'",
+    });
+  }),
 );
 
-it.effect("Setting reconciler matches: true iff variant, schema/path/key and value are all equal", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeSettingReconciler;
-    const desired = {
-      variant: "Gsettings" as const,
-      schema: "org.gnome.desktop.interface",
-      path: undefined,
-      key: "clock-format",
-      value: "'24h'",
-    };
-    expect(reconciler.matches(desired, desired)).toBe(true);
-    expect(reconciler.matches({ ...desired, value: "'12h'" }, desired)).toBe(false);
-    // A dconf state observed at the identical `key`/`value` text never
-    // matches a gsettings desired state — the illegal cross-backend mixup
-    // the previous flat `{backend, key, value}` shape made possible.
-    expect(
-      reconciler.matches(
-        { variant: "Dconf", schema: undefined, path: undefined, key: undefined, value: "'24h'" },
-        desired,
-      ),
-    ).toBe(false);
-  }),
+it.effect(
+  "Setting reconciler matches: true iff variant, schema/path/key and value are all equal",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const desired = {
+        variant: "Gsettings" as const,
+        schema: "org.gnome.desktop.interface",
+        path: undefined,
+        key: "clock-format",
+        value: "'24h'",
+      };
+      expect(reconciler.matches(desired, desired)).toBe(true);
+      expect(reconciler.matches({ ...desired, value: "'12h'" }, desired)).toBe(false);
+      // A dconf state observed at the identical `key`/`value` text never
+      // matches a gsettings desired state — the illegal cross-backend mixup
+      // the previous flat `{backend, key, value}` shape made possible.
+      expect(
+        reconciler.matches(
+          { variant: "Dconf", schema: undefined, path: undefined, key: undefined, value: "'24h'" },
+          desired,
+        ),
+      ).toBe(false);
+    }),
 );
 
 it.effect("Setting reconciler apply: writes the value and confirms it by reading it back", () =>

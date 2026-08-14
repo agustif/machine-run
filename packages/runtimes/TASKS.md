@@ -8,8 +8,8 @@ was verified by running each CLI, and where the remaining gaps are.
 
 - [x] **`RuntimeToolProps` is a `Schema.TaggedUnion`** (`Mise`/`Asdf`/`Rustup`/`Uv`),
       not `{ manager: RuntimeManagerId, tool: Schema.String, version:
-      Schema.String }`. The old shape let a recipe write `{ manager: "rustup",
-      tool: "node" }` — a combination that was never legal (rustup only ever
+Schema.String }`. The old shape let a recipe write `{ manager: "rustup",
+tool: "node" }` — a combination that was never legal (rustup only ever
       manages `"rust"`) and was only ever caught at runtime by
       `RuntimeToolMismatch`. That error class is deleted: `Rustup`'s case has
       no `tool` field for a caller to get wrong, and `Uv`'s has none either.

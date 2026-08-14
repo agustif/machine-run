@@ -10,9 +10,8 @@ import * as Schema from "effect/Schema";
 
 /**
  * Every AI coding tool this repo knows the on-disk layout of, keyed the same
- * way `system-packages`' `PackageManagerId` and `secrets`' `SecretBackendId`
- * are — a closed set so an unknown id is a compile error, not a runtime
- * surprise.
+ * way `system-packages`' `PackageManagerId` is — a closed set so an unknown
+ * id is a compile error, not a runtime surprise.
  *
  * Membership here says only "this tool's `skills/` directory and reviewed
  * config files are known" — it says nothing about MCP support. See

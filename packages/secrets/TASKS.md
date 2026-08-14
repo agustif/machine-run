@@ -5,13 +5,13 @@ that receive a command runner; nothing here needs a service.
 
 - [x] **`SecretFileProps.source` is a typed `SecretSource` union, not a string
       discriminator plus an opaque `ref: Schema.String`.** `{ source:
-    "1password", ref: "GITHUB_TOKEN" }` used to type-check while being
+"1password", ref: "GITHUB_TOKEN" }` used to type-check while being
       nonsense — one field's grammar depended entirely on its sibling's value,
       and nothing caught a ref shaped for the wrong store. `SecretSource` is
       now a `Schema.TaggedUnion` (`Backend.ts`) with one properly-named-field
       variant per store — `OnePassword { vault, item, field }`, `Doppler {
-    project, config, name }`, `Keychain { service, account? }`, `Pass {
-    path }`, `Env { variable }` — dispatched exhaustively in `Store.ts` via
+project, config, name }`, `Keychain { service, account? }`, `Pass {
+path }`, `Env { variable }` — dispatched exhaustively in `Store.ts` via
       `Match.tagsExhaustive`, and each `SecretBackend`'s `read` is narrowed to
       the one variant it accepts, so handing a backend a reference shaped for
       a different store is now a compile error. This is a props-and-state

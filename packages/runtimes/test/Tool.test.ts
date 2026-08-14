@@ -193,9 +193,9 @@ it.effect(
       ).toBe(false);
       // Same tool name, different manager (asdf spells node "nodejs", so this
       // also covers the case of a same-named tool under the wrong manager).
-      expect(
-        reconciler.matches({ manager: "Asdf", tool: "node", ...observedBase }, desired),
-      ).toBe(false);
+      expect(reconciler.matches({ manager: "Asdf", tool: "node", ...observedBase }, desired)).toBe(
+        false,
+      );
     }).pipe(Effect.provide(layer)),
 );
 

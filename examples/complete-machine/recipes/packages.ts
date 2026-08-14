@@ -20,8 +20,7 @@ export const packages = Effect.gen(function* () {
   // because a repo's addressing scheme is manager-specific: a `ppa:` only
   // means something to apt.
   yield* SystemPackages.Repo("homebrew-tap", {
-    manager: "brew",
-    repo: "homebrew/cask-fonts",
+    repo: { _tag: "Brew", tap: "homebrew/cask-fonts" },
   });
 
   // One package, stated on its own, so its `version`/drift is visible.

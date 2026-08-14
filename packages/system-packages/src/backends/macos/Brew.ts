@@ -1,6 +1,6 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
+import type { BrewRepo, PackageManagerBackend, RepoBackend } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
 export const makeBrewBackend = (): PackageManagerBackend => ({
@@ -30,10 +30,18 @@ export const makeBrewBackend = (): PackageManagerBackend => ({
       shell: true,
       timeout: "10 minutes",
     }).pipe(Effect.asVoid),
+});
+
+const toBrewRepo = (tap: string): BrewRepo => ({ _tag: "Brew", tap });
+
+/** `brew tap`'s repo half — see `Repo.ts`'s `RepoSpec` for the `tap` field's `owner/name` shape. */
+export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
   listRepos: (exec) =>
-    exec({ command: "brew tap" }).pipe(Effect.map((result) => lines(result.stdout))),
+    exec({ command: "brew tap" }).pipe(
+      Effect.map((result) => lines(result.stdout).map(toBrewRepo)),
+    ),
   addRepo: (repo, exec) =>
-    exec({ command: Sh.sh("brew", "tap", repo), shell: true }).pipe(Effect.asVoid),
+    exec({ command: Sh.sh("brew", "tap", repo.tap), shell: true }).pipe(Effect.asVoid),
 });
 
 export const makeBrewCaskBackend = (): PackageManagerBackend => ({

@@ -93,9 +93,7 @@ export type AsdfToolIdentity = typeof AsdfToolIdentity.Type;
 /**
  * rustup manages exactly one toolchain — Rust — so there is no `tool` field
  * to get wrong: {@link RuntimeToolProps}'s `Rustup` case (`Tool.ts`) has no
- * way to name anything else in the first place, unlike the old
- * `{ manager, tool }` shape this replaces (see `RuntimeToolMismatch`'s
- * deletion note in `Tool.ts`'s git history). `channel` (not `version`) is
+ * way to name anything else in the first place. `channel` (not `version`) is
  * deliberate: rustup's own vocabulary — `rustup toolchain install`,
  * `rustup default`, `rustup override set`, all verified directly — takes a
  * *channel* (`stable`, `beta`, `nightly`) or a pinned version like `1.79`,
@@ -125,8 +123,8 @@ export type UvToolIdentity = typeof UvToolIdentity.Type;
  *
  * Parametrized over `Identity` — one of {@link MiseToolIdentity}, {@link
  * AsdfToolIdentity}, {@link RustupToolIdentity} or {@link UvToolIdentity} —
- * rather than a bare `tool: Schema.String`. This is what makes a
- * `RuntimeToolMismatch`-style error impossible to need: `makeRustupBackend`
+ * rather than a bare `tool: Schema.String`. This is what makes a runtime
+ * name check impossible to need: `makeRustupBackend`
  * and `makeUvBackend` return a `RuntimeBackend<RustupToolIdentity>`/
  * `RuntimeBackend<UvToolIdentity>`, whose `Identity` has no `tool` field at
  * all, so there is no mismatched name a caller could hand them in the first

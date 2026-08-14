@@ -1,12 +1,18 @@
 import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
-import type { BackendError } from "./Backend.ts";
+import type { BackendError, RepoSpec } from "./Backend.ts";
 
 /**
- * A memoized string-list cache keyed by an arbitrary string (here, always a
+ * A memoized list cache keyed by an arbitrary string (here, always a
  * package-manager id). One `list`/`listRepos` shell-out per key for the
  * lifetime of the provider, not one per resource.
+ *
+ * Generic in the element type so `Package.ts`'s installed-name strings and
+ * `Repo.ts`'s typed {@link RepoSpec} entries share this same machinery
+ * without either being forced into the other's shape — see
+ * {@link PackageIndex}'s doc comment for why `packages`/`repos` are
+ * separate instances rather than one shared cache.
  *
  * Backed by `effect/Cache` (`Cache.make`/`Cache.get`/`Cache.invalidate`)
  * rather than a hand-rolled `Map`: `Cache.get` de-duplicates concurrent calls
@@ -14,7 +20,7 @@ import type { BackendError } from "./Backend.ts";
  * `Ref<Map<...>>` cannot do without reimplementing exactly the machinery
  * `Cache` already provides.
  */
-export interface MemoizedLister {
+export interface MemoizedLister<T> {
   /**
    * Returns the cached list for `key`, calling `fetch` only on the first
    * request for that key (or the first after an `invalidate`). Concurrent
@@ -23,56 +29,57 @@ export interface MemoizedLister {
    */
   readonly get: (
     key: string,
-    fetch: () => Effect.Effect<string[], BackendError>,
-  ) => Effect.Effect<string[], BackendError>;
+    fetch: () => Effect.Effect<T[], BackendError>,
+  ) => Effect.Effect<T[], BackendError>;
   /** Drops `key`'s cached entry, so the next `get` re-fetches. */
   readonly invalidate: (key: string) => Effect.Effect<void>;
 }
 
-const makeMemoizedLister: Effect.Effect<MemoizedLister> = Effect.gen(function* () {
-  // `Cache.make`'s `lookup` is one function fixed for the cache's whole
-  // lifetime, keyed only on `key` — it has no way to accept a different
-  // `fetch` thunk per `get` call the way this module's own `get` does (`diff`
-  // and `reconcile` each close over a different session when they call
-  // `get`). This ref is the seam that bridges the two: `get` records `fetch`
-  // here immediately before asking the cache for `key`, and `lookup` below
-  // reads it back in the same synchronous step. It never stores results —
-  // only which thunk to run on the next actual miss — so it is not a
-  // second cache; hit/miss decisions, concurrent de-duplication, and
-  // invalidation all live in `Cache` itself.
-  const fetchers = yield* Ref.make(new Map<string, () => Effect.Effect<string[], BackendError>>());
+const makeMemoizedLister = <T>(): Effect.Effect<MemoizedLister<T>> =>
+  Effect.gen(function* () {
+    // `Cache.make`'s `lookup` is one function fixed for the cache's whole
+    // lifetime, keyed only on `key` — it has no way to accept a different
+    // `fetch` thunk per `get` call the way this module's own `get` does
+    // (`diff` and `reconcile` each close over a different session when they
+    // call `get`). This ref is the seam that bridges the two: `get` records
+    // `fetch` here immediately before asking the cache for `key`, and
+    // `lookup` below reads it back in the same synchronous step. It never
+    // stores results — only which thunk to run on the next actual miss — so
+    // it is not a second cache; hit/miss decisions, concurrent
+    // de-duplication, and invalidation all live in `Cache` itself.
+    const fetchers = yield* Ref.make(new Map<string, () => Effect.Effect<T[], BackendError>>());
 
-  const cache = yield* Cache.make<string, string[], BackendError>({
-    // A handful of package-manager ids exist in total (brew, apt, dnf,
-    // pacman, cargo, npm, winget, choco, ...) — this is not sized for
-    // eviction, just large enough that a real deployment never approaches it.
-    capacity: 256,
-    lookup: (key) =>
-      Effect.gen(function* () {
-        const fetch = (yield* Ref.get(fetchers)).get(key);
-        // Unreachable in practice: `get` below always registers a fetcher
-        // for `key` before asking the cache for it, so a miss always finds
-        // one. Guards against this module being used outside that contract
-        // rather than a real runtime condition.
-        if (!fetch) {
-          return yield* Effect.die(
-            `PackageIndex: no fetcher registered for "${key}" — get() must register one before querying the cache`,
-          );
-        }
-        return yield* fetch();
-      }),
-  });
-
-  const get: MemoizedLister["get"] = (key, fetch) =>
-    Effect.gen(function* () {
-      yield* Ref.update(fetchers, (map) => new Map(map).set(key, fetch));
-      return yield* Cache.get(cache, key);
+    const cache = yield* Cache.make<string, T[], BackendError>({
+      // A handful of package-manager ids exist in total (brew, apt, dnf,
+      // pacman, cargo, npm, winget, choco, ...) — this is not sized for
+      // eviction, just large enough that a real deployment never approaches it.
+      capacity: 256,
+      lookup: (key) =>
+        Effect.gen(function* () {
+          const fetch = (yield* Ref.get(fetchers)).get(key);
+          // Unreachable in practice: `get` below always registers a fetcher
+          // for `key` before asking the cache for it, so a miss always finds
+          // one. Guards against this module being used outside that contract
+          // rather than a real runtime condition.
+          if (!fetch) {
+            return yield* Effect.die(
+              `PackageIndex: no fetcher registered for "${key}" — get() must register one before querying the cache`,
+            );
+          }
+          return yield* fetch();
+        }),
     });
 
-  const invalidate = (key: string) => Cache.invalidate(cache, key);
+    const get: MemoizedLister<T>["get"] = (key, fetch) =>
+      Effect.gen(function* () {
+        yield* Ref.update(fetchers, (map) => new Map(map).set(key, fetch));
+        return yield* Cache.get(cache, key);
+      });
 
-  return { get, invalidate };
-});
+    const invalidate = (key: string) => Cache.invalidate(cache, key);
+
+    return { get, invalidate };
+  });
 
 /**
  * A pair of memoized `list`/`listRepos` caches for `Package.ts`/`Repo.ts` to
@@ -114,12 +121,12 @@ const makeMemoizedLister: Effect.Effect<MemoizedLister> = Effect.gen(function* (
  * `ApplyContext` (checking for `snapshot`, which only the latter has).
  */
 export interface PackageIndex {
-  readonly packages: MemoizedLister;
-  readonly repos: MemoizedLister;
+  readonly packages: MemoizedLister<string>;
+  readonly repos: MemoizedLister<RepoSpec>;
 }
 
 export const makePackageIndex: Effect.Effect<PackageIndex> = Effect.gen(function* () {
-  const packages = yield* makeMemoizedLister;
-  const repos = yield* makeMemoizedLister;
+  const packages = yield* makeMemoizedLister<string>();
+  const repos = yield* makeMemoizedLister<RepoSpec>();
   return { packages, repos };
 });

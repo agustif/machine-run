@@ -21,16 +21,20 @@ export const ai = Effect.gen(function* () {
   yield* Ai.McpServer("filesystem-claude", {
     tool: "claude",
     name: "filesystem",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/code"],
+    transport: {
+      _tag: "Stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/code"],
+    },
   });
 
-  // A remote MCP server. `command` and `url` are mutually exclusive: a server
-  // is either launched or dialled.
+  // A remote MCP server. Stdio and Remote are separate variants, so a server
+  // with both a command and a url — or with neither — cannot be written at
+  // all, rather than being ruled out by a comment.
   yield* Ai.McpServer("linear-claude", {
     tool: "claude",
     name: "linear",
-    url: "https://mcp.linear.app/sse",
+    transport: { _tag: "Remote", url: "https://mcp.linear.app/sse" },
   });
 
   // The same server registered for a second tool, since each keeps its own
@@ -38,8 +42,11 @@ export const ai = Effect.gen(function* () {
   yield* Ai.McpServer("filesystem-codex", {
     tool: "codex",
     name: "filesystem",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/code"],
+    transport: {
+      _tag: "Stdio",
+      command: "npx",
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/you/code"],
+    },
   });
 
   // These derive their own resource ids from `tool`, so one call per tool is
