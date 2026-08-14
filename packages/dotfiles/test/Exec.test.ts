@@ -5,6 +5,7 @@ import { CommandExecutor, CommandExecutorLive } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ExecGuardRequired, makeExecReconciler, type ExecProps } from "../src/Exec.ts";
 
@@ -47,10 +48,10 @@ it.effect("a `creates` guard reflects whether the path really exists", () =>
     const marker = path.join(dir, "marker");
 
     const props: ExecProps = { command: "true", creates: marker };
-    expect(yield* reconciler.observe(props, c)).toEqual({ satisfied: false });
+    expect(yield* reconciler.observe(props, c)).toEqual(Option.some({ satisfied: false }));
 
     yield* fs.writeFileString(marker, "");
-    expect(yield* reconciler.observe(props, c)).toEqual({ satisfied: true });
+    expect(yield* reconciler.observe(props, c)).toEqual(Option.some({ satisfied: true }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -60,10 +61,10 @@ it.effect("an `unless` guard runs for real and reads its real exit code", () =>
     const c = yield* ctx;
 
     const notDone: ExecProps = { command: "true", unless: "false" };
-    expect(yield* reconciler.observe(notDone, c)).toEqual({ satisfied: false });
+    expect(yield* reconciler.observe(notDone, c)).toEqual(Option.some({ satisfied: false }));
 
     const alreadyDone: ExecProps = { command: "true", unless: "true" };
-    expect(yield* reconciler.observe(alreadyDone, c)).toEqual({ satisfied: true });
+    expect(yield* reconciler.observe(alreadyDone, c)).toEqual(Option.some({ satisfied: true }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -85,9 +86,9 @@ it.effect(
 
       // Not yet converged: the file this command creates does not exist.
       const before = yield* reconciler.observe(props, c);
-      expect(before).toEqual({ satisfied: false });
+      expect(before).toEqual(Option.some({ satisfied: false }));
       const desired = yield* reconciler.desired(props);
-      expect(reconciler.matches(before!, desired)).toBe(false);
+      expect(reconciler.matches(Option.getOrThrow(before), desired)).toBe(false);
 
       const after = yield* reconciler.apply({ props, observed: before, desired }, c);
       expect(after).toEqual({ satisfied: true });
@@ -97,7 +98,7 @@ it.effect(
       // running the command again — this is the idempotency the guard
       // exists to provide.
       const later = yield* reconciler.observe(props, c);
-      expect(reconciler.matches(later!, desired)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(later), desired)).toBe(true);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -108,7 +109,7 @@ it.effect("a failing command surfaces as a real CommandError, not a guard result
     const props: ExecProps = { command: "exit 7", unless: "false" };
     const desired = yield* reconciler.desired(props);
     const error = yield* reconciler
-      .apply({ props, observed: undefined, desired }, c)
+      .apply({ props, observed: Option.none(), desired }, c)
       .pipe(Effect.flip);
     expect(error._tag).toBe("CommandError");
   }).pipe(Effect.provide(layer)),

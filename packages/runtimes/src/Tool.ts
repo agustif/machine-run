@@ -417,18 +417,20 @@ export const makeRuntimeToolReconciler: Effect.Effect<
   const observeState = (
     props: RuntimeToolProps,
     exec: Exec,
-  ): Effect.Effect<RuntimeToolState | undefined, BackendError> =>
+  ): Effect.Effect<Option.Option<RuntimeToolState>, BackendError> =>
     Effect.gen(function* () {
       const plan = planFor(props);
       const observation = yield* plan.observe(exec);
       const version = resolveVersion(plan.requestedVersion, observation);
-      return version === undefined ? undefined : plan.toObservedState(version, observation);
+      return Option.fromUndefinedOr(version).pipe(
+        Option.map((resolved) => plan.toObservedState(resolved, observation)),
+      );
     });
 
   const observe = (
     props: RuntimeToolProps,
     ctx: ObserveContext,
-  ): Effect.Effect<RuntimeToolState | undefined, BackendError> => observeState(props, ctx.exec);
+  ): Effect.Effect<Option.Option<RuntimeToolState>, BackendError> => observeState(props, ctx.exec);
 
   return {
     address: (props) =>
@@ -468,10 +470,10 @@ export const makeRuntimeToolReconciler: Effect.Effect<
         const plan = planFor(props);
 
         const alreadyInstalled =
-          observed !== undefined &&
-          observed.installed &&
-          plan.sameIdentity(observed) &&
-          versionSatisfies(plan.requestedVersion, observed.version);
+          Option.isSome(observed) &&
+          observed.value.installed &&
+          plan.sameIdentity(observed.value) &&
+          versionSatisfies(plan.requestedVersion, observed.value.version);
 
         if (!alreadyInstalled) {
           yield* plan.install(ctx.exec);
@@ -485,10 +487,10 @@ export const makeRuntimeToolReconciler: Effect.Effect<
         // write: a fuzzy request can resolve to a slightly different
         // concrete version than a naive echo of `props.version` would claim.
         const reobserved = yield* observe(props, ctx);
-        if (reobserved === undefined) {
-          return yield* Effect.fail(new RuntimeNotConverged({ props }));
-        }
-        return reobserved;
+        return yield* Option.match(reobserved, {
+          onNone: () => Effect.fail(new RuntimeNotConverged({ props })),
+          onSome: (state) => Effect.succeed(state),
+        });
       }),
   };
 });

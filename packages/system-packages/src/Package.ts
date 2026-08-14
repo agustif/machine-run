@@ -6,6 +6,7 @@ import {
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { makeYayBackend, makeParuBackend } from "./backends/linux/Aur.ts";
 import { makeAptBackend } from "./backends/linux/Apt.ts";
@@ -143,8 +144,8 @@ export const makePackageReconciler: Effect.Effect<
       const backend = backends[props.manager];
       const index = isApplyPhase(ctx) ? applyIndex : planIndex;
       const installed = yield* index.packages.get(props.manager, () => backend.list(ctx.exec));
-      if (!installed.includes(props.name)) return undefined;
-      return { manager: props.manager, name: props.name };
+      if (!installed.includes(props.name)) return Option.none();
+      return Option.some({ manager: props.manager, name: props.name });
     });
 
   return {

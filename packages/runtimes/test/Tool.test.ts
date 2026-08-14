@@ -4,6 +4,7 @@ import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { makeRuntimeToolReconciler, type RuntimeToolProps } from "../src/Tool.ts";
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
@@ -46,11 +47,11 @@ const props = (
   ...overrides,
 });
 
-it.effect("observe: nothing installed and nothing active reports undefined", () =>
+it.effect("observe: nothing installed and nothing active reports Option.none()", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRuntimeToolReconciler;
     const observed = yield* reconciler.observe(props(), observeCtx(queuedExec(["[]"])));
-    expect(observed).toBeUndefined();
+    expect(observed).toEqual(Option.none());
   }).pipe(Effect.provide(layer)),
 );
 
@@ -63,14 +64,16 @@ it.effect(
         props({ version: "22" }),
         observeCtx(queuedExec([miseEntry("22.11.0", true, true)])),
       );
-      expect(observed).toEqual({
-        manager: "Mise",
-        tool: "node",
-        scope: { _tag: "Global" },
-        version: "22.11.0",
-        installed: true,
-        active: true,
-      });
+      expect(observed).toEqual(
+        Option.some({
+          manager: "Mise",
+          tool: "node",
+          scope: { _tag: "Global" },
+          version: "22.11.0",
+          installed: true,
+          active: true,
+        }),
+      );
     }).pipe(Effect.provide(layer)),
 );
 
@@ -83,14 +86,16 @@ it.effect(
         props({ version: "22" }),
         observeCtx(queuedExec([miseEntry("22.11.0", true, false)])),
       );
-      expect(observed).toEqual({
-        manager: "Mise",
-        tool: "node",
-        scope: { _tag: "Global" },
-        version: "22.11.0",
-        installed: true,
-        active: false,
-      });
+      expect(observed).toEqual(
+        Option.some({
+          manager: "Mise",
+          tool: "node",
+          scope: { _tag: "Global" },
+          version: "22.11.0",
+          installed: true,
+          active: false,
+        }),
+      );
     }).pipe(Effect.provide(layer)),
 );
 
@@ -210,7 +215,7 @@ it.effect("apply: installs and activates when nothing was observed", () =>
     // listing as the *last* fixture the exec sees.
     const exec = capturingExec(miseEntry("22.11.0", true, true), calls);
     const result = yield* reconciler.apply(
-      { props: p, observed: undefined, desired },
+      { props: p, observed: Option.none(), desired },
       applyCtx(exec),
     );
 
@@ -246,7 +251,7 @@ it.effect("apply: an already-installed version is only activated, never reinstal
     };
 
     const exec = capturingExec(miseEntry("22.11.0", true, true), calls);
-    yield* reconciler.apply({ props: p, observed, desired }, applyCtx(exec));
+    yield* reconciler.apply({ props: p, observed: Option.some(observed), desired }, applyCtx(exec));
 
     expect(calls.map((c) => c.command)).toEqual([
       "mise use --global --pin -y node@22",
@@ -276,7 +281,10 @@ it.effect(
       };
 
       const exec = capturingExec(miseEntry("22.11.0", true, true), calls);
-      yield* reconciler.apply({ props: p, observed, desired }, applyCtx(exec));
+      yield* reconciler.apply(
+        { props: p, observed: Option.some(observed), desired },
+        applyCtx(exec),
+      );
 
       expect(calls.map((c) => c.command)).toEqual([
         "mise install node@22",
@@ -294,7 +302,7 @@ it.effect("apply: `active: false` installs but never calls activate", () =>
     const desired = yield* reconciler.desired(p);
 
     const exec = capturingExec(miseEntry("22.11.0", true, false), calls);
-    yield* reconciler.apply({ props: p, observed: undefined, desired }, applyCtx(exec));
+    yield* reconciler.apply({ props: p, observed: Option.none(), desired }, applyCtx(exec));
 
     expect(calls.map((c) => c.command)).toEqual(["mise install node@22", "mise ls node --json"]);
   }).pipe(Effect.provide(layer)),
@@ -339,12 +347,14 @@ installed targets:
       { _tag: "Rustup", channel: "stable" },
       observeCtx(queuedExec([rustupShow])),
     );
-    expect(observed).toEqual({
-      manager: "Rustup",
-      scope: { _tag: "Global" },
-      version: "stable",
-      installed: true,
-      active: true,
-    });
+    expect(observed).toEqual(
+      Option.some({
+        manager: "Rustup",
+        scope: { _tag: "Global" },
+        version: "stable",
+        installed: true,
+        active: true,
+      }),
+    );
   }).pipe(Effect.provide(layer)),
 );

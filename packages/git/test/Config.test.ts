@@ -7,6 +7,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import {
@@ -88,7 +89,7 @@ it.effect("observe reports absent when the key is unset (real exit code 1)", () 
     // Verified against real git 2.50.1: `--get-all` on an unset key exits 1
     // with empty stdout.
     const observed = yield* reconciler.observe(props(), fakeExecExit(1));
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -103,7 +104,7 @@ it.effect(
         props({ key: "multi.key", values: ["val1", "val2"] }),
         fakeExecOk("val1\0val2\0"),
       );
-      expect(observed).toEqual({ key: "multi.key", values: ["val1", "val2"] });
+      expect(observed).toEqual(Option.some({ key: "multi.key", values: ["val1", "val2"] }));
     }).pipe(Effect.provide(layer)),
 );
 
@@ -117,7 +118,7 @@ it.effect("observe reads a valueless boolean entry as canonical `true` with --ty
       props({ key: "core.bare", values: ["true"], type: "bool" }),
       fakeExecOk("true\0"),
     );
-    expect(observed).toEqual({ key: "core.bare", values: ["true"] });
+    expect(observed).toEqual(Option.some({ key: "core.bare", values: ["true"] }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -200,7 +201,7 @@ it.effect("apply clears every existing value before re-adding, tolerating 'nothi
     const desiredProps = props({ key: "credential.helper", values: ["osxkeychain", "gh"] });
     const desired = yield* reconciler.desired(desiredProps);
     const result = yield* reconciler.apply(
-      { props: desiredProps, observed: undefined, desired },
+      { props: desiredProps, observed: Option.none(), desired },
       applyCtx(exec),
     );
 
@@ -220,7 +221,7 @@ it.effect("apply passes --type=bool through to both the unset key and every --ad
     const desiredProps = props({ key: "commit.gpgsign", values: ["true"], type: "bool" });
     const desired = yield* reconciler.desired(desiredProps);
     yield* reconciler.apply(
-      { props: desiredProps, observed: undefined, desired },
+      { props: desiredProps, observed: Option.none(), desired },
       applyCtx(capturingExec(calls).exec),
     );
 

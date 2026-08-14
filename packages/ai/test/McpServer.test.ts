@@ -7,6 +7,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 /**
@@ -86,11 +87,11 @@ it.effect("apply registers a stdio server, and a later observe reports it as mat
       },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
     const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
     expect(written.mcpServers["my-server"]).toEqual({
@@ -114,7 +115,7 @@ it.effect("changing a literal env value is real drift, caught by matches and fix
       transport: { _tag: "Stdio", command: "npx", env: { LOG_LEVEL: "debug" } },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const changedProps: McpServerProps = {
       ...props,
@@ -122,7 +123,7 @@ it.effect("changing a literal env value is real drift, caught by matches and fix
     };
     const changedDesired = yield* reconciler.desired(changedProps);
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(reconciler.matches(observed!, changedDesired)).toBe(false);
+    expect(reconciler.matches(Option.getOrThrow(observed), changedDesired)).toBe(false);
 
     yield* reconciler.apply({ props: changedProps, observed, desired: changedDesired }, applyCtx);
     const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
@@ -157,7 +158,7 @@ it.effect(
       expect(stdioTransport(desired).envLiteral).toBeUndefined();
 
       yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx)
+        .apply({ props, observed: Option.none(), desired }, applyCtx)
         .pipe(Effect.provide(envConfig({ MCP_TEST_TOKEN: "sk-live-value" })));
 
       // The live file genuinely holds the resolved value — these tools store
@@ -168,8 +169,8 @@ it.effect(
 
       const observed = yield* reconciler.observe(props, observeCtx);
       expect(JSON.stringify(observed)).not.toContain("sk-live-value");
-      expect(stdioTransport(observed!).envKeys).toEqual(["API_KEY"]);
-      expect(reconciler.matches(observed!, desired)).toBe(true);
+      expect(stdioTransport(Option.getOrThrow(observed)).envKeys).toEqual(["API_KEY"]);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -193,7 +194,7 @@ it.effect(
       };
       const desired = yield* reconciler.desired(props);
       yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx)
+        .apply({ props, observed: Option.none(), desired }, applyCtx)
         .pipe(Effect.provide(envConfig({ MCP_TEST_TOKEN_ROTATE: "sk-original" })));
 
       // The secret rotates in the store without machine-run's involvement —
@@ -203,7 +204,7 @@ it.effect(
       const observed = yield* reconciler.observe(props, observeCtx);
       // Still reports satisfied: comparing the resolved value would mean
       // holding a secret in `matches`, which must never happen.
-      expect(reconciler.matches(observed!, desired)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
       const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
       expect(written.mcpServers["my-server"].env.API_KEY).toBe("sk-original");
@@ -224,7 +225,7 @@ it.effect(
         transport: { _tag: "Stdio", command: "npx", env: { LOG_LEVEL: "debug" } },
       };
       const desired = yield* reconciler.desired(props);
-      yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
       const observed = yield* reconciler.observe(props, observeCtx);
 
       const withExtra: McpServerProps = {
@@ -236,7 +237,7 @@ it.effect(
         },
       };
       const desiredWithExtra = yield* reconciler.desired(withExtra);
-      expect(reconciler.matches(observed!, desiredWithExtra)).toBe(false);
+      expect(reconciler.matches(Option.getOrThrow(observed), desiredWithExtra)).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -257,11 +258,11 @@ it.effect("apply registers a remote server, and a later observe reports it as ma
       },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
     const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
     // Claude's own config marks a remote server with `type: "http"` — see
@@ -289,7 +290,7 @@ it.effect(
       };
       const stdioDesired = yield* reconciler.desired(stdioProps);
       yield* reconciler.apply(
-        { props: stdioProps, observed: undefined, desired: stdioDesired },
+        { props: stdioProps, observed: Option.none(), desired: stdioDesired },
         applyCtx,
       );
       const observed = yield* reconciler.observe(stdioProps, observeCtx);
@@ -300,7 +301,7 @@ it.effect(
         transport: { _tag: "Remote", url: "https://mcp.example.test" },
       };
       const remoteDesired = yield* reconciler.desired(remoteProps);
-      expect(reconciler.matches(observed!, remoteDesired)).toBe(false);
+      expect(reconciler.matches(Option.getOrThrow(observed), remoteDesired)).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -316,6 +317,6 @@ it.effect("observe reports absent for a server that was never registered", () =>
       transport: { _tag: "Stdio", command: "npx" },
     };
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );

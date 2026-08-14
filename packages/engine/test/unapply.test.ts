@@ -4,9 +4,11 @@ import { services as coreServices, silentSession } from "@machine-run/core";
 import { CommandExecutor } from "alchemy/Command";
 import { RemovalPolicy } from "alchemy/RemovalPolicy";
 import { Resource } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import { type Reconciler, toProvider } from "../src/index.ts";
@@ -68,15 +70,14 @@ const makeTestFileReconciler = (
     const fs = yield* FileSystem.FileSystem;
 
     const read = (path: string) =>
-      fs
-        .exists(path)
-        .pipe(
-          Effect.flatMap((exists) =>
-            exists
-              ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
-              : Effect.succeed(undefined),
-          ),
-        );
+      fs.exists(path).pipe(
+        Effect.flatMap((exists) =>
+          Boolean.match(exists, {
+            onFalse: () => Effect.succeed(Option.none()),
+            onTrue: () => fs.readFileString(path).pipe(Effect.map((content) => Option.some({ content }))),
+          }),
+        ),
+      );
 
     return {
       address: (props) => props.path,
@@ -96,9 +97,13 @@ const makeTestFileReconciler = (
           // recover later (see `Reconciler.unapply`'s doc comment: the
           // engine's own auto-snapshot discards the path for exactly this
           // reason — it has nowhere of its own to put it).
-          const backupPath = observed !== undefined ? yield* ctx.snapshot(props.path) : undefined;
+          const backupPath = yield* Option.match(observed, {
+            onNone: () => Effect.succeed<string | undefined>(undefined),
+            onSome: () => ctx.snapshot(props.path),
+          });
           yield* fs.writeFileString(props.path, props.content);
-          return backupPath !== undefined ? { ...desired, backupPath } : desired;
+          if (backupPath === undefined) return desired;
+          return { ...desired, backupPath };
         }),
 
       unapply: ({ props, recorded }) =>
@@ -124,15 +129,14 @@ const makeNoUnapplyReconciler: Effect.Effect<
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const read = (path: string) =>
-    fs
-      .exists(path)
-      .pipe(
-        Effect.flatMap((exists) =>
-          exists
-            ? fs.readFileString(path).pipe(Effect.map((content) => ({ content })))
-            : Effect.succeed(undefined),
-        ),
-      );
+    fs.exists(path).pipe(
+      Effect.flatMap((exists) =>
+        Boolean.match(exists, {
+          onFalse: () => Effect.succeed(Option.none()),
+          onTrue: () => fs.readFileString(path).pipe(Effect.map((content) => Option.some({ content }))),
+        }),
+      ),
+    );
 
   return {
     address: (props) => props.path,

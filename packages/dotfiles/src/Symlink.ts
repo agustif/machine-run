@@ -130,8 +130,8 @@ export const makeSymlinkReconciler: Effect.Effect<
         const target = paths.expand(props.path);
         const current = yield* currentTarget(target);
         return Option.match(current, {
-          onNone: () => undefined,
-          onSome: (source) => ({ path: target, source }),
+          onNone: () => Option.none(),
+          onSome: (source) => Option.some({ path: target, source }),
         });
       }),
 

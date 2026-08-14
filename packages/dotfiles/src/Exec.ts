@@ -5,6 +5,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import { type PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
@@ -175,12 +176,16 @@ export const makeExecReconciler: Effect.Effect<
           // real action).
           `exec:${props.cwd ?? ""}:${props.command}`,
 
+    // Always `Option.some`: whether the guard(s) report `command` as already
+    // run is itself the observation (see `ExecState`'s doc comment), so there
+    // is no "nothing here yet" case distinct from `satisfied: false` for this
+    // resource to signal.
     observe: (props, ctx) =>
       Effect.gen(function* () {
         if (props.unless === undefined && props.creates === undefined) {
           return yield* Effect.fail(new ExecGuardRequired({ command: props.command }));
         }
-        return { satisfied: yield* evaluateGuard(props, ctx) };
+        return Option.some({ satisfied: yield* evaluateGuard(props, ctx) });
       }),
 
     desired: () => Effect.succeed({ satisfied: true }),

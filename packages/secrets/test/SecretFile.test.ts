@@ -5,6 +5,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   makeSecretFileReconciler,
@@ -96,7 +97,7 @@ it.effect("trailingNewline 'preserve' (the default) writes the backend's bytes v
 
     yield* withEnv(
       { SSH_KEY: key },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     expect(yield* fs.readFileString(target)).toBe(key);
@@ -118,7 +119,7 @@ it.effect(
 
       yield* withEnv(
         { API_TOKEN: "no-newline-here" },
-        reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+        reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
       );
 
       expect(yield* fs.readFileString(target)).toBe("no-newline-here\n");
@@ -138,7 +139,7 @@ it.effect("trailingNewline 'ensure' does not double a newline that is already th
 
     yield* withEnv(
       { API_TOKEN: "already-has-one\n" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     expect(yield* fs.readFileString(target)).toBe("already-has-one\n");
@@ -160,7 +161,7 @@ it.effect(
 
       yield* withEnv(
         { API_TOKEN: "a-token\n\n" },
-        reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+        reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
       );
 
       expect(yield* fs.readFileString(target)).toBe("a-token");
@@ -182,7 +183,7 @@ it.effect("mode defaults to 0600, and the directory holding it defaults to 0700"
 
     yield* withEnv(
       { SSH_KEY: "private-key-bytes\n" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     const fileInfo = yield* fs.stat(target);
@@ -206,7 +207,7 @@ it.effect("an explicit mode overrides the 0600 default", () =>
 
     yield* withEnv(
       { API_TOKEN: "a-token" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     const info = yield* fs.stat(target);
@@ -223,12 +224,12 @@ it.effect("observe reports absent before the first write, then presence and mode
     const target = path.join(dir, "token");
 
     const props = propsFor(target, "API_TOKEN");
-    expect(yield* reconciler.observe(props, observeCtx)).toBeUndefined();
+    expect(Option.isNone(yield* reconciler.observe(props, observeCtx))).toBe(true);
 
     const desired = yield* reconciler.desired(props);
     yield* withEnv(
       { API_TOKEN: "a-token" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     // `observe` never reads the secret's own bytes back — only presence and
@@ -236,8 +237,8 @@ it.effect("observe reports absent before the first write, then presence and mode
     // design (see `SecretFileState`'s doc comment). What it must still catch
     // is the file's permissions being satisfied.
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toEqual({ path: target, mode: 0o600 });
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(observed).toEqual(Option.some({ path: target, mode: 0o600 }));
+    expect(Option.isSome(observed) && reconciler.matches(observed.value, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -258,7 +259,7 @@ it.effect("trailingNewline 'strip' also removes a carriage return", () =>
 
     yield* withEnv(
       { API_TOKEN: "a-token\r\n" },
-      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
     );
 
     expect(yield* fs.readFileString(target)).toBe("a-token");

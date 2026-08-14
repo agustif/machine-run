@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import {
   makeTailscaleConnectionReconciler,
@@ -36,7 +37,7 @@ it.effect("observe reports absent when the daemon is stopped or logged out (nonz
     // "command not found"/"ENOENT", so this must not be classified as a
     // missing binary.
     const observed = yield* reconciler.observe(props, fakeExecFailing("Tailscale is stopped.\n"));
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }),
 );
 
@@ -56,7 +57,7 @@ it.effect("observe treats unparseable status JSON the same as not connected, not
   Effect.gen(function* () {
     const reconciler = yield* makeTailscaleConnectionReconciler;
     const observed = yield* reconciler.observe(props, fakeExecOk("not json at all"));
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }),
 );
 
@@ -66,8 +67,8 @@ it.effect("observe treats unparseable status JSON the same as not connected, not
  * straight to `decodeStatus`, which is `Schema.decodeUnknownEffect` over
  * `Schema.fromJsonString(...)` — a schema that only accepts a JSON *string*.
  * Handed an object instead, decoding always fails with a `SchemaError`, which
- * `observe` explicitly catches and turns into `undefined` ("treated the same
- * as not being connected"). So a genuinely-running, genuinely-authenticated
+ * `observe` explicitly catches and turns into `Option.none()` ("treated the
+ * same as not being connected"). So a genuinely-running, genuinely-authenticated
  * daemon is never detected: every `diff` reports drift and every `apply` runs
  * `tailscale up` again, unconditionally, on every single deploy.
  *
@@ -88,7 +89,7 @@ it.effect("observe reports the connected state, including hostname, for a live d
     // makes every decode fail, which this resource treats as "cannot
     // confirm it is running" — so a genuinely connected daemon would read
     // as absent and every apply would re-run `tailscale up`.
-    expect(observed).toEqual({ hostname: "my-mac" });
+    expect(observed).toEqual(Option.some({ hostname: "my-mac" }));
   }),
 );
 
@@ -125,7 +126,7 @@ it.effect(
 
       const desired = yield* reconciler.desired(props);
       yield* reconciler
-        .apply({ props, observed: undefined, desired }, capturingExec)
+        .apply({ props, observed: Option.none(), desired }, capturingExec)
         .pipe(
           Effect.provide(
             ConfigProvider.layer(ConfigProvider.fromEnvRecord({ TS_KEY: "tskey-secret-value" })),
@@ -157,7 +158,11 @@ it.effect(
 
       const desired = yield* reconciler.desired({ ...props, hostname: "new-name" });
       yield* reconciler.apply(
-        { props: { ...props, hostname: "new-name" }, observed: { hostname: "old-name" }, desired },
+        {
+          props: { ...props, hostname: "new-name" },
+          observed: Option.some({ hostname: "old-name" }),
+          desired,
+        },
         capturingExec,
       );
 

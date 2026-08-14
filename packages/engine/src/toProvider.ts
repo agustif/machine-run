@@ -5,6 +5,7 @@ import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { RemovalPolicy } from "alchemy/RemovalPolicy";
 import type { ResourceClassLike, ResourceLike } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
@@ -142,8 +143,11 @@ export const toProvider = <Res extends ResourceLike, E, R>(
         // result passed straight through.
         ...(list ? { list: () => list(observeCtx) } : {}),
 
+        // Alchemy's `read` contract is `undefined`-shaped: this is the one
+        // place `Option.getOrUndefined` belongs, converting at the boundary
+        // rather than pushing the weaker spelling back into the reconciler.
         read: Effect.fn(function* ({ olds }: { olds: Res["Props"] }) {
-          return yield* reconciler.observe(olds, observeCtx);
+          return yield* reconciler.observe(olds, observeCtx).pipe(Effect.map(Option.getOrUndefined));
         }),
 
         diff: Effect.fn(function* ({ news }: { news: Res["Props"] }) {
@@ -153,10 +157,13 @@ export const toProvider = <Res extends ResourceLike, E, R>(
           if (!isResolved(news)) return undefined;
 
           const observed = yield* reconciler.observe(news, observeCtx);
-          if (observed === undefined) return { action: "update" as const };
+          if (Option.isNone(observed)) return { action: "update" as const };
 
           const desired = yield* reconciler.desired(news);
-          return reconciler.matches(observed, desired) ? undefined : { action: "update" as const };
+          return Boolean.match(reconciler.matches(observed.value, desired), {
+            onTrue: () => undefined,
+            onFalse: () => ({ action: "update" as const }),
+          });
         }),
 
         reconcile: Effect.fn(function* ({
@@ -187,8 +194,8 @@ export const toProvider = <Res extends ResourceLike, E, R>(
               const observed = yield* reconciler.observe(news, ctx);
               const desired = yield* reconciler.desired(news);
 
-              if (observed !== undefined && reconciler.matches(observed, desired)) {
-                return observed;
+              if (Option.isSome(observed) && reconciler.matches(observed.value, desired)) {
+                return observed.value;
               }
 
               if (reconciler.snapshotBeforeApply && preexisting) {
@@ -234,8 +241,8 @@ export const toProvider = <Res extends ResourceLike, E, R>(
             address,
             Effect.gen(function* () {
               const observed = yield* reconciler.observe(olds, ctx);
-              if (observed === undefined) return;
-              yield* unapply({ props: olds, observed, recorded: output }, ctx);
+              if (Option.isNone(observed)) return;
+              yield* unapply({ props: olds, observed: observed.value, recorded: output }, ctx);
             }),
           );
         }),

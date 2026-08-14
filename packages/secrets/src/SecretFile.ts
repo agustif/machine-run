@@ -4,6 +4,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { PlatformError } from "effect/PlatformError";
 import * as Redacted from "effect/Redacted";
@@ -146,8 +147,8 @@ export const makeSecretFileReconciler: Effect.Effect<
                 : Effect.fail(new SecretFilePathUnreadable({ path: target, cause })),
             ),
           );
-        if (info === undefined) return undefined;
-        return { path: target, mode: Number(info.mode) & 0o777 };
+        if (info === undefined) return Option.none();
+        return Option.some({ path: target, mode: Number(info.mode) & 0o777 });
       }),
 
     desired: (props) =>

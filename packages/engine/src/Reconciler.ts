@@ -2,6 +2,7 @@ import type * as Core from "@machine-run/core";
 import type { CommandRunProps } from "alchemy/Command";
 import type { CommandError } from "alchemy/Command";
 import type * as Effect from "effect/Effect";
+import type * as Option from "effect/Option";
 
 /**
  * The output of a command, as `CommandExecutor` returns it.
@@ -77,12 +78,12 @@ export interface ApplyContext extends ObserveContext {
 export interface ApplyInput<Props, State> {
   readonly props: Props;
   /**
-   * Live state as observed immediately beforehand, or `undefined` when there
-   * is nothing at this address yet. Reconcilers converge from what is actually
-   * there rather than from what was recorded, so an apply that resumes after a
-   * partial failure sees the truth.
+   * Live state as observed immediately beforehand, or `Option.none()` when
+   * there is nothing at this address yet. Reconcilers converge from what is
+   * actually there rather than from what was recorded, so an apply that
+   * resumes after a partial failure sees the truth.
    */
-  readonly observed: State | undefined;
+  readonly observed: Option.Option<State>;
   /** What {@link Reconciler.desired} computed for these props. */
   readonly desired: State;
 }
@@ -120,11 +121,15 @@ export interface Reconciler<Props, State, E = never, R = never> {
   readonly address: (props: Props) => string;
 
   /**
-   * Read the live state at {@link address}, or `undefined` if nothing is there.
+   * Read the live state at {@link address}, or `Option.none()` if nothing is
+   * there.
    *
    * This is the only thing that decides whether the machine matches the recipe.
    */
-  readonly observe: (props: Props, ctx: ObserveContext) => Effect.Effect<State | undefined, E, R>;
+  readonly observe: (
+    props: Props,
+    ctx: ObserveContext,
+  ) => Effect.Effect<Option.Option<State>, E, R>;
 
   /** The state these props are asking for. */
   readonly desired: (props: Props) => Effect.Effect<State, E, R>;

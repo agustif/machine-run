@@ -411,33 +411,44 @@ The cost of waiting is that every new resource picks a namespace by imitation.
 
 **Fix:** settle it immediately after the first successful `plan`/`deploy`.
 
-### 2.4 `observe` returns `State | undefined`
+### 2.4 `observe` returns `Option<State>` — resolved
 
-Every reconciler. `undefined` means "not there", which Effect models as
-`Option`. This is the single largest contributor to the `noNullish` count below.
+`Reconciler.observe` and `ApplyInput.observed` are `Option.Option<State>`. The
+weaker spelling conflated "not there" with "a field that happens to be
+missing", which is the same conflation behind four prior data-loss bugs, and it
+was the single largest contributor to the `noNullish` count below.
 
-**Fix:** written up as one atomic change in `packages/engine/TASKS.md`.
+All 23 reconcilers moved together, because the interface change is atomic:
+`Option`'s runtime shape is not compatible with `undefined`, so nothing
+compiles until every implementation is converted. `Option.getOrUndefined`
+converts exactly once, at the Alchemy boundary in `toProvider.ts`'s `read` —
+everything above that boundary is total.
 
 ---
 
 ## Tier 3 — consistency and hygiene
 
-### 3.1 873 lint warnings
+### 3.1 762 lint warnings
 
 All 25 `oxlint-plugin-effect` rules are enabled and **errors are at zero**;
 these are the `warn` tier, and they have grown with every package.
 
 | Rule | Count | What it means here |
 |---|---:|---|
-| `noNullish` | 516 | mostly `observe`'s `undefined` (2.4) plus Alchemy's own optional-prop contract |
-| `noTernary` | 180 | Effect has `Match`, `UndefinedOr.match`, `Boolean.match` |
-| `noAs` | 91 | see 3.2 |
-| `noConditionalEmptyObjectSpread` | 55 | the omit-a-key pattern, uncentralised |
+| `noNullish` | 413 | Alchemy's own optional-prop contract, plus backend-internal helpers |
+| `noTernary` | 165 | Effect has `Match`, `UndefinedOr.match`, `Boolean.match` |
+| `noAs` | 94 | see 3.2 |
+| `noConditionalEmptyObjectSpread` | 56 | the omit-a-key pattern, uncentralised |
+| `noNodeBuiltinImport` | 16 | should be Effect platform services |
 | `noRuntimeTypeof` | 14 | should be `Schema` at a boundary |
-| `noNodeBuiltinImport` | 13 | should be Effect platform services |
 | `noUnknownParameters` | 4 | |
 
-Concentrated in `ai` (217), `dotfiles` (125) and `runtimes` (113).
+Concentrated in `ai` (213), `runtimes` (104) and `dotfiles` (101).
+
+`noNullish` fell from 516 when 2.4 moved `observe` to `Option`. What remains is
+mostly not the same shape: optional *props* (Alchemy's contract) and helpers
+private to a backend, neither of which is the resource-level presence question
+`Option` was the right answer for.
 
 ### 3.2 `noAs` is a warning, and it has been hiding real bugs
 

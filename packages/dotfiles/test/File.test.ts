@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { FilePathUnreadable, makeFileReconciler, type FileProps } from "../src/File.ts";
 
@@ -96,17 +97,17 @@ it.effect(
 
       const props: FileProps = { path: target, content: "generated line" };
       const desired = yield* reconciler.desired(props);
-      yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
       // Something other than this tool edits the file between plans — the
       // core case a reconciler model exists to catch.
       yield* fs.writeFileString(target, "hand-edited, not what the recipe asked for");
 
       const observed = yield* reconciler.observe(props, observeCtx);
-      expect(observed).toBeDefined();
+      expect(Option.isSome(observed)).toBe(true);
       // Comparing against a remembered hash instead of the live file would
       // never see this: `observe` must read the disk, not its own history.
-      expect(reconciler.matches(observed!, desired)).toBe(false);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -120,7 +121,7 @@ it.effect("mode participates in matching once the recipe pins one, and apply con
 
     const props: FileProps = { path: target, content: "x", mode: 0o600 };
     const desired = yield* reconciler.desired(props);
-    const applied = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    const applied = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
     expect(applied.mode).toBe(0o600);
 
     const info = yield* fs.stat(target);
@@ -132,7 +133,7 @@ it.effect("mode participates in matching once the recipe pins one, and apply con
     expect(reconciler.matches(applied, desired2)).toBe(false);
 
     const applied2 = yield* reconciler.apply(
-      { props: props2, observed: applied, desired: desired2 },
+      { props: props2, observed: Option.some(applied), desired: desired2 },
       applyCtx,
     );
     expect(applied2.mode).toBe(0o644);
@@ -156,14 +157,14 @@ it.effect("an unset mode is unconstrained: any observed mode satisfies it", () =
     // A real file with a specific mode the recipe never asked to pin.
     yield* fs.writeFileString(target, "x", { mode: 0o640 });
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed?.mode).toBe(0o640);
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(Option.getOrThrow(observed).mode).toBe(0o640);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
     // Even a very different real mode still satisfies an unconstrained
     // desired state — only a *pinned* mode should ever cause a rewrite.
     yield* fs.chmod(target, 0o755);
     const observedAgain = yield* reconciler.observe(props, observeCtx);
-    expect(reconciler.matches(observedAgain!, desired)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observedAgain), desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -179,7 +180,7 @@ it.effect("a moved `path` is an independent address: the old file is left untouc
     const oldProps: FileProps = { path: oldPath, content: "same content" };
     const oldDesired = yield* reconciler.desired(oldProps);
     yield* reconciler.apply(
-      { props: oldProps, observed: undefined, desired: oldDesired },
+      { props: oldProps, observed: Option.none(), desired: oldDesired },
       applyCtx,
     );
 
@@ -188,12 +189,12 @@ it.effect("a moved `path` is an independent address: the old file is left untouc
     const newProps: FileProps = { path: newPath, content: "same content" };
     expect(reconciler.address(oldProps)).not.toBe(reconciler.address(newProps));
     const observedAtNew = yield* reconciler.observe(newProps, observeCtx);
-    expect(observedAtNew).toBeUndefined();
+    expect(observedAtNew).toStrictEqual(Option.none());
 
     yield* reconciler.apply(
       {
         props: newProps,
-        observed: undefined,
+        observed: Option.none(),
         desired: yield* reconciler.desired(newProps),
       },
       applyCtx,

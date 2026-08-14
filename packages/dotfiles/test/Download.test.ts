@@ -6,6 +6,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import {
@@ -66,7 +67,7 @@ it.effect("observe reports nothing for a file that has not been fetched yet", ()
       },
       { exec: () => Effect.die("not used") },
     );
-    expect(observed).toBeUndefined();
+    expect(observed).toStrictEqual(Option.none());
   }).pipe(Effect.provide(layer)),
 );
 
@@ -82,7 +83,7 @@ it.effect("apply fetches, verifies the checksum, and writes the bytes atomically
     const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o644 };
     const desired = yield* reconciler.desired(props);
     const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
+      { props, observed: Option.none(), desired },
       { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
     );
 
@@ -96,8 +97,8 @@ it.effect("apply fetches, verifies the checksum, and writes the bytes atomically
     const observedAfter = yield* reconciler.observe(props, {
       exec: () => Effect.die("not used"),
     });
-    expect(observedAfter).toBeDefined();
-    expect(reconciler.matches(observedAfter!, desired)).toBe(true);
+    expect(Option.isSome(observedAfter)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observedAfter), desired)).toBe(true);
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
@@ -116,7 +117,7 @@ it.effect("a checksum mismatch fails without ever writing the file", () =>
 
     const error = yield* reconciler
       .apply(
-        { props, observed: undefined, desired },
+        { props, observed: Option.none(), desired },
         {
           exec: () => Effect.die("not used"),
           snapshot: () => Effect.succeed(undefined),
@@ -187,7 +188,7 @@ it.effect("refuses an artifact larger than `maxBytes` instead of holding it in m
             // rather than the fixture being trivially small.
             maxBytes: 8,
           },
-          observed: undefined,
+          observed: Option.none(),
           desired: { path: target, hash: CHECKSUM },
         },
         { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },

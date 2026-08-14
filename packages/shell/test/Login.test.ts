@@ -3,6 +3,7 @@ import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { makeLoginReconcilerAt, parseEtcShells } from "../src/Login.ts";
 
@@ -118,7 +119,7 @@ it.effect("Login reconciler observe reads the live shell via the platform's own 
       { shell: "/bin/bash" },
       planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)),
     );
-    expect(observed).toEqual({ shell: "/bin/zsh" });
+    expect(observed).toEqual(Option.some({ shell: "/bin/zsh" }));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 

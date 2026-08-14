@@ -1,6 +1,7 @@
 import { expect, it } from "@effect/vitest";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import { makeMacDefaultReconciler, type MacDefaultProps } from "../src/Default.ts";
 import { data, date, PlistDecodeError, render, type PlistValue } from "../src/Value.ts";
@@ -56,8 +57,8 @@ it.effect(
       const observed = yield* reconciler.observe(props(live), fakeExecOk(xmlOf(live)));
       const desired = yield* reconciler.desired(props(recipe));
 
-      expect(observed).toBeDefined();
-      expect(reconciler.matches(observed!, desired)).toBe(true);
+      expect(Option.isSome(observed)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
     }),
 );
 
@@ -71,8 +72,8 @@ it.effect("matches: a real difference in array order IS reported as drift", () =
     const observed = yield* reconciler.observe(props(live), fakeExecOk(xmlOf(live)));
     const desired = yield* reconciler.desired(props(recipe));
 
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(false);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(false);
   }),
 );
 
@@ -82,7 +83,7 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeMacDefaultReconciler;
       const observed = yield* reconciler.observe(props(true), fakeExecFailing());
-      expect(observed).toBeUndefined();
+      expect(Option.isNone(observed)).toBe(true);
     }),
 );
 
@@ -112,7 +113,7 @@ it.effect("apply writes the rendered XML and returns the desired state", () =>
 
     const desired = yield* reconciler.desired(props(42));
     const result = yield* reconciler.apply(
-      { props: props(42), observed: undefined, desired },
+      { props: props(42), observed: Option.none(), desired },
       capturingExec,
     );
 

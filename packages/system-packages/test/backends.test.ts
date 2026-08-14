@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { makeYayBackend, makeParuBackend } from "../src/backends/linux/Aur.ts";
 import { makeAptBackend, makeAptRepoBackend } from "../src/backends/linux/Apt.ts";
 import { makeFlatpakBackend, makeFlatpakRepoBackend } from "../src/backends/linux/Flatpak.ts";
@@ -809,7 +810,7 @@ it.effect(
 );
 
 it.effect(
-  "Package reconciler observe: undefined when the package is missing from a live listing",
+  "Package reconciler observe: Option.none() when the package is missing from a live listing",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makePackageReconciler;
@@ -817,7 +818,7 @@ it.effect(
         { manager: "brew", name: "fd" },
         planCtx(fakeExec("ripgrep\n")),
       );
-      expect(observed).toBeUndefined();
+      expect(observed).toEqual(Option.none());
     }),
 );
 
@@ -828,7 +829,7 @@ it.effect("Package reconciler observe: the package's state once a live listing i
       { manager: "brew", name: "ripgrep" },
       planCtx(fakeExec("ripgrep\nfd\n")),
     );
-    expect(observed).toEqual({ manager: "brew", name: "ripgrep" });
+    expect(observed).toEqual(Option.some({ manager: "brew", name: "ripgrep" }));
   }),
 );
 
@@ -850,7 +851,7 @@ it.effect("Package reconciler apply: installs the package and returns its state"
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
+      { props, observed: Option.none(), desired },
       applyCtx(capturingExec("", calls)),
     );
 
@@ -868,14 +869,14 @@ it.effect(
 
       // Planning sees ripgrep present, and caches that under the plan-phase index.
       const planned = yield* reconciler.observe(props, planCtx(fakeExec("ripgrep\n")));
-      expect(planned).toEqual({ manager: "brew", name: "ripgrep" });
+      expect(planned).toEqual(Option.some({ manager: "brew", name: "ripgrep" }));
 
       // Something uninstalls ripgrep in the gap between plan and apply. The
       // apply-phase observe (a distinct `ApplyContext`) must re-list rather
       // than reuse the plan-phase cache, or this uninstall would go unnoticed
       // and `apply` would never run.
       const applied = yield* reconciler.observe(props, applyCtx(fakeExec("otherpkg\n")));
-      expect(applied).toBeUndefined();
+      expect(applied).toEqual(Option.none());
     }),
 );
 
@@ -892,7 +893,9 @@ it.effect(
           const props = { manager: "brew" as const, name };
           const observed = yield* reconciler.observe(props, applyCtx(exec));
           const desired = yield* reconciler.desired(props);
-          if (observed !== undefined && reconciler.matches(observed, desired)) return observed;
+          if (Option.isSome(observed) && reconciler.matches(observed.value, desired)) {
+            return observed.value;
+          }
           return yield* reconciler.apply({ props, observed, desired }, applyCtx(exec));
         });
 
@@ -937,14 +940,14 @@ it.effect("Repo reconciler address is the repo's tag", () =>
   }),
 );
 
-it.effect("Repo reconciler observe: undefined when the repo is missing from a live listing", () =>
+it.effect("Repo reconciler observe: Option.none() when the repo is missing from a live listing", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const observed = yield* reconciler.observe(
       { repo: { _tag: "Brew", tap: "can1357/tap" } },
       planCtx(fakeExec("homebrew/cask\n")),
     );
-    expect(observed).toBeUndefined();
+    expect(observed).toEqual(Option.none());
   }),
 );
 
@@ -955,7 +958,7 @@ it.effect("Repo reconciler observe: the repo's state once a live listing include
       { repo: { _tag: "Brew", tap: "can1357/tap" } },
       planCtx(fakeExec("can1357/tap\n")),
     );
-    expect(observed).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
+    expect(observed).toEqual(Option.some({ repo: { _tag: "Brew", tap: "can1357/tap" } }));
   }),
 );
 
@@ -967,7 +970,7 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
+      { props, observed: Option.none(), desired },
       applyCtx(capturingExec("", calls)),
     );
 
@@ -984,10 +987,10 @@ it.effect(
       const props = { repo: { _tag: "Brew" as const, tap: "can1357/tap" } };
 
       const planned = yield* reconciler.observe(props, planCtx(fakeExec("can1357/tap\n")));
-      expect(planned).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
+      expect(planned).toEqual(Option.some({ repo: { _tag: "Brew", tap: "can1357/tap" } }));
 
       const applied = yield* reconciler.observe(props, applyCtx(fakeExec("homebrew/cask\n")));
-      expect(applied).toBeUndefined();
+      expect(applied).toEqual(Option.none());
     }),
 );
 
@@ -1001,7 +1004,7 @@ it.effect(
         // Real captured `dnf copr list` output — see Dnf.ts's doc comment.
         planCtx(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n")),
       );
-      expect(observed).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
+      expect(observed).toEqual(Option.some({ repo: { _tag: "Dnf", project: "atim/lazygit" } }));
     }),
 );
 
@@ -1013,7 +1016,7 @@ it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
+      { props, observed: Option.none(), desired },
       applyCtx(capturingExec("", calls)),
     );
 
@@ -1023,7 +1026,7 @@ it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <
 );
 
 it.effect(
-  "Repo reconciler observe: flatpak, undefined against a real empty `flatpak remotes` listing",
+  "Repo reconciler observe: flatpak, Option.none() against a real empty `flatpak remotes` listing",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
@@ -1037,7 +1040,7 @@ it.effect(
         },
         planCtx(fakeExec(fixture("flatpak-remotes-empty.txt"))),
       );
-      expect(observed).toBeUndefined();
+      expect(observed).toEqual(Option.none());
     }),
 );
 
@@ -1052,7 +1055,7 @@ it.effect(
         { repo: { _tag: "Flatpak", name: "flathub" } },
         planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
       );
-      expect(observed).toEqual({ repo: { _tag: "Flatpak", name: "flathub" } });
+      expect(observed).toEqual(Option.some({ repo: { _tag: "Flatpak", name: "flathub" } }));
     }),
 );
 
@@ -1076,7 +1079,7 @@ it.effect(
       // (https://dl.flathub.org/repo/), never the bootstrap URL that was
       // actually passed to `remote-add` — so this never matches, even
       // though `flathub` really is registered.
-      expect(observed).toBeUndefined();
+      expect(observed).toEqual(Option.none());
     }),
 );
 
@@ -1097,7 +1100,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const result = yield* reconciler.apply(
-        { props, observed: undefined, desired },
+        { props, observed: Option.none(), desired },
         applyCtx(capturingExec("", calls)),
       );
 
@@ -1119,7 +1122,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const error = yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx(capturingExec("", calls)))
+        .apply({ props, observed: Option.none(), desired }, applyCtx(capturingExec("", calls)))
         .pipe(Effect.flip);
 
       expect(error._tag).toBe("BackendParseError");

@@ -4,6 +4,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { makeBrewServicesBackend } from "./backends/macos/BrewServices.ts";
@@ -154,19 +155,19 @@ export const makeServiceReconciler: Effect.Effect<
     "brew-services": makeBrewServicesBackend(),
   } satisfies Record<ServiceBackendId, ServiceBackend>;
 
-  // Never returns `undefined`: unlike `System.Package`'s membership
-  // question, "nothing here" is itself a meaningful, fully-expressible
-  // `ServiceState` (`installed: false, enabled: false, running: false`),
-  // not an absence `Reconciler.observe` has to signal separately.
+  // Always `Option.some(...)`, never `Option.none()`: unlike `System.Package`'s
+  // membership question, "nothing here" is itself a meaningful, fully-expressible
+  // `ServiceState` (`installed: false, enabled: false, running: false`), not an
+  // absence `Reconciler.observe` has to signal separately.
   const observe = (props: ServiceProps, ctx: ObserveContext) =>
     Effect.gen(function* () {
       const backend = backends[props.backend];
       const observation = yield* backend.observe(props.name, props.path, ctx.exec);
-      return {
+      return Option.some({
         backend: props.backend,
         name: props.name,
         ...observation,
-      };
+      });
     });
 
   return {

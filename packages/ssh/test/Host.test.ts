@@ -5,6 +5,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { sshHostBlockProps, type SshHostProps } from "../src/Host.ts";
 
@@ -117,7 +118,7 @@ it.effect(
       });
 
       const desired = yield* reconciler.desired(rendered);
-      yield* reconciler.apply({ props: rendered, observed: undefined, desired }, applyCtx);
+      yield* reconciler.apply({ props: rendered, observed: Option.none(), desired }, applyCtx);
 
       const written = yield* fs.readFileString(configPath);
 
@@ -151,7 +152,7 @@ it.effect("creates ~/.ssh (here, the config's parent directory) at exactly 0o700
 
     const rendered = sshHostBlockProps({ configPath, name: "exe", hostnames: ["exe.dev"] });
     const desired = yield* reconciler.desired(rendered);
-    yield* reconciler.apply({ props: rendered, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props: rendered, observed: Option.none(), desired }, applyCtx);
 
     const info = yield* fs.stat(path.dirname(configPath));
     expect(Number(info.mode) & 0o777).toBe(0o700);
@@ -195,7 +196,7 @@ it.effect(
       const runApply = Effect.gen(function* () {
         const reconciler = yield* Dotfiles.makeManagedBlockReconciler;
         const desired = yield* reconciler.desired(rendered);
-        yield* reconciler.apply({ props: rendered, observed: undefined, desired }, applyCtx);
+        yield* reconciler.apply({ props: rendered, observed: Option.none(), desired }, applyCtx);
       }).pipe(Effect.provide(Layer.mergeAll(fakeHomeLayer(dir), NodeCrypto.layer)));
 
       yield* runApply;

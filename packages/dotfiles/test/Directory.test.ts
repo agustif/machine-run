@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   DirectoryPathIsFile,
@@ -37,7 +38,7 @@ it.effect("observe reports nothing for a directory that does not exist yet", () 
       const observed = yield* reconciler.observe(props(target), {
         exec: () => Effect.die("not used"),
       });
-      expect(observed).toBeUndefined();
+      expect(observed).toStrictEqual(Option.none());
     }),
   ).pipe(Effect.provide(layer)),
 );
@@ -48,7 +49,7 @@ it.effect("apply creates the directory with the requested mode", () =>
       const fs = yield* FileSystem.FileSystem;
       const desired = yield* reconciler.desired(props(target, 0o700));
       const result = yield* reconciler.apply(
-        { props: props(target, 0o700), observed: undefined, desired },
+        { props: props(target, 0o700), observed: Option.none(), desired },
         { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
       );
       expect(result.mode).toBe(0o700);
@@ -72,7 +73,7 @@ it.effect("apply chmods a directory that already exists with a different mode", 
 
       const desired = yield* reconciler.desired(props(target, 0o700));
       const result = yield* reconciler.apply(
-        { props: props(target, 0o700), observed: undefined, desired },
+        { props: props(target, 0o700), observed: Option.none(), desired },
         { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
       );
       expect(result.mode).toBe(0o700);

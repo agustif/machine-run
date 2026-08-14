@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   makeSymlinkReconciler,
@@ -52,7 +53,7 @@ it.effect(
 
       const props = { path: linkPath, source: realSource };
       const desired = yield* reconciler.desired(props);
-      const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+      const result = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
       expect(result.source).toBe(realSource);
       expect(yield* fs.readLink(linkPath)).toBe(realSource);
@@ -78,10 +79,10 @@ it.effect("apply replaces a real, non-symlink file occupying the path", () =>
     // symlink to report on, so `observe` reports absent rather than
     // fabricating something from a file it doesn't own.
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeUndefined();
+    expect(observed).toStrictEqual(Option.none());
 
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     expect(yield* fs.readLink(target)).toBe(realSource);
   }).pipe(Effect.provide(layer)),
@@ -134,7 +135,7 @@ it.effect(
       const tildeProps = { path: "~/link", source: realSource };
       const tildeDesired = yield* reconciler.desired(tildeProps);
       yield* reconciler.apply(
-        { props: tildeProps, observed: undefined, desired: tildeDesired },
+        { props: tildeProps, observed: Option.none(), desired: tildeDesired },
         applyCtx,
       );
 
@@ -150,8 +151,8 @@ it.effect(
         observeCtx,
       );
 
-      expect(observedAbs).toBeDefined();
-      expect(reconciler.matches(observedAbs!, absDesired)).toBe(true);
+      expect(Option.isSome(observedAbs)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(observedAbs), absDesired)).toBe(true);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -170,7 +171,7 @@ it.effect(
       };
       const desired = yield* reconciler.desired(props);
       const error = yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx)
+        .apply({ props, observed: Option.none(), desired }, applyCtx)
         .pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(SymlinkSourceMissing);

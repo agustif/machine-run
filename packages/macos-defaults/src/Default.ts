@@ -2,6 +2,7 @@ import { Sh } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { canonicalXml, PlistDecodeError, PlistValueSchema, render } from "./Value.ts";
 
@@ -59,7 +60,7 @@ export const makeMacDefaultReconciler: Effect.Effect<
   address: (props) => `defaults:${props.domain}`,
 
   /**
-   * The live value of the key as canonical XML, or `undefined` when unset.
+   * The live value of the key as canonical XML, or `Option.none()` when unset.
    *
    * These keys are routinely written by things other than this tool — System
    * Settings, an OS update, another script — so a recorded value cannot stand
@@ -85,18 +86,20 @@ export const makeMacDefaultReconciler: Effect.Effect<
         // exits 1 for a missing key path; `defaults export` of an unknown
         // domain succeeds with an empty dictionary, which then fails the
         // extract the same way.
-        Effect.map((result) => result.stdout),
-        Effect.orElseSucceed(() => undefined),
-        Effect.flatMap((stdout) =>
-          stdout === undefined
-            ? Effect.succeed(undefined)
-            : // Output that will not parse is a real failure rather than
-              // "absent": `plutil` succeeded, so something is there, and
-              // silently treating it as missing would overwrite a value
-              // nobody could see.
+        Effect.map((result) => Option.some(result.stdout)),
+        Effect.orElseSucceed((): Option.Option<string> => Option.none()),
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.succeed(Option.none()),
+            // Output that will not parse is a real failure rather than
+            // "absent": `plutil` succeeded, so something is there, and
+            // silently treating it as missing would overwrite a value
+            // nobody could see.
+            onSome: (stdout) =>
               Effect.fromResult(canonicalXml(stdout)).pipe(
-                Effect.map((xml) => ({ domain: props.domain, key: props.key, xml })),
+                Effect.map((xml) => Option.some({ domain: props.domain, key: props.key, xml })),
               ),
+          }),
         ),
       ),
 
