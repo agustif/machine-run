@@ -8,7 +8,8 @@ import type { ResourceClassLike, ResourceLike } from "alchemy/Resource";
 import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
+import { DEFAULT_EXECUTION, detectPrivilege } from "./Reconciler.ts";
+import type { ApplyContext, ExecutionContext, ObserveContext, Reconciler } from "./Reconciler.ts";
 
 /**
  * Builds the Alchemy provider for a {@link Reconciler}.
@@ -130,12 +131,21 @@ export const toProvider = <Res extends ResourceLike, E, R>(
       const backups = yield* Backups;
       const locks = yield* FileLock;
 
-      const observeCtx: ObserveContext = {
-        exec: (props) => executor.run(props, silentSession),
+      const exec: ObserveContext["exec"] = (props) => executor.run(props, silentSession);
+
+      // Detected once per provider, not per reconcile: whether this run can or
+      // should escalate is a property of the machine, and probing it on every
+      // command would be two extra processes per package.
+      const execution: ExecutionContext = {
+        ...DEFAULT_EXECUTION,
+        privilege: yield* detectPrivilege(exec),
       };
+
+      const observeCtx: ObserveContext = { exec, execution };
 
       const applyCtx = (session: ScopedPlanStatusSession): ApplyContext => ({
         exec: (props) => executor.run(props, session),
+        execution,
         snapshot: (path) => backups.snapshot(path),
       });
 

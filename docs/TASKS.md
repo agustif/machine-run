@@ -90,17 +90,16 @@ are the backlog, currently 695 across seven rules:
 Writing [MAP.md](./MAP.md) meant checking claims instead of recalling them, and
 these came out of it. None was tracked anywhere before.
 
-- [ ] **Three resource kinds in twenty-three implement `unapply`** —
-      `Shell.Login`, `Git.Maintenance`, `System.Setting`. So `destroy` is a
-      no-op for the other twenty, which the container check confirms is *safe*
-      (retain is the default and nothing was clobbered) but which also means
-      `destroy` reports success having reverted almost nothing. The
-      unmanage story is therefore mostly unbuilt, not merely undecided. The
-      per-package backlogs now carry the judgement for each: `system-settings`
-      *should* have one (`gsettings reset` is a real revert), `tailscale`
-      probably should **not** (logging out could cut the operator's own access to
-      the machine). Work through the remaining fifteen and record a decision per
-      resource rather than leaving silence.
+- [ ] **Nine of twenty-three kinds still have no `unapply`.** Fourteen do.
+      The nine are deliberate refusals in most cases, each with its reason
+      recorded next to the resource: `Machine.Exec` (a command is not undoable),
+      `Runtime.Tool` (nothing captures which version was active before),
+      `MacOS.Default` (state never captures the prior value), `Ssh.Key`
+      (deleting a private key is unrecoverable), `Git.Repo` (could destroy
+      uncommitted work), `Tailscale.Connection` (could cut the operator's own
+      access). What is left to decide is `System.Package`, `System.Repo` and
+      `Machine.SecretFile` — the last needing a way to tell a file this resource
+      wrote from one it adopted before deleting a credential is safe.
 - [ ] **Five Alchemy primitives are unbridged.** `Action` (no imperative
       one-shots), `Artifacts` (`Machine.Download` rolls its own fetch-and-hash
       instead), `KeyPair` (the natural `Ssh.Key`), `Namespace` (no multi-machine

@@ -208,24 +208,6 @@ that no type carries, so each backend improvises it, hardcodes it, or forgets
 it. This is the largest structural finding in the document, and the individual
 items are symptoms.
 
-### 1d.1 Privilege is a hardcoded `sudo` at 16 call sites
-
-`apt`, `dnf`, `pacman` and `snap` shell out to `Sh.sh("sudo", ...)`
-unconditionally. `flatpak` does not, and nothing says whether that is a
-deliberate user-scoped choice or an oversight.
-
-Consequences, none of which a type would allow:
-
-- **It runs `sudo` when already root.** Minimal containers frequently do not
-  install `sudo`, so this fails with command-not-found in precisely the
-  environments this repo verifies in. Our runs pass because they are root *and*
-  happen to have it.
-- **A password prompt has nowhere to go.** A non-interactive `deploy` hangs on
-  the tty or fails. A reconciler that can hang mid-apply is worse than one that
-  refuses to start.
-- **A recipe cannot say** "already root", "use `doas`", or "no escalation
-  available on this machine".
-
 ### 1d.2 Locale is never pinned — *every* parser is exposed
 
 Zero occurrences of `LC_ALL` or `LANG` anywhere in `src`. This repo parses

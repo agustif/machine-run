@@ -17,6 +17,13 @@
 //   Machine.Symlink
 //   Machine.Exec
 //   Machine.SecretFile (the `env` backend — no CLI, no auth, never a real vault)
+//   Machine.Template
+//   Machine.LineInFile
+//   Machine.Download (from a local HTTP server `entrypoint.sh` starts — no
+//                      dependency on the real internet)
+//   Git.Config
+//   Git.Repo (cloned from a local origin `entrypoint.sh` creates — no
+//             dependency on the real internet)
 //
 // Deliberately excluded, and why:
 //   - `MacOS.Default`          — macOS-only, see above.
@@ -25,16 +32,21 @@
 //                                 does not ship.
 //   - `@machine-run/ssh`       — same; also mutates `~/.ssh/config`, which
 //                                 the harness has no reviewed content for.
-//   - `@machine-run/git-identity`/`@machine-run/git` — composes
+//   - `@machine-run/git-identity`/`Shell.*` compositions — compose
 //                                 `Machine.File`/`Machine.ManagedBlock`
-//                                 already covered directly below, and (as of
-//                                 this being written) pulls in
-//                                 `@machine-run/shell`, a package still being
-//                                 written concurrently by another agent — see
-//                                 docs/deploy-notes.md. Using its resources
-//                                 directly, rather than through that
-//                                 composition, keeps this recipe's dependency
-//                                 graph small and stable.
+//                                 already covered above, so add no new kind.
+//   - `Shell.Login`            — `chsh` needs real PAM password auth for a
+//                                 non-root user changing their own shell;
+//                                 verified in a container (exit 1,
+//                                 "Authentication failure" with no tty).
+//                                 Running as root instead takes a different,
+//                                 unrepresentative code path — see
+//                                 `Login.ts`'s own doc comment.
+//   - `System.Service`         — needs a real systemd user session (D-Bus,
+//                                 `loginctl enable-linger`); not present in a
+//                                 plain, unprivileged container.
+//   - `Runtime.Tool`           — a real mise/asdf/rustup/uv install is slow
+//                                 and network-heavy for what this check buys.
 //
 // `$HOME` here is the container's own throwaway user (see
 // `docker/Dockerfile`) — never a real machine's home directory.
@@ -47,6 +59,8 @@ import * as Alchemy from "alchemy";
 import { CommandExecutorLive } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 // Hand-assembled rather than `@machine-run/machine`'s aggregate, to keep a
 // Linux recipe from dragging in providers it can never use.
@@ -121,6 +135,40 @@ export default Alchemy.Stack(
     yield* Secrets.SecretFile("demo-secret", {
       path: "~/.config/machine-run-demo/secret",
       source: { _tag: "Env", variable: "MACHINE_RUN_TEST_SECRET" },
+    });
+
+    yield* Dotfiles.Template("greeting-template", {
+      path: "~/.config/machine-run-demo/greeting.txt",
+      template: "Hello, ${name}! Welcome to ${host}.\n",
+      variables: { name: "Container Test", host: "deploy-check" },
+    });
+
+    yield* Dotfiles.LineInFile("greeting-line", {
+      path: "~/.config/machine-run-demo/one-line.conf",
+      match: "^GREETING=",
+      line: "GREETING=hello-from-line-in-file",
+    });
+
+    // Fetched from `entrypoint.sh`'s own local HTTP server, not the real
+    // internet — see this file's header comment.
+    yield* Dotfiles.Download("download-fixture", {
+      url: "http://127.0.0.1:8765/download-fixture.txt",
+      path: "~/.config/machine-run-demo/downloaded-fixture.txt",
+      checksum: "91dcec70836ee052b90e049275a60d5826bbe6e9712a8b0fe491e1485e30be10",
+    });
+
+    yield* Git.Config("git-config-username", {
+      key: "user.name",
+      values: ["Container Test User"],
+    });
+
+    // `remote` is not `~`-expanded by `Git.Repo` itself (only `path` is), so
+    // the origin `entrypoint.sh` creates at `~/vault/origin-repo` is resolved
+    // to an absolute path here rather than passed as a literal `~/...` string.
+    yield* Git.Repo("demo-repo-clone", {
+      path: "~/demo-repo-clone",
+      remote: join(homedir(), "vault", "origin-repo"),
+      branch: "main",
     });
   }),
 );

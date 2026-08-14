@@ -1,8 +1,9 @@
-import type * as Core from "@machine-run/core";
+import * as Core from "@machine-run/core";
 import type { CommandRunProps } from "alchemy/Command";
 import type { CommandError } from "alchemy/Command";
-import type * as Effect from "effect/Effect";
-import type * as Option from "effect/Option";
+import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
 
 /**
  * The output of a command, as `CommandExecutor` returns it.
@@ -98,6 +99,42 @@ export const DEFAULT_EXECUTION: ExecutionContext = {
 /** The run's execution context, defaulted. */
 export const executionOf = (ctx: ObserveContext): ExecutionContext =>
   ctx.execution === undefined ? DEFAULT_EXECUTION : ctx.execution;
+
+/**
+ * Decides `privilege` by asking the machine rather than assuming.
+ *
+ * Three real cases, and no default covers more than one of them: already root
+ * (escalation is unnecessary, and `sudo` may not even be installed), not root
+ * with `sudo` available (escalation is required for a package install), and not
+ * root without it (nothing can escalate, so the honest answer is to run
+ * unprivileged and let the command fail with the real permission error rather
+ * than `sudo: command not found`).
+ *
+ * Both probes are shell built-ins or coreutils and neither mutates anything, so
+ * this is safe to run before a plan. Failure of either probe is read as its
+ * negative — a machine that cannot answer `id -u` is not one to assume root on.
+ */
+export const detectPrivilege = (
+  exec: Exec,
+): Effect.Effect<ExecutionContext["privilege"], never> =>
+  Effect.gen(function* () {
+    // `Effect.exit` rather than `orElseSucceed`, because an executor that cannot
+    // answer may *die* rather than fail — a stubbed one in a test does exactly
+    // that — and a defect would otherwise escape a probe that is meant to be
+    // unable to break a run.
+    const stdoutOf = (command: Core.Sh.ShellCommand) =>
+      Effect.exit(exec({ command, shell: true })).pipe(
+        Effect.map((result) =>
+          Exit.isSuccess(result) ? Option.some(result.value.stdout.trim()) : Option.none<string>(),
+        ),
+      );
+
+    const uid = yield* stdoutOf(Core.Sh.sh("id", "-u"));
+    if (Option.exists(uid, (value) => value === "0")) return "none";
+
+    const sudo = yield* stdoutOf(Core.Sh.sh("command", "-v", "sudo"));
+    return Option.exists(sudo, (value) => value !== "") ? "sudo" : "none";
+  });
 
 /**
  * What a reconciler is allowed to do while *changing* the machine.
