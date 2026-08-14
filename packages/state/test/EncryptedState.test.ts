@@ -123,6 +123,37 @@ const makeFakeKeychain = () => {
   return { exec, entries };
 };
 
+/**
+ * Wraps a fake keychain's `exec` so `find-generic-password` always fails with
+ * a failure that is *not* the verified "no such entry" signal
+ * (`backends/Keychain.ts`'s `isNoSuchKeychainItem`: exit `44` and a stderr
+ * containing "could not be found in the keychain") — standing in for a
+ * locked keychain, "user interaction is not allowed", or `security` being
+ * momentarily busy. The exact wording here is not a captured fixture (a real
+ * locked keychain blocks on an interactive prompt rather than printing
+ * anything — see that file's doc comment); what matters for this test is
+ * only that it is *some* failure distinct from the not-found one.
+ * `add-generic-password` still writes through to the same fake keychain's
+ * `entries`, so a wrongly-minted key would be visible there.
+ */
+const withUnreadableFind =
+  (keychain: ReturnType<typeof makeFakeKeychain>): Exec =>
+  (props) => {
+    const subcommand = props.command.split(/\s+/)[1];
+    if (subcommand === "find-generic-password") {
+      return Effect.fail(
+        new CommandError({
+          command: props.command,
+          reason: new UnexpectedExit({
+            exitCode: 1,
+            stderr: "security: SecKeychainSearchCopyNext: could not access the keychain.",
+          }),
+        }),
+      );
+    }
+    return keychain.exec(props);
+  };
+
 /** Resolved once: the real Node `Crypto` service. */
 const crypto = Effect.runSync(Crypto.Crypto.pipe(Effect.provide(NodeCrypto.layer)));
 
@@ -245,6 +276,65 @@ it.effect(
 
       const read = yield* state.get({ stack: "s", stage: "dev", fqn: "MyResource" });
       expect(read).toBeUndefined();
+    }),
+);
+
+/**
+ * The bug `MUST_CLEANUP.md` 0.1 describes: `ensureDataKey` used to catch
+ * *every* `readDataKey` failure, not just a genuine "no key yet", and
+ * respond by minting and persisting a fresh key. A transient read failure —
+ * the entry is still there, `security` just couldn't read it right now —
+ * would therefore overwrite the real key and permanently orphan every row
+ * already encrypted under it. This is deliberately not the "entry deleted"
+ * scenario above (that one has no real key to lose); it is the strictly
+ * worse case where a real key exists and gets clobbered anyway.
+ */
+it.effect(
+  "a read failure while the keychain entry still exists must not mint a replacement key",
+  () =>
+    Effect.gen(function* () {
+      const { service: underlying } = makeFakeUnderlying();
+      const keychain = makeFakeKeychain();
+      const state1 = yield* wrapState(underlying, keychain.exec, crypto);
+
+      // First write mints the real key and encrypts "Existing" under it.
+      yield* state1.set({
+        stack: "s",
+        stage: "dev",
+        fqn: "Existing",
+        value: row({ fqn: "Existing" }),
+      });
+      expect(keychain.entries.size).toBe(1);
+
+      // A later run — a fresh `wrapState`/`Cache`, standing in for a new
+      // process picking up where the last one left off — hits a `security`
+      // failure that is not the verified "not found" signal: the entry is
+      // still there, this read just doesn't work right now.
+      const state2 = yield* wrapState(underlying, withUnreadableFind(keychain), crypto);
+
+      // Before the fix this succeeds (wrongly). `Effect.flip` turns an
+      // effect that is expected to fail into one whose success *is* that
+      // failure value — so if `set` unexpectedly succeeds here, this line
+      // itself fails the test, rather than silently letting a wrong "it
+      // worked" through.
+      const failure = yield* state2
+        .set({ stack: "s", stage: "dev", fqn: "New", value: row({ fqn: "New" }) })
+        .pipe(Effect.flip);
+      expect(failure._tag).toBe("StateStoreError");
+
+      // The keychain entry must be untouched: no replacement key minted and
+      // persisted over the real one.
+      expect(keychain.entries.size).toBe(1);
+
+      // And critically, the row encrypted before the flaky read is still
+      // decryptable through a working exec afterward — nothing was lost.
+      // Before the fix, the wrongly-minted key would have been persisted
+      // over the real one, and this would degrade to `undefined` exactly
+      // like the genuinely-deleted-entry case above, indistinguishable from
+      // it even though the entry was never actually gone.
+      const state3 = yield* wrapState(underlying, keychain.exec, crypto);
+      const recovered = yield* state3.get({ stack: "s", stage: "dev", fqn: "Existing" });
+      expect(recovered).toEqual(row({ fqn: "Existing" }));
     }),
 );
 
