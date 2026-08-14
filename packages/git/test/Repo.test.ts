@@ -5,6 +5,7 @@ import { CommandError, UnexpectedExit } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   GitRepoCommandFailed,
@@ -66,7 +67,7 @@ it.effect("observe reports absent when nothing exists at the path yet", () =>
       { path: target, remote: "irrelevant" },
       notARepoExec,
     );
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -85,7 +86,7 @@ it.effect(
         { path: target, remote: "irrelevant" },
         notARepoExec,
       );
-      expect(observed).toBeUndefined();
+      expect(Option.isNone(observed)).toBe(true);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -148,7 +149,7 @@ it.effect("observe reports the configured remote when the path is its own reposi
       { path: target, remote: "irrelevant" },
       repoAt(target, "git@example.com:me/repo.git"),
     );
-    expect(observed).toEqual({ path: target, remote: "git@example.com:me/repo.git" });
+    expect(observed).toEqual(Option.some({ path: target, remote: "git@example.com:me/repo.git" }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -165,7 +166,7 @@ it.effect("observe reports no `remote` field when the repository has no `origin`
       { path: target, remote: "irrelevant" },
       repoAt(target, undefined),
     );
-    expect(observed).toEqual({ path: target });
+    expect(observed).toEqual(Option.some({ path: target }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -235,7 +236,7 @@ it.effect(
       const props = { path: target, remote: "https://example.com/repo.git", branch: "main" };
       const desired = yield* reconciler.desired(props);
       const result = yield* reconciler.apply(
-        { props, observed: undefined, desired },
+        { props, observed: Option.none(), desired },
         applyCtx((commandProps) => {
           calls.push(commandProps.command);
           return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
@@ -259,7 +260,7 @@ it.effect("apply adds `origin` when the repository exists but has none configure
     const props = { path: target, remote: "https://example.com/repo.git" };
     const desired = yield* reconciler.desired(props);
     const result = yield* reconciler.apply(
-      { props, observed: { path: target }, desired },
+      { props, observed: Option.some({ path: target }), desired },
       applyCtx((commandProps) => {
         calls.push(commandProps.command);
         return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
@@ -283,7 +284,7 @@ it.effect(
       const props = { path: target, remote: "https://example.com/new.git" };
       const desired = yield* reconciler.desired(props);
       yield* reconciler.apply(
-        { props, observed: { path: target, remote: "https://example.com/old.git" }, desired },
+        { props, observed: Option.some({ path: target, remote: "https://example.com/old.git" }), desired },
         applyCtx((commandProps) => {
           calls.push(commandProps.command);
           return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
@@ -304,7 +305,7 @@ it.effect("apply does nothing when the remote already matches", () =>
     const props = { path: target, remote: "https://example.com/repo.git" };
     const desired = yield* reconciler.desired(props);
     yield* reconciler.apply(
-      { props, observed: { path: target, remote: "https://example.com/repo.git" }, desired },
+      { props, observed: Option.some({ path: target, remote: "https://example.com/repo.git" }), desired },
       applyCtx((commandProps) => {
         calls.push(commandProps.command);
         return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });

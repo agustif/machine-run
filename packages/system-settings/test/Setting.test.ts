@@ -1,6 +1,7 @@
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import {
   makeSettingReconciler,
   type SettingProps,
@@ -109,7 +110,7 @@ it.effect(
     }),
 );
 
-it.effect("Setting reconciler observe: undefined when the backend reports the key absent", () =>
+it.effect("Setting reconciler observe: none when the backend reports the key absent", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const observed = yield* reconciler.observe(
@@ -118,7 +119,7 @@ it.effect("Setting reconciler observe: undefined when the backend reports the ke
       // bytes on stdout.
       planCtx(fakeExec("")),
     );
-    expect(observed).toBeUndefined();
+    expect(observed).toStrictEqual(Option.none());
   }),
 );
 
@@ -136,12 +137,14 @@ it.effect(
         },
         planCtx(fakeExec("'24h'\n")),
       );
-      expect(observed).toEqual({
-        variant: "Gsettings",
-        schema: "org.gnome.desktop.interface",
-        key: "clock-format",
-        value: "'24h'",
-      });
+      expect(observed).toStrictEqual(
+        Option.some({
+          variant: "Gsettings",
+          schema: "org.gnome.desktop.interface",
+          key: "clock-format",
+          value: "'24h'",
+        }),
+      );
     }),
 );
 
@@ -158,13 +161,15 @@ it.effect("Setting reconciler observe: a relocatable schema reports schema/path/
       },
       planCtx(fakeExec("'hi there'\n")),
     );
-    expect(observed).toEqual({
-      variant: "GsettingsRelocatable",
-      schema: "org.example.relocatable",
-      path: "/org/example/testpath1/",
-      key: "greeting",
-      value: "'hi there'",
-    });
+    expect(observed).toStrictEqual(
+      Option.some({
+        variant: "GsettingsRelocatable",
+        schema: "org.example.relocatable",
+        path: "/org/example/testpath1/",
+        key: "greeting",
+        value: "'hi there'",
+      }),
+    );
   }),
 );
 
@@ -206,7 +211,7 @@ it.effect("Setting reconciler apply: writes the value and confirms it by reading
     };
     const desired = yield* reconciler.desired(props);
 
-    const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
+    const result = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx(exec));
 
     expect(result).toEqual({
       variant: "Gsettings",
@@ -241,7 +246,7 @@ it.effect(
       // as `gsettings set` behaves with no reachable session D-Bus.
       const result = yield* Effect.flip(
         reconciler.apply(
-          { props, observed: undefined, desired },
+          { props, observed: Option.none(), desired },
           applyCtx(noopWriteExec("'12h'", calls)),
         ),
       );
@@ -363,7 +368,7 @@ it.effect("Setting reconciler apply: dconf backend writes and confirms an array 
     const props: SettingProps = { _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" };
     const desired = yield* reconciler.desired(props);
 
-    const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
+    const result = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx(exec));
 
     expect(result).toEqual({ variant: "Dconf", path: "/test/mypath", value: "['a', 'b']" });
     expect(calls).toEqual([
@@ -389,7 +394,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const result = yield* reconciler.apply(
-        { props, observed: undefined, desired },
+        { props, observed: Option.none(), desired },
         applyCtx(exec),
       );
 

@@ -7,6 +7,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 /**
@@ -154,7 +155,8 @@ export const makeLoginReconcilerAt = (
         Effect.gen(function* () {
           const username = yield* currentUsername(ctx.exec);
           const shell = yield* readLoginShell(username, ctx.exec);
-          return shell.length > 0 ? { shell } : undefined;
+          if (shell.length === 0) return Option.none();
+          return Option.some({ shell });
         }),
 
       // Validated here, not only in `apply`: `diff` calls `desired` too, so
@@ -179,7 +181,10 @@ export const makeLoginReconcilerAt = (
           yield* ctx.exec({ command: Sh.sh("chsh", "-s", desired.shell), shell: true });
           return {
             shell: desired.shell,
-            ...(observed?.shell !== undefined ? { previousShell: observed.shell } : {}),
+            ...Option.match(observed, {
+              onNone: () => ({}),
+              onSome: (state) => ({ previousShell: state.shell }),
+            }),
           };
         }),
 

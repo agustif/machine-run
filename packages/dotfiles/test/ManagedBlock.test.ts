@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import {
@@ -235,14 +236,14 @@ it.effect("CRLF file: the reconciler reports no drift after writing the same con
       content: "[includeIf]\n  path = personal.gitconfig",
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     // Before the fix: `observe`'s hash of the CRLF-extracted region never
     // equalled `desired`'s hash of the plain-LF `props.content`, so this
     // reports drift even though nothing changed since the write above.
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -302,7 +303,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const failure = yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx)
+        .apply({ props, observed: Option.none(), desired }, applyCtx)
         .pipe(
           Effect.flip,
           Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),

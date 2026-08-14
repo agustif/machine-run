@@ -345,8 +345,8 @@ export const makeManagedBlockReconciler: Effect.Effect<
       Effect.gen(function* () {
         const target = paths.expand(props.path);
         const current = readBlock(yield* readFileOrEmpty(target), props.marker, props);
-        if (current === undefined) return undefined;
-        return { path: target, marker: props.marker, hash: yield* sha256(current) };
+        if (current === undefined) return Option.none();
+        return Option.some({ path: target, marker: props.marker, hash: yield* sha256(current) });
       }),
 
     desired: (props) =>

@@ -4,7 +4,9 @@ import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
+import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -118,20 +120,24 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
     ctx.exec({ command: Sh.sh("tailscale", "status", "--json") }).pipe(
       Effect.flatMap((result) => decodeStatus(result.stdout)),
       Effect.map((status) =>
-        status.BackendState === "Running"
-          ? { ...(status.Self?.HostName !== undefined ? { hostname: status.Self.HostName } : {}) }
-          : undefined,
+        Boolean.match(status.BackendState === "Running", {
+          onFalse: () => Option.none(),
+          onTrue: () =>
+            Option.some({
+              ...(status.Self?.HostName !== undefined ? { hostname: status.Self.HostName } : {}),
+            }),
+        }),
       ),
       Effect.catchTag("CommandError", (error) =>
         isCommandNotFound(error)
           ? Effect.fail(new TailscaleNotInstalled({ cause: error }))
           : // A non-zero exit means the daemon is not up or not logged in,
             // which is an ordinary state to converge from.
-            Effect.succeed(undefined),
+            Effect.succeed(Option.none()),
       ),
       // Output that will not decode means the state cannot be confirmed, which
       // is treated the same as not being connected.
-      Effect.catchTag("SchemaError", () => Effect.succeed(undefined)),
+      Effect.catchTag("SchemaError", () => Effect.succeed(Option.none())),
     ),
 
   desired: (props) =>
@@ -159,7 +165,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
         { onUndefined: () => ({}), onDefined: (hostname) => ({ TS_HOSTNAME: hostname }) },
       );
 
-      if (observed === undefined) {
+      if (Option.isNone(observed)) {
         const authKey = yield* readSecret(props.authKey, ctx.exec);
 
         yield* ctx.exec({

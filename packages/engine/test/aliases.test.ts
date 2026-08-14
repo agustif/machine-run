@@ -65,7 +65,7 @@ const reconciler: Effect.Effect<
   yield* FileSystem.FileSystem;
   return {
     address: (props) => props.path,
-    observe: () => Effect.succeed(undefined),
+    observe: () => Effect.succeed(Option.none()),
     desired: (props) => Effect.succeed({ path: props.path }),
     matches: (observed, desired) => observed.path === desired.path,
     apply: ({ desired }) => Effect.succeed(desired),

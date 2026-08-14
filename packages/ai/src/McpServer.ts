@@ -5,6 +5,7 @@ import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
@@ -261,7 +262,7 @@ export const makeMcpServerReconciler: Effect.Effect<
         const mcp = yield* requireMcp(props.tool);
         const toolCtx: AiToolContext = { exec: ctx.exec, fs, path, home: paths.home };
         const live = yield* mcp.observe(props.name, toolCtx);
-        if (live === undefined) return undefined;
+        if (live === undefined) return Option.none();
 
         const env = observedKeysAndLiteral(declaredEnv(props.transport), live.env);
         const headers = observedKeysAndLiteral(declaredHeaders(props.transport), live.headers);
@@ -293,11 +294,11 @@ export const makeMcpServerReconciler: Effect.Effect<
             }),
         });
 
-        return {
+        return Option.some({
           tool: props.tool,
           name: props.name,
           ...(transport !== undefined ? { transport } : {}),
-        };
+        });
       }),
 
     desired: (props) =>

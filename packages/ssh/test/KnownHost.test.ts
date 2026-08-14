@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   appendKnownHostLine,
@@ -124,7 +125,7 @@ it.effect("CRLF known_hosts: a second entry is appended using the file's own CRL
       publicKey: "BBBB",
     });
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const written = yield* fs.readFileString(target);
     expect(written).toBe("github.com ssh-ed25519 AAAA\r\ngitlab.com ssh-rsa BBBB\r\n");
@@ -156,7 +157,7 @@ it.effect("observe reports absent for a file that does not exist yet", () =>
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "known_hosts");
 
-    expect(yield* reconciler.observe(propsFor(target), observeCtx)).toBeUndefined();
+    expect(Option.isNone(yield* reconciler.observe(propsFor(target), observeCtx))).toBe(true);
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
@@ -170,7 +171,7 @@ it.effect("apply creates the file and writes exactly one line for a brand-new en
 
     const props = propsFor(target);
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const written = yield* fs.readFileString(target);
     expect(written).toBe(`github.com ssh-ed25519 ${props.publicKey}\n`);
@@ -190,7 +191,7 @@ it.effect("apply creates ~/.ssh (the file's parent) at 0o700", () =>
 
     const props = propsFor(target);
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const info = yield* fs.stat(path.dirname(target));
     expect(Number(info.mode) & 0o777).toBe(0o700);
@@ -207,7 +208,7 @@ it.effect("a second, unrelated entry appends alongside the first without disturb
 
     const first = propsFor(target);
     const firstDesired = yield* reconciler.desired(first);
-    yield* reconciler.apply({ props: first, observed: undefined, desired: firstDesired }, applyCtx);
+    yield* reconciler.apply({ props: first, observed: Option.none(), desired: firstDesired }, applyCtx);
 
     const second = propsFor(target, {
       host: "gitlab.com",
@@ -216,7 +217,7 @@ it.effect("a second, unrelated entry appends alongside the first without disturb
     });
     const secondDesired = yield* reconciler.desired(second);
     yield* reconciler.apply(
-      { props: second, observed: undefined, desired: secondDesired },
+      { props: second, observed: Option.none(), desired: secondDesired },
       applyCtx,
     );
 
@@ -259,7 +260,7 @@ it.effect(
       const props = propsFor(target); // pins a *different* key for the same host/keyType
       const observed = yield* reconciler.observe(props, observeCtx);
       const desired = yield* reconciler.desired(props);
-      expect(reconciler.matches(observed!, desired)).toBe(false);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(false);
 
       const error = yield* reconciler
         .apply({ props, observed, desired }, applyCtx)

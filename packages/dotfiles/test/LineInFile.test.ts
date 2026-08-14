@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import {
@@ -164,8 +165,8 @@ it.effect(
       // leaves this line as `"127.0.0.1 example.local\r"`, which the
       // `$`-anchored `match` never recognises, so `observe` reports "no line
       // yet" for a line that is genuinely already there.
-      expect(observed).toBeDefined();
-      expect(reconciler.matches(observed!, desired)).toBe(true);
+      expect(Option.isSome(observed)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
       yield* reconciler.apply({ props, observed, desired }, applyCtx);
 
@@ -194,13 +195,13 @@ it.effect("apply inserts the line, and a second apply with the same props is a n
       line: "127.0.0.1 example.local",
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     expect(yield* fs.readFileString(target)).toBe("127.0.0.1 example.local\n");
 
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(true);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -218,13 +219,13 @@ it.effect("live drift: a hand-edit to the owned line is detected on the next obs
       line: "127.0.0.1 example.local",
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     yield* fs.writeFileString(target, "127.0.0.1 hand-edited.local\n");
 
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, desired)).toBe(false);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -242,7 +243,7 @@ it.effect("a second call replaces the line rather than appending a duplicate", (
       line: "127.0.0.1 example.local",
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     const props2: LineInFileProps = { ...props, line: "127.0.0.1 renamed.local" };
     const desired2 = yield* reconciler.desired(props2);
@@ -313,7 +314,7 @@ it.effect("apply fails with LineInFileMalformed rather than writing over an ambi
     };
     const desiredState = yield* reconciler.desired(props);
     const error = yield* reconciler
-      .apply({ props, observed: undefined, desired: desiredState }, applyCtx)
+      .apply({ props, observed: Option.none(), desired: desiredState }, applyCtx)
       .pipe(Effect.flip);
     expect(error).toBeInstanceOf(LineInFileMalformed);
 
@@ -384,7 +385,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const failure = yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx)
+        .apply({ props, observed: Option.none(), desired }, applyCtx)
         .pipe(
           Effect.flip,
           Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),

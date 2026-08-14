@@ -7,6 +7,7 @@ import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   GitMaintenanceCommandFailed,
@@ -107,7 +108,7 @@ it.effect("observe reports absent when the repository is not registered at all",
       { repo: "/repo" },
       observeCtx(maintenanceExec("/repo", [])),
     );
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -118,7 +119,7 @@ it.effect("observe reports absent when other repositories are registered but thi
       { repo: "/repo" },
       observeCtx(maintenanceExec("/repo", ["/other-repo", "/yet-another"])),
     );
-    expect(observed).toBeUndefined();
+    expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -129,7 +130,7 @@ it.effect("observe reports the repo when it's registered, among others", () =>
       { repo: "/repo" },
       observeCtx(maintenanceExec("/repo", ["/other-repo", "/repo"])),
     );
-    expect(observed).toEqual({ repo: "/repo" });
+    expect(observed).toEqual(Option.some({ repo: "/repo" }));
   }).pipe(Effect.provide(layer)),
 );
 
@@ -186,7 +187,7 @@ it.effect("apply runs `git maintenance start` against the repo and returns desir
     const calls: string[] = [];
 
     const result = yield* reconciler.apply(
-      { props, observed: undefined, desired },
+      { props, observed: Option.none(), desired },
       applyCtx(capturingExec(calls)),
     );
 
@@ -205,7 +206,7 @@ it.effect(
       const desired = yield* reconciler.desired(props);
 
       const error = yield* reconciler
-        .apply({ props, observed: undefined, desired }, applyCtx(noSchedulerExec))
+        .apply({ props, observed: Option.none(), desired }, applyCtx(noSchedulerExec))
         .pipe(Effect.flip);
 
       expect(error).toBeInstanceOf(GitMaintenanceSchedulerUnavailable);
@@ -220,7 +221,7 @@ it.effect("apply fails with the generic GitMaintenanceCommandFailed for any othe
 
     const error = yield* reconciler
       .apply(
-        { props, observed: undefined, desired },
+        { props, observed: Option.none(), desired },
         applyCtx(() =>
           Effect.fail(
             new CommandError({

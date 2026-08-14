@@ -4,6 +4,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import {
@@ -90,7 +91,7 @@ it.effect("apply renders variables into the file's content", () =>
       variables: { host: "example.com", port: "22" },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     expect(yield* fs.readFileString(target)).toBe("host = example.com\nport = 22");
   }).pipe(Effect.provide(layer)),
@@ -110,15 +111,15 @@ it.effect("a changed variable is detected as drift on the next plan", () =>
       variables: { host: "example.com" },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     // Nothing hand-edited the file — only the recipe's `variables` changed.
     const changedProps: TemplateProps = { ...props, variables: { host: "changed.example" } };
     const observed = yield* reconciler.observe(changedProps, observeCtx);
     const newDesired = yield* reconciler.desired(changedProps);
 
-    expect(observed).toBeDefined();
-    expect(reconciler.matches(observed!, newDesired)).toBe(false);
+    expect(Option.isSome(observed)).toBe(true);
+    expect(reconciler.matches(Option.getOrThrow(observed), newDesired)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -136,12 +137,12 @@ it.effect("a hand-edit to the rendered file is detected as drift, same as Machin
       variables: { host: "example.com" },
     };
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
     yield* fs.writeFileString(target, "hand-edited, not what the recipe asked for");
 
     const observed = yield* reconciler.observe(props, observeCtx);
-    expect(reconciler.matches(observed!, desired)).toBe(false);
+    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -182,7 +183,7 @@ it.effect("apply also fails with TemplateRenderFailed rather than writing a brok
     // refuses rather than assuming `desired` was always called first.
     const error = yield* reconciler
       .apply(
-        { props, observed: undefined, desired: { path: target, hash: "irrelevant" } },
+        { props, observed: Option.none(), desired: { path: target, hash: "irrelevant" } },
         applyCtx,
       )
       .pipe(Effect.flip);

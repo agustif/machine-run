@@ -7,7 +7,9 @@ import {
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Arr from "effect/Array";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as UndefinedOr from "effect/UndefinedOr";
 import { makeYayBackend, makeParuBackend } from "./backends/linux/Aur.ts";
@@ -250,9 +252,16 @@ export const makePackageReconciler: Effect.Effect<
       const backend = backends[props.manager];
       const index = isApplyPhase(ctx) ? applyIndex : planIndex;
       const installed = yield* index.packages.get(props.manager, () => backend.list(ctx.exec));
-      const entry = installed.find((candidate) => candidate.name === props.name);
-      if (entry === undefined) return undefined;
-      return { manager: props.manager, name: props.name, version: entry.version };
+      // `Arr.findFirst` rather than `.find` plus an `=== undefined` check: the
+      // absence this is looking for is exactly what `Option` models, and the
+      // version work made the entry itself carry a `version` worth keeping.
+      return Arr.findFirst(installed, (candidate) => candidate.name === props.name).pipe(
+        Option.map((entry) => ({
+          manager: props.manager,
+          name: props.name,
+          version: entry.version,
+        })),
+      );
     });
 
   return {
@@ -351,19 +360,25 @@ export const makePackageReconciler: Effect.Effect<
               }),
             ),
         });
-        if (
-          observed !== undefined &&
-          desired.version !== undefined &&
-          observed.version !== undefined &&
-          pinNamesAVersion
-        ) {
-          const drift = compareVersions(observed.version, desired.version);
+        // `observed` is an `Option` since the seam migration, so the guard reads
+        // as one flatMap rather than three `!== undefined` checks: a live version
+        // is needed, a pinned version is needed, and the pin has to name a
+        // version at all.
+        const liveVersion = Option.flatMap(observed, (state) =>
+          UndefinedOr.match(state.version, {
+            onUndefined: () => Option.none<string>(),
+            onDefined: (version) => Option.some(version),
+          }),
+        );
+        if (Option.isSome(liveVersion) && desired.version !== undefined && pinNamesAVersion) {
+          const installed = liveVersion.value;
+          const drift = compareVersions(installed, desired.version);
           if ((drift === "Ahead" || drift === "Unknown") && !backend.versions.canDowngrade) {
             return yield* Effect.fail(
               new CannotDowngrade({
                 manager: props.manager,
                 name: props.name,
-                installed: observed.version,
+                installed,
                 desired: desired.version,
                 direction: drift,
               }),

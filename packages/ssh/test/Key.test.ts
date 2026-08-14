@@ -5,6 +5,7 @@ import { CommandExecutor, CommandExecutorLive, type CommandRunProps } from "alch
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   KeyPairIncomplete,
@@ -107,7 +108,7 @@ it.effect("observe reports absent for a path with no key at all yet", () =>
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "id_ed25519");
 
-    expect(yield* reconciler.observe(propsFor(target), c)).toBeUndefined();
+    expect(Option.isNone(yield* reconciler.observe(propsFor(target), c))).toBe(true);
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
@@ -124,7 +125,7 @@ it.effect(
 
       const props = propsFor(target, { comment: "test-comment" });
       const desired = yield* reconciler.desired(props);
-      const result = yield* reconciler.apply({ props, observed: undefined, desired }, c);
+      const result = yield* reconciler.apply({ props, observed: Option.none(), desired }, c);
 
       expect(result.path).toBe(target);
       expect(result.publicKeyPath).toBe(`${target}.pub`);
@@ -142,7 +143,7 @@ it.effect(
 
       // observe now agrees with what apply just reported.
       const observed = yield* reconciler.observe(props, c);
-      expect(observed).toEqual(result);
+      expect(observed).toEqual(Option.some(result));
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
@@ -157,7 +158,7 @@ it.effect('apply defaults the comment to "" rather than OpenSSH\'s own <user>@<h
 
     const props = propsFor(target);
     const desired = yield* reconciler.desired(props);
-    const result = yield* reconciler.apply({ props, observed: undefined, desired }, c);
+    const result = yield* reconciler.apply({ props, observed: Option.none(), desired }, c);
 
     expect(result.comment).toBe("");
   }).pipe(Effect.scoped, Effect.provide(layer)),
@@ -174,7 +175,7 @@ it.effect("creates the containing directory at 0o700", () =>
 
     const props = propsFor(target);
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: undefined, desired }, c);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, c);
 
     const info = yield* fs.stat(path.dirname(target));
     expect(Number(info.mode) & 0o777).toBe(0o700);
@@ -193,7 +194,7 @@ it.effect("`-b` is passed for rsa but never for ed25519, which OpenSSH ignores i
     const ed25519Props = propsFor(ed25519Target, { algorithm: "ed25519", bits: 256 });
     const ed25519Desired = yield* reconciler.desired(ed25519Props);
     yield* reconciler.apply(
-      { props: ed25519Props, observed: undefined, desired: ed25519Desired },
+      { props: ed25519Props, observed: Option.none(), desired: ed25519Desired },
       spy,
     );
     expect(spy.seen.some((cmd) => cmd.includes("-t") && cmd.includes("ed25519"))).toBe(true);
@@ -203,7 +204,7 @@ it.effect("`-b` is passed for rsa but never for ed25519, which OpenSSH ignores i
     const rsaProps = propsFor(rsaTarget, { algorithm: "rsa", bits: 2048 });
     const rsaDesired = yield* reconciler.desired(rsaProps);
     const rsaResult = yield* reconciler.apply(
-      { props: rsaProps, observed: undefined, desired: rsaDesired },
+      { props: rsaProps, observed: Option.none(), desired: rsaDesired },
       spy,
     );
     expect(spy.seen.some((cmd) => cmd.includes("-b") && cmd.includes("2048"))).toBe(true);
@@ -270,7 +271,7 @@ it.effect(
 );
 
 it.effect(
-  "apply never calls ssh-keygen when `observed` is already defined — it returns it untouched",
+  "apply never calls ssh-keygen when `observed` is already Option.some — it returns it untouched",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeKeyReconciler;
@@ -288,7 +289,10 @@ it.effect(
         fingerprint: "SHA256:already-generated",
       };
 
-      const result = yield* reconciler.apply({ props, observed: alreadyThere, desired }, dyingCtx);
+      const result = yield* reconciler.apply(
+        { props, observed: Option.some(alreadyThere), desired },
+        dyingCtx,
+      );
       expect(result).toEqual(alreadyThere);
     }).pipe(Effect.provide(layer)),
 );

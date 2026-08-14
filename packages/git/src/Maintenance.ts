@@ -238,7 +238,8 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
         const target = paths.expand(props.repo);
         const toplevel = yield* resolveRepo(target, ctx.exec);
         const registered = yield* isRegistered(toplevel, ctx.exec);
-        return registered ? { repo: target } : undefined;
+        if (!registered) return Option.none();
+        return Option.some({ repo: target });
       }),
 
     desired: (props) => Effect.succeed({ repo: paths.expand(props.repo) }),

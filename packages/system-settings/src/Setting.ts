@@ -3,6 +3,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import {
   type DconfIdentity,
@@ -360,7 +361,7 @@ export const makeSettingReconciler: Effect.Effect<
     const plan = planFor(props);
     return plan
       .read(ctx.exec)
-      .pipe(Effect.map((value) => (value === undefined ? undefined : plan.withValue(value))));
+      .pipe(Effect.map((value) => Option.fromUndefinedOr(value).pipe(Option.map(plan.withValue))));
   },
 
   desired: (props) => Effect.succeed(planFor(props).desiredState),

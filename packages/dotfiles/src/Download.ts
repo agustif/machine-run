@@ -6,6 +6,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { type PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -189,7 +190,7 @@ export const makeDownloadReconciler: Effect.Effect<
                 : Effect.fail(new DownloadPathUnreadable({ path: target, cause })),
             ),
           );
-        if (info === undefined) return undefined;
+        if (info === undefined) return Option.none();
         if (info.type !== "File") {
           return yield* Effect.fail(new DownloadPathIsNotFile({ path: target }));
         }
@@ -202,11 +203,11 @@ export const makeDownloadReconciler: Effect.Effect<
           return yield* Effect.fail(new DownloadTooLarge({ path: target, bytes: size, limit }));
         }
         const bytes = yield* fs.readFile(target);
-        return {
+        return Option.some({
           path: target,
           hash: yield* hashBytes(bytes),
           mode: Number(info.mode) & 0o777,
-        };
+        });
       }),
 
     // No network call here: the whole point of a required `checksum` is that

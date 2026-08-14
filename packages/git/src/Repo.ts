@@ -43,7 +43,7 @@ import { showToplevel } from "./toplevel.ts";
  *   (verified: `git clone` into an already-existing *empty* directory
  *   succeeds exactly like cloning into a path that doesn't exist yet, and
  *   also creates any missing parent directories itself — no
- *   `fs.makeDirectory` needed here). `observe` returns `undefined`.
+ *   `fs.makeDirectory` needed here). `observe` returns `Option.none()`.
  * - **There, correct remote**: `path` is itself a repository root (see the
  *   toplevel check below) whose `origin` points at `props.remote`.
  * - **There, different remote** (including "no `origin` at all" — modelled
@@ -194,7 +194,7 @@ export const makeGitRepoReconciler: Effect.Effect<
           target,
           (cause) => new GitRepoPathUnreadable({ path: target, cause }),
         );
-        if (Option.isNone(info)) return undefined;
+        if (Option.isNone(info)) return Option.none();
 
         if (info.value.type !== "Directory") {
           return yield* Effect.fail(
@@ -233,7 +233,7 @@ export const makeGitRepoReconciler: Effect.Effect<
 
           if (realRoot === realTarget) {
             const remote = yield* getOriginUrl(target, ctx.exec);
-            return { path: target, ...(remote !== undefined ? { remote } : {}) };
+            return Option.some({ path: target, ...(remote !== undefined ? { remote } : {}) });
           }
         }
 
@@ -242,7 +242,7 @@ export const makeGitRepoReconciler: Effect.Effect<
         // comment). An empty directory is exactly what a fresh `git clone`
         // accepts; anything else here is content this resource did not put
         // there and will not clear away.
-        if (entries.length === 0) return undefined;
+        if (entries.length === 0) return Option.none();
 
         return yield* Effect.fail(
           new GitRepoPathOccupied({
@@ -261,7 +261,7 @@ export const makeGitRepoReconciler: Effect.Effect<
 
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
-        if (observed === undefined) {
+        if (Option.isNone(observed)) {
           yield* ctx
             .exec({
               command: Sh.sh(
@@ -283,9 +283,9 @@ export const makeGitRepoReconciler: Effect.Effect<
           return desired;
         }
 
-        if (observed.remote !== props.remote) {
+        if (observed.value.remote !== props.remote) {
           const args =
-            observed.remote === undefined
+            observed.value.remote === undefined
               ? ["remote", "add", "origin", props.remote]
               : ["remote", "set-url", "origin", props.remote];
           yield* ctx

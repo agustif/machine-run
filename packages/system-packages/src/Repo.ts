@@ -7,6 +7,7 @@ import {
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { makeAptRepoBackend } from "./backends/linux/Apt.ts";
 import { makeDnfRepoBackend } from "./backends/linux/Dnf.ts";
@@ -66,9 +67,10 @@ export const Repo = Resource<Repo>("System.Repo");
  * Structural equality over `RepoSpec` — the same value for two purposes:
  * "is this spec already in a live listing" (`observe`) and "does an observed
  * state already satisfy a desired one" (`matches`). Both questions are the
- * same question here because `observe` only ever returns either `undefined`
- * or an exact echo of `props` (see its doc comment below), so there is
- * nothing a bespoke `matches` could compare that this doesn't already.
+ * same question here because `observe` only ever returns either
+ * `Option.none()` or `Option.some` of an exact echo of `props` (see its doc
+ * comment below), so there is nothing a bespoke `matches` could compare that
+ * this doesn't already.
  *
  * `Match.tagsExhaustive` over the tag, rather than a generic per-field walk,
  * means a fifth `RepoSpec` member with a differently-shaped payload is a
@@ -124,12 +126,12 @@ export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, 
             }),
           ),
         );
-        if (!existing.some((entry) => repoEquals(entry, props.repo))) return undefined;
+        if (!existing.some((entry) => repoEquals(entry, props.repo))) return Option.none();
         // Every field this resource tracks about a repo lives in `props`
         // itself — unlike `Ai.McpServer`'s state, there is nothing an
         // observation resolves that props didn't already say, so the state
         // this returns is exactly the spec that was found.
-        return props;
+        return Option.some(props);
       });
 
     return {

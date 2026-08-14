@@ -10,6 +10,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -273,7 +274,7 @@ export const makeKnownHostReconciler: Effect.Effect<
         const target = paths.expand(props.path ?? DEFAULT_PATH);
         const entries = parseKnownHosts(yield* readContentOrEmpty(target));
         const found = findKnownHostEntry(entries, props.host, props.keyType);
-        if (found === undefined) return undefined;
+        if (found === undefined) return Option.none();
         // Reports whatever is actually on the line — even when it doesn't
         // match `publicKey` — so `matches` below can tell the two cases
         // apart. Collapsing a mismatch into "absent" here would make
@@ -282,12 +283,12 @@ export const makeKnownHostReconciler: Effect.Effect<
         // `found.keyType` (both are equal by construction — `findKnownHostEntry`
         // filtered on exactly that value) so this needs no unsafe cast back
         // into the literal union.
-        return {
+        return Option.some({
           path: target,
           host: found.host,
           keyType: props.keyType,
           publicKey: found.publicKey,
-        };
+        });
       }),
 
     desired: (props) =>
@@ -306,18 +307,18 @@ export const makeKnownHostReconciler: Effect.Effect<
 
     apply: ({ props, observed, desired }) =>
       Effect.gen(function* () {
-        // `observed` is only defined here when `matches` returned false —
-        // i.e. a line already exists for this `host`/`keyType` but with a
+        // `observed` is only `Option.some` here when `matches` returned false
+        // — i.e. a line already exists for this `host`/`keyType` but with a
         // different key. See `KnownHostKeyMismatch`'s doc comment for why
         // this resource will not decide which one is stale.
-        if (observed !== undefined) {
+        if (Option.isSome(observed)) {
           return yield* Effect.fail(
             new KnownHostKeyMismatch({
               path: desired.path,
               host: desired.host,
               keyType: desired.keyType,
               expected: desired.publicKey,
-              actual: observed.publicKey,
+              actual: observed.value.publicKey,
             }),
           );
         }

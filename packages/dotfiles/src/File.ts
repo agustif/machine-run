@@ -101,7 +101,7 @@ export const makeFileReconciler: Effect.Effect<
                 : Effect.fail(new FilePathUnreadable({ path: target, cause })),
             ),
           );
-        if (info === undefined) return undefined;
+        if (info === undefined) return Option.none();
         // `stat` above already confirmed something is here, so a read
         // failure now is not "the file is empty" — it's a permission change
         // or an I/O error in the window between the two calls. Only a
@@ -120,11 +120,11 @@ export const makeFileReconciler: Effect.Effect<
           ),
           () => "",
         );
-        return {
+        return Option.some({
           path: target,
           hash: yield* sha256(content),
           mode: Number(info.mode) & 0o777,
-        };
+        });
       }),
 
     desired: (props) =>

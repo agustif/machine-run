@@ -6,6 +6,7 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import {
@@ -128,7 +129,7 @@ it.effect(
 );
 
 it.effect(
-  "observe: never returns undefined — a fully absent service is a defined, all-false state",
+  "observe: never returns Option.none() — a fully absent service is a defined, all-false state",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeServiceReconciler;
@@ -138,13 +139,15 @@ it.effect(
         props({ name: "transmission-cli" }),
         observeCtx(queuedExec([brewInfo(false, false, false)]).exec),
       );
-      expect(observed).toEqual({
-        backend: "brew-services",
-        name: "transmission-cli",
-        installed: false,
-        enabled: false,
-        running: false,
-      });
+      expect(observed).toEqual(
+        Option.some({
+          backend: "brew-services",
+          name: "transmission-cli",
+          installed: false,
+          enabled: false,
+          running: false,
+        }),
+      );
     }).pipe(Effect.provide(layer)),
 );
 
@@ -161,7 +164,7 @@ it.effect(
       ]);
 
       const result = yield* reconciler.apply(
-        { props: p, observed: undefined, desired },
+        { props: p, observed: Option.none(), desired },
         applyCtx(exec),
       );
 
@@ -189,7 +192,7 @@ it.effect(
       ]);
 
       const result = yield* Effect.flip(
-        reconciler.apply({ props: p, observed: undefined, desired }, applyCtx(exec)),
+        reconciler.apply({ props: p, observed: Option.none(), desired }, applyCtx(exec)),
       );
 
       expect(result).toBeInstanceOf(ServiceNotConverged);
@@ -225,12 +228,14 @@ it.effect(
           failingExec(113, `Could not find service "com.example.thing" in domain for port\n`),
         ),
       );
-      expect(observed).toEqual({
-        backend: "launchd",
-        name: "com.example.thing",
-        installed: true,
-        enabled: false,
-        running: false,
-      });
+      expect(observed).toEqual(
+        Option.some({
+          backend: "launchd",
+          name: "com.example.thing",
+          installed: true,
+          enabled: false,
+          running: false,
+        }),
+      );
     }).pipe(Effect.provide(layer)),
 );

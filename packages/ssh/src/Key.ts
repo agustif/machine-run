@@ -5,6 +5,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { PlatformError, systemError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
@@ -253,7 +254,7 @@ const DEFAULT_DIRECTORY_MODE = 0o700;
  * </dev/null`) that it prompts `Overwrite (y/n)?` and, fed a closed stdin,
  * exits `1` leaving the existing private key untouched. `apply` here never
  * reaches that prompt in the first place, because it only ever runs
- * `ssh-keygen` when `observed` is `undefined`.
+ * `ssh-keygen` when `observed` is `Option.none()`.
  */
 export const makeKeyReconciler: Effect.Effect<
   Reconciler<KeyProps, KeyState, KeyError>,
@@ -321,7 +322,7 @@ export const makeKeyReconciler: Effect.Effect<
         const privatePath = paths.expand(props.path);
         const publicPath = `${privatePath}.pub`;
         const found = yield* readKeyState(privatePath, publicPath);
-        if (found === undefined) return undefined;
+        if (found === undefined) return Option.none();
 
         const fingerprintOutput = yield* ctx.exec({
           command: Sh.sh("ssh-keygen", "-lf", found.publicPath),
@@ -337,13 +338,13 @@ export const makeKeyReconciler: Effect.Effect<
           );
         }
 
-        return {
+        return Option.some({
           path: found.privatePath,
           publicKeyPath: found.publicPath,
           publicKeyType: found.keyType,
           comment: found.comment,
           fingerprint,
-        };
+        });
       }),
 
     // `comment`/`publicKeyType`/`fingerprint` are left unset: a comment
@@ -364,10 +365,10 @@ export const makeKeyReconciler: Effect.Effect<
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
         // `matches` above guarantees the engine only reaches here when
-        // `observed` is `undefined` — this branch is unreachable in
+        // `observed` is `Option.none()` — this branch is unreachable in
         // practice, but returning the untouched state is the honest answer
         // if it were ever reached some other way, not a defect to raise.
-        if (observed !== undefined) return observed;
+        if (Option.isSome(observed)) return observed.value;
 
         yield* fs.makeDirectory(path.dirname(desired.path), {
           recursive: true,

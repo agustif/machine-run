@@ -4,6 +4,7 @@ import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import { type PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
@@ -108,11 +109,11 @@ export const makeDirectoryReconciler: Effect.Effect<
                 : Effect.fail(new DirectoryPathUnreadable({ path: target, cause })),
             ),
           );
-        if (info === undefined) return undefined;
+        if (info === undefined) return Option.none();
         if (info.type !== "Directory") {
           return yield* Effect.fail(new DirectoryPathIsFile({ path: target }));
         }
-        return { path: target, mode: Number(info.mode) & 0o777 };
+        return Option.some({ path: target, mode: Number(info.mode) & 0o777 });
       }),
 
     desired: (props) =>

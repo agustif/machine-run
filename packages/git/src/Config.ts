@@ -371,7 +371,8 @@ export const makeGitConfigReconciler: Effect.Effect<
     observe: (props, ctx) =>
       Effect.gen(function* () {
         const values = yield* getAll(props.key, props.type, ctx.exec);
-        return values === undefined ? undefined : { key: props.key, values };
+        if (values === undefined) return Option.none();
+        return Option.some({ key: props.key, values });
       }),
 
     desired: (props) =>

@@ -280,8 +280,8 @@ export const makeLineInFileReconciler: Effect.Effect<
             }),
           );
         }
-        if (found.success === undefined) return undefined;
-        return { path: target, match: props.match, hash: yield* sha256(found.success) };
+        if (found.success === undefined) return Option.none();
+        return Option.some({ path: target, match: props.match, hash: yield* sha256(found.success) });
       }),
 
     desired: (props) =>

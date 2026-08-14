@@ -3,51 +3,17 @@
 `Reconciler` → Alchemy provider. Where the uniform decisions are made once.
 See [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
-- [ ] **`observe` should return `Option<State>`.** `State | undefined` is our
-      own contract, not Alchemy's, and it is the single largest contributor to
-      the `noNullish` count. The adapter converts to `undefined` once, at the
-      Alchemy boundary where it genuinely is required (`read`'s and `diff`'s
-      return values). `ApplyInput.observed` becomes `Option<State>` too, all
-      the way into `apply`; `matches`, `unapply`'s `observed`/`recorded`, and
-      `ApplyContext.snapshot`'s return stay as they are — they're already
-      non-optional or already `string | undefined` for an unrelated reason.
+- [x] **`observe` returns `Option<State>`.** `State | undefined` was our own
+      contract, not Alchemy's, and conflated "nothing is there" with "a field
+      that happens to be missing". `ApplyInput.observed` is an `Option<State>`
+      all the way into `apply`; `matches`, `unapply`'s `observed`/`recorded`
+      and `ApplyContext.snapshot`'s return are unaffected — they are already
+      non-optional, or `string | undefined` for an unrelated reason.
 
-      **This is an atomic, repo-wide change — it cannot land incrementally.**
-      `Option`'s runtime shape (`{ _tag: "Some", value }` / `{ _tag: "None" }`)
-      isn't compatible with `undefined`/a bare value, so the moment
-      `Reconciler.observe`'s declared return type changes, every existing
-      implementation fails to type-check until it's updated in the same
-      commit. A prototype of this was built and fully reverted on
-      2026-08-13 specifically because five other agents had uncommitted,
-      in-flight work in exactly the files it would have touched — landing it
-      then would have clobbered that work or forced a re-do against a moving
-      target. It's safe once the tree is quiet. The full list of call sites
-      that have to change together, so whoever picks this up doesn't have to
-      rediscover it:
-
-      - `packages/engine/src/Reconciler.ts` — `Reconciler.observe`'s return
-        type; `ApplyInput.observed`'s type.
-      - `packages/engine/src/toProvider.ts` — `read` (`Option.getOrUndefined`
-        at the return), `diff` (`Option.isNone`/`.value`), `reconcile`
-        (`Option.isSome`/`.value`, `observed` passed through to `apply` as
-        `Option`).
-      - `packages/dotfiles/src/File.ts`, `ManagedBlock.ts`, `Symlink.ts`,
-        `Directory.ts`, `Download.ts`, `Exec.ts` — each `observe`.
-      - `packages/macos-defaults/src/Default.ts` — `observe`.
-      - `packages/secrets/src/SecretFile.ts` — `observe`.
-      - `packages/system-packages/src/Package.ts`, `Repo.ts` — each `observe`
-        (note `Package.ts`'s `isApplyPhase`-gated `planIndex`/`applyIndex`
-        split stays exactly as it is; only the wrapped return value changes).
-      - `packages/tailscale/src/Connection.ts` — `observe`.
-      - Every package's own test file that constructs a reconciler's
-        `observe` result directly (not just the provider-level ones) needs
-        the same `Option.some`/`Option.none()` swap.
-
-      Mechanical per call site: `return undefined` → `return Option.none()`;
-      `return { ... }` → `return Option.some({ ... })`; a `.pipe`-chained
-      `Effect.map`/`orElseSucceed` returning `undefined` becomes
-      `Option.none()` the same way. No reconciler's actual observation logic
-      needs to change, only how "nothing here" and "here it is" are spelled.
+      `toProvider` converts exactly once, at the Alchemy boundary that
+      genuinely requires `undefined` (`read`'s return value). Everything above
+      that boundary is total, which is the point: `Option.getOrUndefined`
+      belongs there and nowhere else in the repo.
 
 - **Decided against: a generic engine-level reuse of the plan-phase
   observation via Alchemy's `Artifacts`.** `toProvider` calls `observe`
