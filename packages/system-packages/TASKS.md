@@ -75,9 +75,137 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       systemd, unreachable from a container" note undersold what a
       `--privileged --cgroupns=host` container with a real `/sbin/init` PID 1
       can do. `nix` remains unaddressed.
-- [ ] **Version pinning.** `PackageProps` has no `version`, so "install ripgrep"
-      cannot mean a particular ripgrep. This is a real gap for reproducibility
-      and changes `matches` from membership to comparison.
+- [x] **Version pinning.** Closed 2026-08-14. `PackageProps` now carries an
+      optional `version: VersionSpec` (`@machine-run/core`'s shared
+      `Exact`/`AtLeast`/`Channel`/`Digest` vocabulary — see that module's doc
+      comment) and an optional `updatePolicy: UpdatePolicy`
+      (`Never`/`ToSpec`/`Latest`, defaulting to `Never`: install once if
+      absent, then leave drift alone — the resource's original,
+      undocumented-until-now behaviour, now a stated choice rather than an
+      accident). `matches` compares the pinned version only under `ToSpec`;
+      `apply` computes drift direction (`core`'s `compareVersions`) and fails
+      with a typed `CannotDowngrade` — before ever shelling out — when the
+      live version is ahead of the pin and the manager's own
+      `PackageVersionSupport.canDowngrade` says it cannot move backward.
+
+      Every one of the 19 backends declares, in its own type
+      (`Backend.ts`'s `PackageVersionSupport`), exactly which `VersionSpec`
+      tags it accepts, and every backend's `install` is an exhaustive
+      `Match` over the *complete* `VersionSpec` union — a tag outside its
+      declared `accepts` fails loudly with `UnsupportedVersionSpec` rather
+      than being silently installed unpinned. Real, container- or
+      machine-verified findings, one per manager (see each backend's own doc
+      comment for the exact command and captured output):
+
+      | Manager | Pin syntax | canDowngrade | Verified |
+      |---|---|---|---|
+      | apt | `pkg=version` | true (while the build is still in a configured repo) | `docker run --rm ubuntu:24.04` |
+      | dnf | `pkg-<NEVRA>` | true (same caveat) | `docker run --rm fedora:latest` |
+      | pacman / yay / paru | `pkg=version` | **false** — official repos hold exactly one build; `pkg=olderversion` is `target not found`, not a version mismatch | `docker run --rm archlinux:latest` |
+      | cargo | `--version <v>` | true — real observed downgrade, no `--force`: `Replaced package `just v1.14.0` with `just v1.5.0`` | `docker run --rm rust:latest` |
+      | npm | `pkg@version` | true | `docker run --rm node:22` |
+      | pipx / uv tool | `pkg==version`, with `--force` (bare `install` refuses to touch an existing name at all) | true | `docker run --rm python:3.12` |
+      | gem | `-v <version>` | true (installs alongside, never removes the newer one — see `Gem.ts`) | `docker run --rm ruby:3.3` |
+      | go install | `path@version` | true, including a real observed downgrade | `docker run --rm golang:1.23` |
+      | brew / brew-cask | **none** — a "version" is a differently-*named* formula (`node@18`), not a version argument to the same name; `brew info ripgrep@14` (no such formula) vs. `brew info node@18` (real, separate formula) proves the distinction | n/a | this machine, read-only |
+      | mas | **none** — `mas install` takes only an App Store id | n/a | this machine, read-only |
+      | snap | `Channel` only, via `--channel=` — no `Exact`: no server-side revision history a recipe can request by version string (`--revision=` exists but is documented as self-reverting on the next `snap refresh`, so it is *not* modelled as `Exact`) | true (channel symmetry) | privileged systemd container, `--help` text |
+      | port (MacPorts) | **none** — MacPorts is not installed on this Mac and has no Docker image; declaring a pin syntax without running it would be exactly the invented-flag certainty rule 0c warns against | n/a | not reachable |
+      | winget / choco | UNVERIFIED — no Windows target this session; flags are the widely-documented `--version`, kept in the same "real flag, not independently run" posture as this backend's pre-existing install flags | unverified | no Windows target |
+      | flatpak | `Channel` only, via `id//branch` — `flatpak remote-info flathub org.gnome.Calculator` reports a `Branch:` but no `Version:` field at all, and `flatpak list --columns=…,version` *does* report one after install (`50.0`), but that string is appstream metadata, not an installable coordinate: `flatpak install …//50.0` fails with the identical `Nothing matches <id> in remote <remote>` text a nonexistent app-id gets — version is observable but never settable, a real asymmetry `Exact` would have hidden. flatpak's `Commit:` (a real content hash) is unreachable from `install` (`--commit` is `update`-only, exit 1: `Unknown option --commit=…`) | **false** — installing a second branch over an existing one is not independently confirmed; see `Flatpak.ts` | `docker run --rm ubuntu:24.04`, native arm64 |
+
+      `refreshIndex` (new, optional on `PackageManagerBackend`): apt
+      (`apt-get update`), dnf (`dnf makecache`), pacman/yay/paru (`-Sy`,
+      **deliberately not `-Syu`** — see `Pacman.ts`'s doc comment for the
+      partial-upgrade hazard this stops short of fixing, a real acknowledged
+      gap, not a silent one). cargo/npm/pipx/uv/gem/go install talk to a live
+      registry per command and keep no local index to go stale. brew/port/
+      flatpak/winget/choco each have a real refresh command
+      (`brew update`/`port selfupdate`/`flatpak update --appstream`/
+      `winget source update`/`choco upgrade all` is not it, `choco source`
+      isn't either) that this pass did not wire up — a real, tracked gap, not
+      an oversight: see the item below.
+
+      `VersionSpec.AtLeast` is part of the shared vocabulary but **no
+      backend here declares it** — every manager this package wraps is
+      pinned by a single exact string or not at all, never by a version
+      *range* the way `mise`/`asdf` resolve `Runtime.Tool`'s `version` field.
+      `Package.ts`'s `matches` therefore compares a `ToSpec` pin by plain
+      string equality, not `core`'s `matchesVersionSpec`; this is a stated
+      simplification, not a silent gap, and is moot in practice because
+      `checkVersionSupported` rejects `AtLeast` for every manager before
+      `matches` would ever see one.
+
+- [x] **`CannotDowngrade` and `compareVersions`'s `"Unknown"` case.** Closed
+      2026-08-14, after a peer measured `compareVersions` against real
+      captured version pairs directly rather than reasoning about it:
+
+      | observed vs. desired | result | source |
+      |---|---|---|
+      | `2.3.2-1` vs `2.0.0-1` | `Ahead` | real pacman pkgrel (`archlinux:latest`) |
+      | `2.1.1-2ubuntu3.24.04.2` vs `2.1.1-2ubuntu3` | `Unknown` | two real `apt-cache madison tree` versions (`ubuntu:24.04`) |
+      | `2.2.1-4.fc44` vs `2.2.1-3.fc44` | `Unknown` | real dnf `%{evr}` (`fedora:latest`) |
+      | `2:4.19.0-7.fc44` vs `2:4.19.0-6.fc44` | `Unknown` | real dnf evr with a nonzero epoch (`shadow-utils`) |
+      | `v0.20.0` vs `v0.19.0` | `Unknown` | real go module tags (`golang:1.23`) |
+      | `2.2.1,20628` vs `2.2.0,20000` | `Unknown` | real `brew list --cask --versions` (this machine) |
+      | `13.1.0` vs `13.0.6` | `Ahead` | real `gem list --local` (`ruby:3.3`) |
+
+      `compareVersions`'s `DOTTED` regex now splits on `.` *and* `-`
+      (`/^\d+([.-]\d+)*$/`), which is what turns pacman's `pkgver-pkgrel`
+      pair into a real `Ahead` — the fix, not a hypothesis. apt/dnf's real
+      strings stay `Unknown` (an `ubuntuN`/`.fc44` distro tag and an epoch
+      colon are not plain digit runs), but that was never the live gap: both
+      managers are `canDowngrade: true`, so `CannotDowngrade` was never
+      written to guard them in the first place — the earlier version of this
+      entry named "apt, dnf or pacman" as the three managers the guard
+      exists for and was wrong on both halves (pacman's guard does fire once
+      the regex above is in place; apt/dnf's `canDowngrade` means there was
+      never a guard to fire).
+
+      The real residual gap, once pacman is accounted for, is narrower and
+      is in the two managers `canDowngrade: false` actually protects that a
+      pacman-shaped test would never reach: **aur** (`yay`/`paru` — a VCS
+      package's version, e.g. `r1234.deadbeef`, has no numeric grammar at
+      all) and **flatpak** (`accepts: {Channel}` — a branch name is never
+      orderable). `Package.ts`'s `apply` now refuses on `"Unknown"` *only*
+      when the pin is a fixed target (`Exact`/`AtLeast`) and the manager
+      can't downgrade — not on every `"Unknown"`, which would have made every
+      legitimate `Channel` switch (flatpak's branch, snap's track) fail: a
+      channel name pair is *always* `"Unknown"` (neither side is
+      dotted-numeric), and switching channels is not a downgrade question in
+      the first place. `CannotDowngrade` carries a `direction: "Ahead" |
+      "Unknown"` field so its message never claims "newer" when the honest
+      statement is "cannot be ordered, and this manager cannot go backward
+      anyway".
+
+      No dpkg/RPM version comparator was written — real EVR and Debian
+      version ordering (epoch, `~`, alphanumeric rules) are two genuinely
+      different algorithms, and getting either right from memory is exactly
+      what rule 0c forbids; `compareVersions`'s doc comment says so
+      explicitly rather than implying more coverage than it has.
+
+      Pinned by three `test/backends.test.ts` cases: pacman's real `Ahead`
+      (the original case, now passing), an AUR VCS `Unknown`-refuses case,
+      and a flatpak `Unknown`-proceeds case — the last one is the test that
+      would have failed if the fix had refused on every `"Unknown"` instead
+      of gating it on the spec tag.
+- [ ] **`refreshIndex` for brew/port/flatpak/winget/choco.** Real commands
+      exist (`brew update`, `port selfupdate`, `flatpak update --appstream`,
+      `winget source update`) but were not wired into `apply` this pass —
+      apt/dnf/pacman/yay/paru (the ones directly named in the finding that
+      prompted this) are done; these five are the acknowledged remainder.
+- [ ] **A real per-manager "upgrade to latest" probe for `UpdatePolicy.Latest`.**
+      Today `Latest` behaves identically to `Never` once a package is
+      present — Alchemy's `reconcile` only calls `apply` when `matches` is
+      false, and `matches` has no notion of "is a newer version available
+      upstream" for any manager. `Latest` is not silently wrong (see
+      `core`'s `Version.ts` for why it's still a stated, honest choice: it
+      is a real update policy that governs what happens on *drift*, and
+      currently there is only ever drift for `ToSpec`), but a recipe that
+      wants continuous auto-update gets no more than `Never` does today. A
+      real fix needs a per-manager "is there a newer version" check
+      (`apt list --upgradable`, `dnf check-update`, `npm outdated -g
+      --json`, …) this session did not build.
 - [x] **Flatpak remotes have no `System.Repo` support.** Implemented and
       container-verified 2026-08-14 (`docs/notes/system-packages-notes.md`):
       `RepoSpec`'s `Flatpak` tag (`Backend.ts`) carries `name` and an

@@ -1,7 +1,35 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  type PackageEntry,
+  type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
+} from "../../Backend.ts";
 import { lines } from "../../parse.ts";
+
+/**
+ * Same `pkg=version` syntax as pacman itself (`yay`/`paru` pass an
+ * official-repo request straight through — see this module's own doc
+ * comment), and the same real limitation, one step worse: an AUR-origin
+ * package has no repo at all behind it, only a PKGBUILD a helper builds
+ * fresh from whatever the AUR currently holds — there is no server-side
+ * history to request an older build from even in principle, so `Exact` can
+ * only ever succeed by naming the version that would get built anyway.
+ * `canDowngrade: false` for the identical reason `Pacman.ts`'s is: verified
+ * there against a real `pacman -S name=olderversion` failure
+ * (`error: target not found`), not independently re-run against a real
+ * `yay`/`paru` binary here (building one is its own multi-minute story — see
+ * this module's doc comment) — inferred from `yay`/`paru` being documented,
+ * confirmed-by-this-repo pacman-CLI-compatible wrappers for the `-S` path,
+ * not independently observed for this specific case.
+ */
+export const aurVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Exact"]),
+  canDowngrade: false,
+};
 
 /**
  * AUR helpers (`yay`, `paru`) — pacman wrappers that additionally build and
@@ -76,13 +104,64 @@ import { lines } from "../../parse.ts";
  */
 const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
   id: bin,
+  versions: aurVersionSupport,
+  // `-Qm` (without `-q`) reports `<name> <version>` pairs for foreign
+  // packages, the same way `Pacman.ts`'s `list` drops `-q` — not
+  // independently re-run in this session (see this module's doc comment on
+  // why a fresh `yay`/`paru` binary wasn't rebuilt again here), but it is the
+  // identical pacman query underneath with one flag removed, which `list`'s
+  // existing `-Qmq` already relied on being true.
   list: (exec) =>
-    exec({ command: Sh.sh("pacman", "-Qmq") }).pipe(Effect.map((result) => lines(result.stdout))),
-  install: (name, exec) =>
+    exec({ command: Sh.sh("pacman", "-Qm") }).pipe(
+      Effect.map((result) =>
+        lines(result.stdout).map((line): PackageEntry => {
+          const [name, version] = line.split(/\s+/);
+          return name === undefined
+            ? { name: line }
+            : version === undefined
+              ? { name }
+              : { name, version };
+        }),
+      ),
+    ),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.sh(bin, "-S", "--noconfirm", name),
+          shell: true,
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Exact: (v) =>
+              exec({
+                command: Sh.sh(bin, "-S", "--noconfirm", `${name}=${v.version}`),
+                shell: true,
+                timeout: "10 minutes",
+              }).pipe(Effect.asVoid),
+            AtLeast: rejectUnsupportedVersionSpec(bin, aurVersionSupport),
+            Channel: rejectUnsupportedVersionSpec(bin, aurVersionSupport),
+            Digest: rejectUnsupportedVersionSpec(bin, aurVersionSupport),
+          }),
+        ),
+    }),
+  // `<bin> -Sy` — both helpers pass `-Sy` straight through to pacman
+  // (documented `-S`-family passthrough behaviour, same CLI surface `install`
+  // above already relies on), so this refreshes the official-repo sync
+  // databases exactly like `Pacman.ts`'s own `refreshIndex`, with the
+  // identical partial-upgrade caveat (`-Sy`, deliberately not `-Syu` — see
+  // that module's doc comment) and the identical honest limit: it does
+  // nothing for the AUR half specifically, which has no index to refresh at
+  // all — a helper always builds from whatever the AUR holds *right now*
+  // (see this module's own doc comment), so there is no staleness for an AUR
+  // package to hit the way an official-repo one can.
+  refreshIndex: (exec) =>
     exec({
-      command: Sh.sh(bin, "-S", "--noconfirm", name),
+      command: Sh.sh(bin, "-Sy", "--noconfirm"),
       shell: true,
-      timeout: "10 minutes",
+      timeout: "5 minutes",
     }).pipe(Effect.asVoid),
 });
 

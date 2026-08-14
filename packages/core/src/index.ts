@@ -7,5 +7,6 @@ export * from "./LineEndings.ts";
 export * from "./Providers.ts";
 export * from "./Sessions.ts";
 export * from "./Paths.ts";
+export * from "./Version.ts";
 export * as Sh from "./Sh.ts";
 export * as Windows from "./windows/index.ts";

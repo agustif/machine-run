@@ -1,7 +1,59 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
-import { firstTokens, lines } from "../../parse.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  type PackageEntry,
+  type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
+} from "../../Backend.ts";
+import { lines } from "../../parse.ts";
+
+/**
+ * `uv tool install "<name>==<version>"` — pip-style pin, verified against
+ * `docker run --rm python:3.12` (`pip install uv`): `uv tool install
+ * "cowsay==5.0"` printed `Resolved 1 package in 1.81s` / `Installed 1
+ * package in 3.46s` / `+ cowsay==5.0`, confirming the syntax resolves and
+ * installs the pinned version, and `uv tool install "cowsay==99.99.99"`
+ * failed with a real dependency-resolution error: `No solution found when
+ * resolving dependencies: Because there is no version of cowsay==99.99.99
+ * and you require cowsay==99.99.99, we can conclude that your requirements
+ * are unsatisfiable.`
+ *
+ * One real, incidental finding from the same run, worth recording rather
+ * than silently working around: the `cowsay==5.0` install above also printed
+ * `error: Executable already exists: cowsay (use --force to overwrite)` —
+ * because `pipx` (installed and exercised in the same container, same
+ * `$HOME`, for `Pipx.ts`'s own verification) had already linked a `cowsay`
+ * shim into the same `~/.local/bin`. uv resolved and installed the package
+ * into its own tool store regardless (confirmed by `+ cowsay==5.0` above),
+ * it only failed to link the shim — a cross-tool `$HOME` collision specific
+ * to running both managers in one container back to back, not a limitation
+ * of `uv tool install` itself. It did mean `uv tool list` read back "No
+ * tools installed" immediately after, so this session could not
+ * independently confirm `uv tool list`'s pinned-version line shape beyond
+ * what `UvTool.ts`'s existing doc comment already established.
+ *
+ * That collision left one real question genuinely open rather than settled:
+ * whether `uv tool install` also refuses to *re-pin an already-uv-installed*
+ * tool to a different version without `--force`, the same way `Pipx.ts`
+ * confirmed pipx's own `install` does (a bare re-`install` there silently
+ * no-ops, exit 0, when anything is already installed under that name,
+ * regardless of whether the requested version matches). This session's own
+ * run cannot distinguish "uv refuses to overwrite its own prior version"
+ * from "uv refuses to overwrite pipx's shim" — the failure happened before
+ * uv had ever successfully installed `cowsay` itself. Passing `--force`
+ * unconditionally on every `Exact` pin, below, is the defensive reading:
+ * cheap when unneeded (a fresh install has nothing to force past) and
+ * necessary if uv's own re-pin behaviour turns out to match pipx's.
+ */
+export const uvToolVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Exact"]),
+  canDowngrade: true,
+};
+
+const rejectSpec = rejectUnsupportedVersionSpec("uv-tool", uvToolVersionSupport);
 
 /**
  * `uv tool list` prints one `<name> v<version>` header line per installed
@@ -38,19 +90,47 @@ import { firstTokens, lines } from "../../parse.ts";
  * confirming the `v\d` header regex doesn't false-match a second tool's own
  * sub-line (fixtures: `test/fixtures/uv-tool-list{,-empty}.txt`).
  */
-export const parseUvToolList = (stdout: string): string[] =>
-  firstTokens(lines(stdout).filter((line) => /^\S+\s+v\d/.test(line)));
+export const parseUvToolList = (stdout: string): PackageEntry[] => {
+  const entries: PackageEntry[] = [];
+  for (const line of lines(stdout)) {
+    const match = /^(\S+)\s+v(\d\S*)/.exec(line);
+    if (match === null) continue;
+    const name = match[1];
+    const version = match[2];
+    if (name === undefined) continue;
+    entries.push(version === undefined ? { name } : { name, version });
+  }
+  return entries;
+};
 
 export const makeUvToolBackend = (): PackageManagerBackend => ({
   id: "uv-tool",
+  versions: uvToolVersionSupport,
   list: (exec) =>
     exec({ command: Sh.sh("uv", "tool", "list") }).pipe(
       Effect.map((result) => parseUvToolList(result.stdout)),
     ),
-  install: (name, exec) =>
-    exec({
-      command: Sh.sh("uv", "tool", "install", name),
-      shell: true,
-      timeout: "5 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.sh("uv", "tool", "install", name),
+          shell: true,
+          timeout: "5 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Exact: (v) =>
+              exec({
+                command: Sh.sh("uv", "tool", "install", "--force", `${name}==${v.version}`),
+                shell: true,
+                timeout: "5 minutes",
+              }).pipe(Effect.asVoid),
+            AtLeast: rejectSpec,
+            Channel: rejectSpec,
+            Digest: rejectSpec,
+          }),
+        ),
+    }),
 });

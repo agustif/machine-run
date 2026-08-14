@@ -69,7 +69,7 @@ it.effect("brew backend parses `brew list --formula` output into names", () =>
   Effect.gen(function* () {
     const backend = makeBrewBackend();
     const installed = yield* backend.list(fakeExec("mise\nripgrep\nfd\n"));
-    expect(installed).toEqual(["mise", "ripgrep", "fd"]);
+    expect(installed).toEqual([{ name: "mise" }, { name: "ripgrep" }, { name: "fd" }]);
   }),
 );
 
@@ -77,8 +77,18 @@ it.effect("brew backend install shells out to `brew install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeBrewBackend();
-    yield* backend.install("ripgrep", capturingExec("", calls));
+    yield* backend.install("ripgrep", undefined, capturingExec("", calls));
     expect(calls).toEqual(["brew install ripgrep"]);
+  }),
+);
+
+it.effect("brew backend refuses a version pin it cannot honour", () =>
+  Effect.gen(function* () {
+    const backend = makeBrewBackend();
+    const result = yield* backend
+      .install("ripgrep", { _tag: "Exact", version: "14.0.0" }, fakeExec(""))
+      .pipe(Effect.flip);
+    expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
 );
 
@@ -95,7 +105,7 @@ it.effect("brew backend list uses --full-name so a tap-qualified name matches", 
     const installed = yield* backend.list(
       capturingExec("ada-url\nkoekeishiya/formulae/skhd\n", calls),
     );
-    expect(installed).toEqual(["ada-url", "koekeishiya/formulae/skhd"]);
+    expect(installed).toEqual([{ name: "ada-url" }, { name: "koekeishiya/formulae/skhd" }]);
     expect(calls).toEqual(["brew list --formula --full-name"]);
   }),
 );
@@ -112,28 +122,59 @@ it.effect("brew-cask backend parses real `brew list --cask` output (this machine
     const backend = makeBrewCaskBackend();
     const installed = yield* backend.list(fakeExec(fixture("brew-list-cask.txt")));
     expect(installed).toEqual([
-      "android-commandlinetools",
-      "ghostree",
-      "ghostty",
-      "jdownloader",
-      "macterm",
-      "markedit",
-      "mori",
-      "muxy",
-      "orbstack",
-      "slack",
-      "stolendata-mpv",
-      "transmission",
-      "visual-studio-code",
+      { name: "android-commandlinetools" },
+      { name: "ghostree" },
+      { name: "ghostty" },
+      { name: "jdownloader" },
+      { name: "macterm" },
+      { name: "markedit" },
+      { name: "mori" },
+      { name: "muxy" },
+      { name: "orbstack" },
+      { name: "slack" },
+      { name: "stolendata-mpv" },
+      { name: "transmission" },
+      { name: "visual-studio-code" },
     ]);
   }),
+);
+
+it.effect(
+  "brew-cask backend list reports versions from real `brew list --cask --versions` output (this machine)",
+  () =>
+    Effect.gen(function* () {
+      // Real captured output from this real machine (see
+      // test/fixtures/brew-list-cask-versions.txt) — `brew list --cask
+      // --versions` prints `<name> <version>` pairs, including the literal
+      // string "latest" for a cask that declares no real version
+      // (`jdownloader latest`) and a comma-bearing version for one that
+      // tracks two numbers at once (`orbstack 2.2.1,20628`) — neither is
+      // treated specially, both are reported verbatim as `version`.
+      const backend = makeBrewCaskBackend();
+      const installed = yield* backend.list(fakeExec(fixture("brew-list-cask-versions.txt")));
+      expect(installed).toEqual([
+        { name: "android-commandlinetools", version: "15859902" },
+        { name: "ghostree", version: "0.3.23" },
+        { name: "ghostty", version: "1.3.1" },
+        { name: "jdownloader", version: "latest" },
+        { name: "macterm", version: "1.20.10" },
+        { name: "markedit", version: "1.33.1" },
+        { name: "mori", version: "0.7.0" },
+        { name: "muxy", version: "1.3.0" },
+        { name: "orbstack", version: "2.2.1,20628" },
+        { name: "slack", version: "4.51.185" },
+        { name: "stolendata-mpv", version: "0.40.0" },
+        { name: "transmission", version: "4.1.3" },
+        { name: "visual-studio-code", version: "1.133.0" },
+      ]);
+    }),
 );
 
 it.effect("brew-cask backend uses `brew install --cask`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeBrewCaskBackend();
-    yield* backend.install("orbstack", capturingExec("", calls));
+    yield* backend.install("orbstack", undefined, capturingExec("", calls));
     expect(calls).toEqual(["brew install --cask orbstack"]);
   }),
 );
@@ -158,11 +199,36 @@ it.effect("brew repo backend addRepo shells out to `brew tap <tap>`", () =>
   }),
 );
 
-it.effect("apt backend parses dpkg-query output into package names", () =>
+it.effect("apt backend parses dpkg-query output into package names and versions", () =>
   Effect.gen(function* () {
     const backend = makeAptBackend();
-    const installed = yield* backend.list(fakeExec("curl\ngit\n"));
-    expect(installed).toEqual(["curl", "git"]);
+    const installed = yield* backend.list(fakeExec("curl\t8.5.0-2ubuntu10\ngit\t1:2.43.0-1\n"));
+    expect(installed).toEqual([
+      { name: "curl", version: "8.5.0-2ubuntu10" },
+      { name: "git", version: "1:2.43.0-1" },
+    ]);
+  }),
+);
+
+it.effect("apt backend install pins an exact version with `pkg=version`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptBackend();
+    yield* backend.install(
+      "tree",
+      { _tag: "Exact", version: "2.1.1-2ubuntu3" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["sudo apt-get install -y tree=2.1.1-2ubuntu3"]);
+  }),
+);
+
+it.effect("apt backend refreshIndex shells out to `apt-get update`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    expect(calls).toEqual(["sudo apt-get update"]);
   }),
 );
 
@@ -192,7 +258,7 @@ it.effect("apt repo backend addRepo shells out to `sudo add-apt-repository -y <p
   }),
 );
 
-it.effect("port backend parses `port installed` output into names", () =>
+it.effect("port backend parses `port installed` output into names and versions", () =>
   Effect.gen(function* () {
     const backend = makePortBackend();
     const installed = yield* backend.list(
@@ -200,27 +266,72 @@ it.effect("port backend parses `port installed` output into names", () =>
         "The following ports are currently installed:\n  git @2.43.0_0 (active)\n  wget @1.24.5_0 (active)\n",
       ),
     );
-    expect(installed).toEqual(["git", "wget"]);
+    expect(installed).toEqual([
+      { name: "git", version: "2.43.0_0" },
+      { name: "wget", version: "1.24.5_0" },
+    ]);
   }),
 );
 
-it.effect("cargo backend ignores indented binary lines from --list", () =>
+it.effect("port backend refuses a version pin — never independently verified against a real port", () =>
+  Effect.gen(function* () {
+    const backend = makePortBackend();
+    const result = yield* backend
+      .install("git", { _tag: "Exact", version: "2.43.0_0" }, fakeExec(""))
+      .pipe(Effect.flip);
+    expect(result._tag).toBe("UnsupportedVersionSpec");
+  }),
+);
+
+it.effect("cargo backend ignores indented binary lines from --list, and reports each crate's version", () =>
   Effect.gen(function* () {
     const backend = makeCargoBackend();
     const installed = yield* backend.list(
       fakeExec("cargo-bloat v0.11.1:\n    cargo-bloat\nripgrep v14.0.0:\n    rg\n"),
     );
-    expect(installed).toEqual(["cargo-bloat", "ripgrep"]);
+    expect(installed).toEqual([
+      { name: "cargo-bloat", version: "0.11.1" },
+      { name: "ripgrep", version: "14.0.0" },
+    ]);
   }),
 );
 
-it.effect("npm backend parses `npm ls -g --json` dependencies", () =>
+it.effect("cargo backend install pins an exact version with `--version`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeCargoBackend();
+    yield* backend.install("just", { _tag: "Exact", version: "1.5.0" }, capturingExec("", calls));
+    expect(calls).toEqual(["cargo install just --version 1.5.0"]);
+  }),
+);
+
+it.effect("npm backend parses `npm ls -g --json` dependencies, including each one's version", () =>
   Effect.gen(function* () {
     const backend = makeNpmBackend();
     const installed = yield* backend.list(
-      fakeExec(JSON.stringify({ dependencies: { typescript: {}, pnpm: {} } })),
+      fakeExec(
+        JSON.stringify({
+          dependencies: { typescript: { version: "5.9.3" }, pnpm: { version: "10.0.0" } },
+        }),
+      ),
     );
-    expect(installed.sort()).toEqual(["pnpm", "typescript"]);
+    expect(installed.sort((a, b) => a.name.localeCompare(b.name))).toEqual([
+      { name: "pnpm", version: "10.0.0" },
+      { name: "typescript", version: "5.9.3" },
+    ]);
+  }),
+);
+
+it.effect("npm backend install pins an exact version with `pkg@version`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeNpmBackend();
+    yield* backend.install(
+      "cowsay",
+      { _tag: "Exact", version: "1.5.0" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["npm install -g cowsay@1.5.0"]);
   }),
 );
 
@@ -271,7 +382,7 @@ it.effect(
       });
       const backend = makeNpmBackend();
       const installed = yield* backend.list(fakeExec(realElsproblemsOutput));
-      expect(installed.sort()).toEqual(["has-peer-dep", "real-pkg"]);
+      expect(installed.map((e) => e.name).sort()).toEqual(["has-peer-dep", "real-pkg"]);
     }),
 );
 
@@ -279,7 +390,7 @@ it.effect("npm backend install shells out to `npm install -g <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeNpmBackend();
-    yield* backend.install("typescript", capturingExec("", calls));
+    yield* backend.install("typescript", undefined, capturingExec("", calls));
     expect(calls).toEqual(["npm install -g typescript"]);
   }),
 );
@@ -323,8 +434,9 @@ it.effect("dnf backend parses `dnf repoquery --userinstalled` output into names"
         ].join("\n"),
       ),
     );
-    expect(installed).toContain("tree");
-    expect(installed).toContain("dnf5");
+    const names = installed.map((e) => e.name);
+    expect(names).toContain("tree");
+    expect(names).toContain("dnf5");
     expect(installed.length).toBe(22);
   }),
 );
@@ -333,8 +445,21 @@ it.effect("dnf backend install shells out to `sudo dnf install -y <name>`", () =
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeDnfBackend();
-    yield* backend.install("tree", capturingExec("", calls));
+    yield* backend.install("tree", undefined, capturingExec("", calls));
     expect(calls).toEqual(["sudo dnf install -y tree"]);
+  }),
+);
+
+it.effect("dnf backend install pins an exact NEVRA with `name-evr`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeDnfBackend();
+    yield* backend.install(
+      "tree",
+      { _tag: "Exact", version: "2.2.1-4.fc44" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["sudo dnf install -y tree-2.2.1-4.fc44"]);
   }),
 );
 
@@ -405,9 +530,21 @@ it.effect("pacman backend parses `pacman -Qq` output into names", () =>
         ].join("\n"),
       ),
     );
-    expect(installed).toContain("base");
-    expect(installed).toContain("bash");
+    const names = installed.map((e) => e.name);
+    expect(names).toContain("base");
+    expect(names).toContain("bash");
     expect(installed.length).toBe(28);
+  }),
+);
+
+it.effect("pacman backend list parses `pacman -Q` name+version pairs", () =>
+  Effect.gen(function* () {
+    const backend = makePacmanBackend();
+    const installed = yield* backend.list(fakeExec("tree 2.3.2-1\nbash 5.2.32-1\n"));
+    expect(installed).toEqual([
+      { name: "tree", version: "2.3.2-1" },
+      { name: "bash", version: "5.2.32-1" },
+    ]);
   }),
 );
 
@@ -415,8 +552,38 @@ it.effect("pacman backend install shells out to `sudo pacman -S --noconfirm <nam
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makePacmanBackend();
-    yield* backend.install("tree", capturingExec("", calls));
+    yield* backend.install("tree", undefined, capturingExec("", calls));
     expect(calls).toEqual(["sudo pacman -S --noconfirm tree"]);
+  }),
+);
+
+it.effect(
+  "pacman backend refuses to attempt a version pin its own reconciler already knows it cannot honour on downgrade — Package.ts's CannotDowngrade, not this backend",
+  () =>
+    Effect.gen(function* () {
+      // pacman's own backend still ACCEPTS an `Exact` spec at the install
+      // seam (its official repo genuinely can hold the current version) —
+      // it is `Package.ts`'s `apply` that must refuse to even try moving
+      // backward, using `pacmanVersionSupport.canDowngrade === false`. See
+      // the `Package reconciler apply: fails with CannotDowngrade` test
+      // below for that guard exercised directly.
+      const calls: string[] = [];
+      const backend = makePacmanBackend();
+      yield* backend.install(
+        "tree",
+        { _tag: "Exact", version: "2.3.2-1" },
+        capturingExec("", calls),
+      );
+      expect(calls).toEqual(["sudo pacman -S --noconfirm tree=2.3.2-1"]);
+    }),
+);
+
+it.effect("pacman backend refreshIndex shells out to `pacman -Sy`, deliberately not `-Syu`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePacmanBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    expect(calls).toEqual(["sudo pacman -Sy --noconfirm"]);
   }),
 );
 
@@ -436,22 +603,28 @@ it.effect(
       const paruCalls: string[] = [];
       // Real captured `pacman -Qmq` output after building yay-bin from the AUR.
       const installedYay = yield* makeYayBackend().list(
-        capturingExec("yay-bin\nyay-bin-debug\n", yayCalls),
+        capturingExec("yay-bin 1.4.0-1\nyay-bin-debug 1.4.0-1\n", yayCalls),
       );
       const installedParu = yield* makeParuBackend().list(
-        capturingExec("yay-bin\nyay-bin-debug\n", paruCalls),
+        capturingExec("yay-bin 1.4.0-1\nyay-bin-debug 1.4.0-1\n", paruCalls),
       );
-      expect(installedYay).toEqual(["yay-bin", "yay-bin-debug"]);
-      expect(installedParu).toEqual(["yay-bin", "yay-bin-debug"]);
-      expect(yayCalls).toEqual(["pacman -Qmq"]);
-      expect(paruCalls).toEqual(["pacman -Qmq"]);
+      expect(installedYay).toEqual([
+        { name: "yay-bin", version: "1.4.0-1" },
+        { name: "yay-bin-debug", version: "1.4.0-1" },
+      ]);
+      expect(installedParu).toEqual([
+        { name: "yay-bin", version: "1.4.0-1" },
+        { name: "yay-bin-debug", version: "1.4.0-1" },
+      ]);
+      expect(yayCalls).toEqual(["pacman -Qm"]);
+      expect(paruCalls).toEqual(["pacman -Qm"]);
     }),
 );
 
 it.effect("yay backend install shells out to `yay -S --noconfirm <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeYayBackend().install("downgrade", capturingExec("", calls));
+    yield* makeYayBackend().install("downgrade", undefined, capturingExec("", calls));
     expect(calls).toEqual(["yay -S --noconfirm downgrade"]);
   }),
 );
@@ -459,8 +632,16 @@ it.effect("yay backend install shells out to `yay -S --noconfirm <name>`", () =>
 it.effect("paru backend install shells out to `paru -S --noconfirm <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeParuBackend().install("downgrade", capturingExec("", calls));
+    yield* makeParuBackend().install("downgrade", undefined, capturingExec("", calls));
     expect(calls).toEqual(["paru -S --noconfirm downgrade"]);
+  }),
+);
+
+it.effect("yay backend refreshIndex shells out to `yay -Sy --noconfirm`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* makeYayBackend().refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    expect(calls).toEqual(["yay -Sy --noconfirm"]);
   }),
 );
 
@@ -469,36 +650,62 @@ it.effect("paru backend install shells out to `paru -S --noconfirm <name>`", () 
 // go install, mas.
 // ---------------------------------------------------------------------------
 
-it("parsePipxList extracts the name from real `pipx list --short` output, ignoring the empty-state banner", () => {
+it("parsePipxList extracts the name and version from real `pipx list --short` output, ignoring the empty-state banner", () => {
   // Real captured output (pipx 1.16.6, installed via `brew install pipx`):
   // populated after `pipx install cowsay`, and the friendly banner pipx
   // prints instead of empty output on a fresh install.
-  expect(parsePipxList("cowsay 6.1\n")).toEqual(["cowsay"]);
+  expect(parsePipxList("cowsay 6.1\n")).toEqual([{ name: "cowsay", version: "6.1" }]);
   expect(parsePipxList("nothing has been installed with pipx 😴\n")).toEqual([]);
 });
 
 it.effect("pipx backend install shells out to `pipx install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makePipxBackend().install("cowsay", capturingExec("", calls));
+    yield* makePipxBackend().install("cowsay", undefined, capturingExec("", calls));
     expect(calls).toEqual(["pipx install cowsay"]);
   }),
 );
 
-it("parseUvToolList extracts the name from real `uv tool list` output, ignoring the empty-state message", () => {
+it.effect(
+  "pipx backend install pins an exact version with `pkg==version --force`, verified against a real refusal without it",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      yield* makePipxBackend().install(
+        "cowsay",
+        { _tag: "Exact", version: "5.0" },
+        capturingExec("", calls),
+      );
+      expect(calls).toEqual(["pipx install --force cowsay==5.0"]);
+    }),
+);
+
+it("parseUvToolList extracts the name and version from real `uv tool list` output, ignoring the empty-state message", () => {
   // Real captured output (uv 0.12.2, already installed on this machine):
   // populated after `uv tool install cowsay`, byte-verified with `sed -n
   // 'l'` to confirm the executable sub-line has no leading indentation
   // (unlike Cargo's), and the empty-state message.
-  expect(parseUvToolList("cowsay v6.1\n- cowsay\n")).toEqual(["cowsay"]);
+  expect(parseUvToolList("cowsay v6.1\n- cowsay\n")).toEqual([{ name: "cowsay", version: "6.1" }]);
   expect(parseUvToolList("No tools installed\n")).toEqual([]);
 });
 
 it.effect("uv-tool backend install shells out to `uv tool install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeUvToolBackend().install("cowsay", capturingExec("", calls));
+    yield* makeUvToolBackend().install("cowsay", undefined, capturingExec("", calls));
     expect(calls).toEqual(["uv tool install cowsay"]);
+  }),
+);
+
+it.effect("uv-tool backend install pins an exact version with `pkg==version --force`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* makeUvToolBackend().install(
+      "cowsay",
+      { _tag: "Exact", version: "5.0" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["uv tool install --force cowsay==5.0"]);
   }),
 );
 
@@ -513,7 +720,10 @@ it.effect(
       const installed = yield* backend.list(
         fakeExec("bigdecimal (default: 1.4.1)\nrake (13.4.2, 13.0.6, 12.3.3)\n"),
       );
-      expect(installed).toEqual(["bigdecimal", "rake"]);
+      expect(installed).toEqual([
+        { name: "bigdecimal", version: "1.4.1" },
+        { name: "rake", version: "13.4.2" },
+      ]);
     }),
 );
 
@@ -521,26 +731,43 @@ it.effect("gem backend install shells out to `gem install --user-install <name>`
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeGemBackend();
-    yield* backend.install("rake", capturingExec("", calls));
+    yield* backend.install("rake", undefined, capturingExec("", calls));
     expect(calls).toEqual(["gem install --user-install rake"]);
   }),
 );
 
-it("parseGoVersionM extracts import paths from real `go version -m <bin>/*` output", () => {
+it.effect("gem backend install pins an exact version with `-v`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeGemBackend();
+    yield* backend.install(
+      "rake",
+      { _tag: "Exact", version: "13.0.6" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["gem install --user-install rake -v 13.0.6"]);
+  }),
+);
+
+it("parseGoVersionM extracts import paths and versions from real `go version -m <bin>/*` output", () => {
   // Real captured output (macOS, go 1.26.5) after
   // `go install golang.org/x/tools/cmd/goimports@latest` and
-  // `...cmd/stringer@latest` — one header + build-info block per binary,
-  // only the `path` line is read.
+  // `...cmd/stringer@latest` — one header + build-info block per binary; the
+  // `path` line names the binary's own import path, and the `mod` line right
+  // beneath it (module path + version) is what `PackageEntry.version` now
+  // reports.
   const realOutput = [
     "/Users/a/go/bin/goimports: go1.26.5",
     "\tpath\tgolang.org/x/tools/cmd/goimports",
+    "\tmod\tgolang.org/x/tools\tv0.48.0\th1:abc=",
     "/Users/a/go/bin/stringer: go1.26.5",
     "\tpath\tgolang.org/x/tools/cmd/stringer",
+    "\tmod\tgolang.org/x/tools\tv0.48.0\th1:abc=",
     "",
   ].join("\n");
   expect(parseGoVersionM(realOutput)).toEqual([
-    "golang.org/x/tools/cmd/goimports",
-    "golang.org/x/tools/cmd/stringer",
+    { name: "golang.org/x/tools/cmd/goimports", version: "v0.48.0" },
+    { name: "golang.org/x/tools/cmd/stringer", version: "v0.48.0" },
   ]);
   // An empty/nonexistent bin directory: the unquoted glob doesn't expand and
   // `go version -m` fails on the literal `*`, all on stderr — this backend's
@@ -553,28 +780,47 @@ it.effect("go-install backend install shells out to `go install <name>@latest`",
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeGoBackend();
-    yield* backend.install("golang.org/x/tools/cmd/goimports", capturingExec("", calls));
+    yield* backend.install(
+      "golang.org/x/tools/cmd/goimports",
+      undefined,
+      capturingExec("", calls),
+    );
     expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@latest"]);
   }),
 );
 
-it.effect("mas backend parses real `mas list` output, taking the numeric App Store id", () =>
+it.effect("go-install backend install pins an exact version with `path@version`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeGoBackend();
+    yield* backend.install(
+      "golang.org/x/tools/cmd/goimports",
+      { _tag: "Exact", version: "v0.20.0" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@v0.20.0"]);
+  }),
+);
+
+it.effect("mas backend parses real `mas list` output, taking the numeric App Store id and version", () =>
   Effect.gen(function* () {
     // Real captured output from this machine's own (signed-in) `mas list`,
     // re-captured this session as `test/fixtures/mas-list.txt` (now seven
     // apps, up from three) — the id column's width varies
     // (leading-space-padded), so this is also a real exercise of
-    // `firstTokens` after `lines()`'s trim, not a fixed-width parse.
+    // `firstTokens` after `lines()`'s trim, not a fixed-width parse. The
+    // trailing `(<version>)` is reported for observability only — `mas` has
+    // no version-pinning mechanism at all (see `Mas.ts`'s `versions`).
     const backend = makeMasBackend();
     const installed = yield* backend.list(fakeExec(fixture("mas-list.txt")));
     expect(installed).toEqual([
-      "937984704",
-      "640199958",
-      "361304891",
-      "490179405",
-      "361309726",
-      "899247664",
-      "6757482822",
+      { name: "937984704", version: "5.3.2" },
+      { name: "640199958", version: "11.0.2" },
+      { name: "361304891", version: "15.1" },
+      { name: "490179405", version: "9.67.1" },
+      { name: "361309726", version: "15.1.1" },
+      { name: "899247664", version: "4.3.0" },
+      { name: "6757482822", version: "2.14" },
     ]);
   }),
 );
@@ -583,8 +829,18 @@ it.effect("mas backend install shells out to `sudo mas install <id>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeMasBackend();
-    yield* backend.install("937984704", capturingExec("", calls));
+    yield* backend.install("937984704", undefined, capturingExec("", calls));
     expect(calls).toEqual(["sudo mas install 937984704"]);
+  }),
+);
+
+it.effect("mas backend refuses a version pin — mas has no version concept at all", () =>
+  Effect.gen(function* () {
+    const backend = makeMasBackend();
+    const result = yield* backend
+      .install("937984704", { _tag: "Exact", version: "5.3.2" }, fakeExec(""))
+      .pipe(Effect.flip);
+    expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
 );
 
@@ -603,9 +859,36 @@ it.effect("flatpak backend install shells out to `flatpak install -y --nonintera
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeFlatpakBackend();
-    yield* backend.install("org.gnome.Calculator", capturingExec("", calls));
+    yield* backend.install("org.gnome.Calculator", undefined, capturingExec("", calls));
     expect(calls).toEqual(["flatpak install -y --noninteractive org.gnome.Calculator"]);
   }),
+);
+
+it.effect(
+  "flatpak backend install pins a branch with `id//branch`, flatpak's own double-slash syntax",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const backend = makeFlatpakBackend();
+      yield* backend.install(
+        "org.gnome.Platform",
+        { _tag: "Channel", name: "45" },
+        capturingExec("", calls),
+      );
+      expect(calls).toEqual(["flatpak install -y --noninteractive org.gnome.Platform//45"]);
+    }),
+);
+
+it.effect(
+  "flatpak backend refuses an Exact pin — a flatpak app has no version history to request by string",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeFlatpakBackend();
+      const result = yield* backend
+        .install("org.gnome.Calculator", { _tag: "Exact", version: "45.0" }, fakeExec(""))
+        .pipe(Effect.flip);
+      expect(result._tag).toBe("UnsupportedVersionSpec");
+    }),
 );
 
 it.effect(
@@ -702,7 +985,15 @@ it.effect("snap backend list parses real `snap list` output (systemd-booted cont
     // installed snap actually ran (`snap run hello-world` → "Hello World!").
     const backend = makeSnapBackend();
     const installed = yield* backend.list(fakeExec(fixture("snap-list.txt")));
-    expect(installed).toEqual(["core", "hello-world", "snapd"]);
+    // `version` reports the `Tracking` column (the channel a snap actually
+    // follows), never the `Version` column — see `Snap.ts`'s `list` doc
+    // comment for why: a channel pin compares against which channel a snap
+    // follows, not the publisher's own release string for that revision.
+    expect(installed).toEqual([
+      { name: "core", version: "latest/stable" },
+      { name: "hello-world", version: "latest/stable" },
+      { name: "snapd", version: "latest/stable" },
+    ]);
   }),
 );
 
@@ -710,8 +1001,31 @@ it.effect("snap backend install shells out to `sudo snap install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeSnapBackend();
-    yield* backend.install("hello-world", capturingExec("", calls));
+    yield* backend.install("hello-world", undefined, capturingExec("", calls));
     expect(calls).toEqual(["sudo snap install hello-world"]);
+  }),
+);
+
+it.effect("snap backend install pins a channel with `--channel=`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeSnapBackend();
+    yield* backend.install(
+      "hello-world",
+      { _tag: "Channel", name: "latest/edge" },
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["sudo snap install hello-world --channel=latest/edge"]);
+  }),
+);
+
+it.effect("snap backend refuses an Exact pin — a snap has no version history to request by string", () =>
+  Effect.gen(function* () {
+    const backend = makeSnapBackend();
+    const result = yield* backend
+      .install("hello-world", { _tag: "Exact", version: "6.4" }, fakeExec(""))
+      .pipe(Effect.flip);
+    expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
 );
 
@@ -776,19 +1090,42 @@ it("parseWingetList extracts the Id column, not the Name column", () => {
     "Git                 Git.Git           2.43.0",
     "Visual Studio Code  Microsoft.VSCode  1.85.0",
   ].join("\n");
-  expect(parseWingetList(table)).toEqual(["Git.Git", "Microsoft.VSCode"]);
+  expect(parseWingetList(table)).toEqual([
+    { name: "Git.Git", version: "2.43.0" },
+    { name: "Microsoft.VSCode", version: "1.85.0" },
+  ]);
 });
 
 it("parseWingetList returns [] when no separator row is found", () => {
   expect(parseWingetList("No installed package found matching input criteria.")).toEqual([]);
 });
 
-it.effect("choco backend parses `name|version` limit-output lines into names", () =>
+it.effect("choco backend parses `name|version` limit-output lines into names and versions", () =>
   Effect.gen(function* () {
     const backend = makeChocoBackend();
     const installed = yield* backend.list(fakeExec("git|2.43.0\nnodejs-lts|20.11.0\n"));
-    expect(installed).toEqual(["git", "nodejs-lts"]);
+    expect(installed).toEqual([
+      { name: "git", version: "2.43.0" },
+      { name: "nodejs-lts", version: "20.11.0" },
+    ]);
   }),
+);
+
+it.effect(
+  "choco backend install pins an exact version with `--version --allow-downgrade` (UNVERIFIED, no Windows target)",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const backend = makeChocoBackend();
+      yield* backend.install(
+        "git",
+        { _tag: "Exact", version: "2.40.0" },
+        capturingExec("", calls),
+      );
+      expect(calls).toEqual([
+        "'choco' 'install' 'git' '--version' '2.40.0' '--allow-downgrade' '-y'",
+      ]);
+    }),
 );
 
 // ---------------------------------------------------------------------------
@@ -857,6 +1194,145 @@ it.effect("Package reconciler apply: installs the package and returns its state"
     expect(result).toEqual({ manager: "brew", name: "fd" });
     expect(calls).toEqual(["brew install fd"]);
   }),
+);
+
+it.effect(
+  "Package reconciler desired: fails with UnsupportedVersionSpec for a manager that can't honour the pin",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const props = {
+        manager: "brew" as const,
+        name: "ripgrep",
+        version: { _tag: "Exact" as const, version: "14.0.0" },
+      };
+      const error = yield* reconciler.desired(props).pipe(Effect.flip);
+      expect(error._tag).toBe("UnsupportedVersionSpec");
+    }),
+);
+
+it.effect(
+  "Package reconciler matches: ToSpec compares the pinned version, Never/unset ignores it once installed",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      // pacman genuinely accepts `Exact` (Pacman.ts's own versions.accepts),
+      // so this exercises the real capability check, not a manager that
+      // would reject the spec before `matches` is ever reached.
+      const toSpecProps = {
+        manager: "pacman" as const,
+        name: "tree",
+        version: { _tag: "Exact" as const, version: "2.3.2-1" },
+        updatePolicy: { _tag: "ToSpec" as const },
+      };
+      const toSpecDesired = yield* reconciler.desired(toSpecProps);
+      expect(
+        reconciler.matches({ manager: "pacman", name: "tree", version: "2.3.2-1" }, toSpecDesired),
+      ).toBe(true);
+      expect(
+        reconciler.matches({ manager: "pacman", name: "tree", version: "2.0.0-1" }, toSpecDesired),
+      ).toBe(false);
+
+      // Same pin, no `updatePolicy` (defaults to `Never`): once installed at
+      // all, a different observed version is not drift — this is the stated
+      // "install once, then leave version alone" default, not an accident.
+      const neverProps = {
+        manager: "pacman" as const,
+        name: "tree",
+        version: { _tag: "Exact" as const, version: "2.3.2-1" },
+      };
+      const neverDesired = yield* reconciler.desired(neverProps);
+      expect(
+        reconciler.matches({ manager: "pacman", name: "tree", version: "2.0.0-1" }, neverDesired),
+      ).toBe(true);
+    }),
+);
+
+it.effect(
+  "Package reconciler apply: fails with CannotDowngrade rather than attempting a pin pacman cannot honour backward",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const calls: string[] = [];
+      const props = {
+        manager: "pacman" as const,
+        name: "tree",
+        version: { _tag: "Exact" as const, version: "2.0.0-1" },
+        updatePolicy: { _tag: "ToSpec" as const },
+      };
+      const desired = yield* reconciler.desired(props);
+      const observed = { manager: "pacman" as const, name: "tree", version: "2.3.2-1" };
+
+      const error = yield* reconciler
+        .apply({ props, observed, desired }, applyCtx(capturingExec("", calls)))
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("CannotDowngrade");
+      expect(error).toMatchObject({ direction: "Ahead" });
+      // Nothing was run — the guard fires before ever shelling out.
+      expect(calls).toEqual([]);
+    }),
+);
+
+it.effect(
+  "Package reconciler apply: fails with CannotDowngrade on an Unknown-direction Exact pin a manager can't downgrade — an AUR VCS version compareVersions cannot order",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const calls: string[] = [];
+      const props = {
+        manager: "yay" as const,
+        name: "some-vcs-pkg",
+        version: { _tag: "Exact" as const, version: "r1234.deadbeef" },
+        updatePolicy: { _tag: "ToSpec" as const },
+      };
+      const desired = yield* reconciler.desired(props);
+      const observed = { manager: "yay" as const, name: "some-vcs-pkg", version: "r1235.cafebabe" };
+
+      const error = yield* reconciler
+        .apply({ props, observed, desired }, applyCtx(capturingExec("", calls)))
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("CannotDowngrade");
+      expect(error).toMatchObject({ direction: "Unknown" });
+      expect(calls).toEqual([]);
+    }),
+);
+
+it.effect(
+  "Package reconciler apply: an Unknown-direction Channel switch proceeds rather than being refused — a channel change is not a downgrade question",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const calls: string[] = [];
+      const props = {
+        manager: "flatpak" as const,
+        name: "org.gnome.Platform",
+        version: { _tag: "Channel" as const, name: "45" },
+        updatePolicy: { _tag: "ToSpec" as const },
+      };
+      const desired = yield* reconciler.desired(props);
+      const observed = {
+        manager: "flatpak" as const,
+        name: "org.gnome.Platform",
+        version: "stable",
+      };
+
+      // flatpak's own `canDowngrade` is `false`, and "stable" vs. "45" is
+      // exactly the kind of pair `compareVersions` calls `"Unknown"` (neither
+      // is dotted-numeric) — if the guard fired on every `"Unknown"`
+      // regardless of spec tag, this legitimate channel switch would be
+      // refused. It must not be: `apply` should reach `install`.
+      const result = yield* reconciler.apply(
+        { props, observed, desired },
+        applyCtx(capturingExec("", calls)),
+      );
+
+      expect(result).toEqual(desired);
+      expect(calls).toEqual([
+        "flatpak install -y --noninteractive org.gnome.Platform//45",
+      ]);
+    }),
 );
 
 it.effect(

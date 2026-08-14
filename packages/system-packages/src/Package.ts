@@ -1,3 +1,4 @@
+import { compareVersions, UpdatePolicy, VersionSpec } from "@machine-run/core";
 import {
   type ApplyContext,
   type ObserveContext,
@@ -6,7 +7,9 @@ import {
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 import { makeYayBackend, makeParuBackend } from "./backends/linux/Aur.ts";
 import { makeAptBackend } from "./backends/linux/Apt.ts";
 import { makeFlatpakBackend } from "./backends/linux/Flatpak.ts";
@@ -24,7 +27,12 @@ import { makePacmanBackend } from "./backends/linux/Pacman.ts";
 import { makePipxBackend } from "./backends/language/Pipx.ts";
 import { makeUvToolBackend } from "./backends/language/UvTool.ts";
 import { makeWingetBackend } from "./backends/windows/Winget.ts";
-import type { BackendError, PackageManagerBackend } from "./Backend.ts";
+import {
+  CannotDowngrade,
+  type BackendError,
+  type PackageManagerBackend,
+  UnsupportedVersionSpec,
+} from "./Backend.ts";
 import { makePackageIndex } from "./PackageIndex.ts";
 
 export const PackageManagerId = Schema.Literals([
@@ -55,6 +63,38 @@ export const PackageProps = Schema.Struct({
   manager: PackageManagerId,
   /** The package's name in that manager's own namespace, e.g. "mise", "cargo-bloat", "@opencode-ai/cli". */
   name: Schema.String,
+  /**
+   * What version to install, in `@machine-run/core`'s shared `VersionSpec`
+   * vocabulary — absent means "whatever the manager resolves as current",
+   * the only behaviour this resource had before this field existed.
+   *
+   * Not every manager accepts every `VersionSpec` tag, and that acceptance
+   * is declared **in each backend's own type**
+   * (`Backend.ts`'s `PackageVersionSupport`), not assumed here: naming a
+   * `version` this manager cannot honour fails loudly with
+   * `UnsupportedVersionSpec` rather than being silently installed unpinned.
+   * `snap` accepts only `Channel` (a track, never a semver); `mas` accepts
+   * nothing at all (`mas install` takes only an App Store id); pacman's
+   * official repos hold exactly one build per package, so `Exact` only ever
+   * succeeds when it names the version already current — see each backend's
+   * own doc comment for what was actually run to confirm this, not assumed
+   * from documentation.
+   *
+   * This resource does not use `VersionSpec.AtLeast`'s dotted-prefix
+   * semantics for comparison — see `matches`'s own doc comment below for
+   * why plain equality is what's actually implemented, and where that stops
+   * being an academic distinction.
+   */
+  version: Schema.optionalKey(VersionSpec),
+  /**
+   * What to do when `version` and the live version disagree, from
+   * `@machine-run/core`'s `UpdatePolicy` — defaults to `Never` (install once
+   * if absent, then leave version drift alone forever) when unset, which is
+   * `System.Package`'s original, undocumented, only behaviour, restated
+   * here as an explicit, statable choice rather than an accident. See this
+   * module's `resolvePolicy` and `matches` for exactly what each case does.
+   */
+  updatePolicy: Schema.optionalKey(UpdatePolicy),
 });
 
 export type PackageProps = typeof PackageProps.Type;
@@ -62,6 +102,15 @@ export type PackageProps = typeof PackageProps.Type;
 export const PackageState = Schema.Struct({
   manager: PackageManagerId,
   name: Schema.String,
+  /**
+   * The concrete version/channel string a backend's own listing reported,
+   * when it can report one at all (see `Backend.ts`'s `PackageEntry`) — on
+   * `desired`, the string `props.version`/`props.updatePolicy` actually
+   * constrain observed state to, or absent when nothing does (see
+   * `resolvedTarget`). Absence on either side is the "unconstrained field"
+   * idiom `Machine.File.mode` already uses, not a placeholder.
+   */
+  version: Schema.optionalKey(Schema.String),
 });
 
 export type PackageState = typeof PackageState.Type;
@@ -87,6 +136,42 @@ export const Package = Resource<Package>("System.Package");
  */
 const isApplyPhase = (ctx: ObserveContext): ctx is ApplyContext => "snapshot" in ctx;
 
+/** The comparable string one `VersionSpec` tag names — see `PackageState.version`'s doc comment. */
+const versionSpecTarget = (spec: VersionSpec): string =>
+  Match.value(spec).pipe(
+    Match.tagsExhaustive({
+      Exact: (s) => s.version,
+      AtLeast: (s) => s.version,
+      Channel: (s) => s.name,
+      Digest: (s) => s.hash,
+    }),
+  );
+
+/**
+ * `props.updatePolicy`'s default — see `PackageProps.updatePolicy`'s doc
+ * comment for why `Never` is the one that applies when a recipe says
+ * nothing at all.
+ */
+const resolvePolicy = (props: PackageProps): UpdatePolicy => props.updatePolicy ?? { _tag: "Never" };
+
+/**
+ * What `observed.version` must equal for a package to count as converged,
+ * given `props`'s policy — `undefined` (the "unconstrained" case `matches`
+ * already treats every other absent field as) under `Never` and `Latest`,
+ * since neither policy makes version drift this resource's concern once the
+ * package is present at all (see `PackageProps.updatePolicy`'s doc comment
+ * for why both stop there rather than actively reconciling toward
+ * anything), and the pinned target string under `ToSpec`.
+ */
+const resolvedTarget = (props: PackageProps): string | undefined =>
+  Match.value(resolvePolicy(props)).pipe(
+    Match.tagsExhaustive({
+      Never: () => undefined,
+      Latest: () => undefined,
+      ToSpec: () => UndefinedOr.map(props.version, versionSpecTarget),
+    }),
+  );
+
 /**
  * The provider body, exported separately from `PackageProvider` so a test
  * can build it directly and drive `observe`/`matches`/`apply` without the
@@ -94,7 +179,7 @@ const isApplyPhase = (ctx: ObserveContext): ctx is ApplyContext => "snapshot" in
  * for the same pattern).
  */
 export const makePackageReconciler: Effect.Effect<
-  Reconciler<PackageProps, PackageState, BackendError>
+  Reconciler<PackageProps, PackageState, BackendError | UnsupportedVersionSpec | CannotDowngrade>
 > = Effect.gen(function* () {
   const backends = {
     brew: makeBrewBackend(),
@@ -138,13 +223,36 @@ export const makePackageReconciler: Effect.Effect<
   const planIndex = yield* makePackageIndex;
   const applyIndex = yield* makePackageIndex;
 
+  /**
+   * Fails with {@link UnsupportedVersionSpec} when `props.version` is set to
+   * a tag this manager's backend doesn't accept — checked once, here, so
+   * both `desired` (surfacing the failure during planning, not only at
+   * apply) and `apply` share the identical decision rather than each
+   * re-deriving it.
+   */
+  const checkVersionSupported = (
+    props: PackageProps,
+  ): Effect.Effect<void, UnsupportedVersionSpec> => {
+    const backend = backends[props.manager];
+    if (props.version === undefined) return Effect.void;
+    if (backend.versions.accepts.has(props.version._tag)) return Effect.void;
+    return Effect.fail(
+      new UnsupportedVersionSpec({
+        manager: props.manager,
+        spec: props.version,
+        accepts: backend.versions.accepts,
+      }),
+    );
+  };
+
   const observe = (props: PackageProps, ctx: ObserveContext) =>
     Effect.gen(function* () {
       const backend = backends[props.manager];
       const index = isApplyPhase(ctx) ? applyIndex : planIndex;
       const installed = yield* index.packages.get(props.manager, () => backend.list(ctx.exec));
-      if (!installed.includes(props.name)) return undefined;
-      return { manager: props.manager, name: props.name };
+      const entry = installed.find((candidate) => candidate.name === props.name);
+      if (entry === undefined) return undefined;
+      return { manager: props.manager, name: props.name, version: entry.version };
     });
 
   return {
@@ -167,19 +275,111 @@ export const makePackageReconciler: Effect.Effect<
 
     observe,
 
-    desired: (props) => Effect.succeed({ manager: props.manager, name: props.name }),
+    desired: (props) =>
+      Effect.gen(function* () {
+        yield* checkVersionSupported(props);
+        return { manager: props.manager, name: props.name, version: resolvedTarget(props) };
+      }),
 
-    // State fully captures what a package declares (no optional/partial
-    // fields the way a file's mode can be unset), so plain equality is
-    // sufficient — unlike `File`'s `matches`, there is nothing to treat as
-    // "unconstrained".
+    // State fully captures what a package declares, with one exception:
+    // `version` is deliberately *not* plain equality between `observed` and
+    // `desired` the way `manager`/`name` are. `desired.version` is already
+    // `undefined` unless `updatePolicy` is `ToSpec` (see `resolvedTarget`),
+    // so this is the same "unconstrained field" idiom `Machine.File.mode`
+    // uses for a prop that doesn't always constrain anything — not a weaker
+    // form of equality, a *narrower* one that only applies when the recipe
+    // actually asked for it.
+    //
+    // This does mean a `ToSpec`-pinned `AtLeast` request is compared by
+    // plain string equality here, not `core`'s `matchesVersionSpec` prefix
+    // rule — a stated simplification, not an oversight: no backend below
+    // declares `AtLeast` in its `PackageVersionSupport.accepts` (none of the
+    // 19 managers this package wraps resolve a version *range* the way
+    // `mise`/`asdf` do for `Runtime.Tool`), so `checkVersionSupported` above
+    // already rejects an `AtLeast` spec for every manager before `matches`
+    // would ever see one — this branch is unreachable today, not silently
+    // wrong.
     matches: (observed, desired) =>
-      observed.manager === desired.manager && observed.name === desired.name,
+      observed.manager === desired.manager &&
+      observed.name === desired.name &&
+      (desired.version === undefined || observed.version === desired.version),
 
-    apply: ({ props, desired }, ctx) =>
+    apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
         const backend = backends[props.manager];
-        yield* backend.install(props.name, ctx.exec);
+
+        // `apply` only ever runs when `matches` returned false, which for an
+        // *already-present* package only happens under `ToSpec` (see
+        // `matches`'s doc comment) — so `observed !== undefined` here means
+        // "converging an existing install to a new pin", not "installing
+        // fresh". `compareVersions` (from `core`) tells forward from
+        // backward: closing an `"Ahead"` gap needs a downgrade, which this
+        // manager may not support at all (`PackageVersionSupport.canDowngrade`).
+        // Failing here, before ever invoking the backend, is the difference
+        // between a clear, typed `CannotDowngrade` and whatever confusing
+        // text the underlying CLI happens to print for the same refusal.
+        //
+        // `"Unknown"` is refused too, but *only* for a fixed-target pin
+        // (`Exact`/`AtLeast`) — never for `Channel`/`Digest`. pacman's own
+        // version strings (`2.3.2-1`, a `pkgver-pkgrel` pair, now handled by
+        // `compareVersions`'s `.`/`-` split) and an AUR VCS package's
+        // (`r1234.deadbeef`, still `"Unknown"` — no numeric grammar covers a
+        // commit hash) are the real cases this guards: for a manager that
+        // cannot recover from a wrong guess (`canDowngrade: false`), refusing
+        // to move at all when direction genuinely can't be told is the rule
+        // 11 reading — we cannot prove it *isn't* backward. A `Channel` pin
+        // (flatpak's branch, snap's track) is a different question entirely:
+        // switching channels is never a downgrade question, `compareVersions`
+        // correctly calls a channel-name pair `"Unknown"` because channel
+        // names have no order, and refusing every channel switch on
+        // `canDowngrade: false` (flatpak's own value) would make every
+        // legitimate branch change fail — so this only ever applies to a
+        // spec that names an actual version.
+        // Exhaustive over `VersionSpec` rather than
+        // `_tag === "Exact" || _tag === "AtLeast"`: a fifth case added to the
+        // union later must be a compile error here, not silently classified
+        // as "not a version" and quietly excluded from the guard above.
+        const pinNamesAVersion = UndefinedOr.match(props.version, {
+          onUndefined: () => false,
+          onDefined: (spec) =>
+            Match.value(spec).pipe(
+              Match.tagsExhaustive({
+                Exact: () => true,
+                AtLeast: () => true,
+                Channel: () => false,
+                Digest: () => false,
+              }),
+            ),
+        });
+        if (
+          observed !== undefined &&
+          desired.version !== undefined &&
+          observed.version !== undefined &&
+          pinNamesAVersion
+        ) {
+          const drift = compareVersions(observed.version, desired.version);
+          if ((drift === "Ahead" || drift === "Unknown") && !backend.versions.canDowngrade) {
+            return yield* Effect.fail(
+              new CannotDowngrade({
+                manager: props.manager,
+                name: props.name,
+                installed: observed.version,
+                desired: desired.version,
+                direction: drift,
+              }),
+            );
+          }
+        }
+
+        // Real, not hypothetical (see `PackageManagerBackend.refreshIndex`'s
+        // doc comment): a stale local index makes the install below fail for
+        // any package whose requested version — or, for some managers, any
+        // package at all — isn't in the last-synced snapshot.
+        if (backend.refreshIndex !== undefined) {
+          yield* backend.refreshIndex(ctx.exec);
+        }
+
+        yield* backend.install(props.name, props.version, ctx.exec);
         // The cached listing for this manager no longer reflects reality —
         // it was taken (by this call's own re-observe, or an earlier apply
         // for a sibling `System.Package` on the same manager) *before* this

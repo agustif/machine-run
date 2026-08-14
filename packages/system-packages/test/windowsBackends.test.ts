@@ -18,7 +18,8 @@ const fixture = (name: string): string =>
   Fs.readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
 
 it("parses real `winget list` output, dropping ids winget did not print in full", () => {
-  const ids = parseWingetList(fixture("winget-list.txt"));
+  const entries = parseWingetList(fixture("winget-list.txt"));
+  const ids = entries.map((entry) => entry.name);
 
   expect(ids).toContain("7zip.7zip");
   expect(ids).toContain("Git.Git");
@@ -38,6 +39,13 @@ it("parses real `winget list` output, dropping ids winget did not print in full"
   // Splitting on 2+ spaces therefore returned the id and version glued
   // together. No surviving id may contain whitespace at all.
   expect(ids.every((id) => !/\s/.test(id))).toBe(true);
+
+  // Every surviving row's `Version` column was sliced the same way `Id` was —
+  // no entry should have an empty or ellipsis-truncated version.
+  expect(entries.every((entry) => entry.version === undefined || entry.version.length > 0)).toBe(
+    true,
+  );
+  expect(entries.every((entry) => !(entry.version ?? "").includes("…"))).toBe(true);
 });
 
 it("keeps an id containing a single space, which fixed-width columns preserve", () => {
@@ -49,7 +57,7 @@ it("keeps an id containing a single space, which fixed-width columns preserve", 
     "--------------------------------------------------",
     "Some Display Name    Vendor.Some Product  1.2.3",
   ].join("\n");
-  expect(parseWingetList(table)).toEqual(["Vendor.Some Product"]);
+  expect(parseWingetList(table)).toEqual([{ name: "Vendor.Some Product", version: "1.2.3" }]);
 });
 
 it("returns nothing rather than guessing when there is no table at all", () => {
