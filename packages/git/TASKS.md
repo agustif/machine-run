@@ -10,14 +10,14 @@ subsumes most of the surface, and the compositions are thin because of it.
 ## Verification
 
 - [x] **`Git.Signing` end to end.** Container-verified (`docker run --rm
-      debian:stable`, git 2.47.3, `docs/notes/git-notes.md`): a throwaway SSH
+    debian:stable`, git 2.47.3, `docs/notes/git-notes.md`): a throwaway SSH
       key, this composition's exact config keys, a real `allowed_signers`
       file, `git commit -S`, and `git verify-commit` returning a real `Good
-      "git" signature ...` at exit `0`. Three negative controls confirm what
+    "git" signature ...` at exit `0`. Three negative controls confirm what
       actually gets checked: swap in a different key under the right
       principal, or point `allowedSignersFile` at a missing path, and
       `verify-commit` correctly fails (`No principal matched.`, exit `1`).
-      But swap in the *right* key under the *wrong* principal and it still
+      But swap in the _right_ key under the _wrong_ principal and it still
       **passes** (exit `0`) — `git verify-commit`'s SSH check is a pure key
       lookup, never cross-checked against the commit's actual author/
       committer identity. `GitAllowedSigner.principals` is legible metadata,
@@ -26,7 +26,7 @@ subsumes most of the surface, and the compositions are thin because of it.
       produce commits that look signed and do not verify — it isn't wrong,
       but the principal-lookup behaviour above is a real, non-obvious fact
       about what `verify-commit` does and doesn't check, worth knowing before
-      trusting a passing `verify-commit` as proof of *who* signed.
+      trusting a passing `verify-commit` as proof of _who_ signed.
 - [x] **The three `CredentialHelperBackend` ids** (`osxkeychain`, `libsecret`,
       `gh`) are container/read-only verified — `docs/MAP.md` §4 has the
       per-id detail. All three: `git config` accepts the value and git
