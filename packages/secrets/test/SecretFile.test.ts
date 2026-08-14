@@ -240,3 +240,27 @@ it.effect("observe reports absent before the first write, then presence and mode
     expect(reconciler.matches(observed!, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect("trailingNewline 'strip' also removes a carriage return", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "token");
+
+    // A secret that reached the vault over a CRLF-normalising transport keeps a
+    // dangling carriage return if only `\n` is stripped — which defeats the
+    // reason `strip` exists, since the consumer comparing the token
+    // byte-for-byte still sees a trailing character it did not expect.
+    const props = propsFor(target, "API_TOKEN", { trailingNewline: "strip" });
+    const desired = yield* reconciler.desired(props);
+
+    yield* withEnv(
+      { API_TOKEN: "a-token\r\n" },
+      reconciler.apply({ props, observed: undefined, desired }, applyCtx),
+    );
+
+    expect(yield* fs.readFileString(target)).toBe("a-token");
+  }).pipe(Effect.provide(layer)),
+);

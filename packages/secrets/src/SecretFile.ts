@@ -94,9 +94,19 @@ export class SecretFilePathUnreadable extends Data.TaggedError("SecretFilePathUn
 const DEFAULT_MODE = 0o600;
 const DEFAULT_DIRECTORY_MODE = 0o700;
 
+/**
+ * `strip` removes `\r` as well as `\n`, because a secret that arrived from a
+ * vault over a CRLF-normalising transport would otherwise keep a dangling
+ * carriage return — which defeats the entire reason a caller asks for `strip`:
+ * a token compared byte-for-byte by its consumer.
+ *
+ * `ensure` deliberately appends only `\n`. The file it produces is read by
+ * OpenSSH and similar tools, which want exactly one LF; matching the host's
+ * convention would be actively wrong here.
+ */
 const applyNewline = (value: string, policy: TrailingNewline | undefined): string => {
   if (policy === "ensure") return value.endsWith("\n") ? value : `${value}\n`;
-  if (policy === "strip") return value.replace(/\n+$/, "");
+  if (policy === "strip") return value.replace(/[\r\n]+$/, "");
   return value;
 };
 
