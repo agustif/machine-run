@@ -265,24 +265,26 @@ it.effect(
     }),
 );
 
-it.effect("Setting reconciler unapply: dconf backend resets and confirms the key is now absent", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeSettingReconciler;
-    const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
-    const recorded = { backend: "dconf" as const, key: props.key, value: "['a', 'b']" };
+it.effect(
+  "Setting reconciler unapply: dconf backend resets and confirms the key is now absent",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
+      const recorded = { backend: "dconf" as const, key: props.key, value: "['a', 'b']" };
 
-    // A real `dconf reset` followed by `dconf read` on a path with no
-    // remaining override prints zero bytes — modelled here via
-    // `resettingExec("", ...)`, which `DconfBackend.read` collapses to
-    // `undefined` (its own "empty stdout means absent" rule).
-    const calls: string[] = [];
-    yield* reconciler.unapply!(
-      { props, observed: recorded, recorded },
-      applyCtx(resettingExec("", calls)),
-    );
+      // A real `dconf reset` followed by `dconf read` on a path with no
+      // remaining override prints zero bytes — modelled here via
+      // `resettingExec("", ...)`, which `DconfBackend.read` collapses to
+      // `undefined` (its own "empty stdout means absent" rule).
+      const calls: string[] = [];
+      yield* reconciler.unapply!(
+        { props, observed: recorded, recorded },
+        applyCtx(resettingExec("", calls)),
+      );
 
-    expect(calls).toEqual(["dconf reset /test/mypath", "dconf read /test/mypath"]);
-  }),
+      expect(calls).toEqual(["dconf reset /test/mypath", "dconf read /test/mypath"]);
+    }),
 );
 
 it.effect("Setting reconciler apply: dconf backend writes and confirms an array value", () =>

@@ -112,15 +112,17 @@ it.effect("gsettings backend reset shells out to `gsettings reset <schema> <key>
   }),
 );
 
-it.effect("gsettings backend reset rejects a key with no schema:key shape before running anything", () =>
-  Effect.gen(function* () {
-    const calls: string[] = [];
-    const result = yield* Effect.flip(
-      GsettingsBackend.reset("not-a-valid-key", capturingExec("", calls)),
-    );
-    expect(result._tag).toBe("SettingKeyInvalid");
-    expect(calls).toEqual([]);
-  }),
+it.effect(
+  "gsettings backend reset rejects a key with no schema:key shape before running anything",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const result = yield* Effect.flip(
+        GsettingsBackend.reset("not-a-valid-key", capturingExec("", calls)),
+      );
+      expect(result._tag).toBe("SettingKeyInvalid");
+      expect(calls).toEqual([]);
+    }),
 );
 
 // ---------------------------------------------------------------------------

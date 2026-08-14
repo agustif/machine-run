@@ -57,7 +57,7 @@ this package: the tool reports success for a write that did not happen.
       container verification (2026-08-14) found `gsettings reset` shares
       `set`'s exact silent no-op with no session bus. Unlike `Shell.Login`,
       no bespoke "previous value" bookkeeping was needed in `SettingState`:
-      a gsettings key always has *some* value (its schema default), and
+      a gsettings key always has _some_ value (its schema default), and
       `reset` is the tool's own way back to it, so there's nothing to
       capture at `apply` time.
 

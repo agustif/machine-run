@@ -88,4 +88,12 @@ export const git = Effect.gen(function* () {
       "pre-commit": "#!/bin/sh\nexec git diff --cached --check\n",
     },
   });
+
+  // Background maintenance for one repository. `unapply` deliberately runs
+  // `git maintenance unregister --force` rather than `git maintenance stop`:
+  // `stop` is machine-wide and tears down the shared schedule for *every*
+  // registered repository, so undoing this one resource would silence others.
+  yield* Git.Maintenance("dotfiles-maintenance", {
+    repo: "~/code/dotfiles",
+  });
 });

@@ -82,8 +82,11 @@ export const GitMaintenanceState = Schema.Struct({
 
 export type GitMaintenanceState = typeof GitMaintenanceState.Type;
 
-export interface Maintenance
-  extends Resource<"Git.Maintenance", GitMaintenanceProps, GitMaintenanceState> {}
+export interface Maintenance extends Resource<
+  "Git.Maintenance",
+  GitMaintenanceProps,
+  GitMaintenanceState
+> {}
 
 export const Maintenance = Resource<Maintenance>("Git.Maintenance");
 

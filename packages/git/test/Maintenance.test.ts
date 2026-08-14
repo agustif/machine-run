@@ -70,10 +70,12 @@ const notARepoExec: Exec = () =>
   );
 
 /** Records every command it's asked to run, always succeeding with empty output. */
-const capturingExec = (calls: string[]): Exec => (props) => {
-  calls.push(props.command);
-  return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
-};
+const capturingExec =
+  (calls: string[]): Exec =>
+  (props) => {
+    calls.push(props.command);
+    return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+  };
 
 /** Fails every command the real way `git maintenance start` does with no cron/systemd. */
 const noSchedulerExec: Exec = (props) =>
@@ -109,17 +111,15 @@ it.effect("observe reports absent when the repository is not registered at all",
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
-  "observe reports absent when other repositories are registered but this one is not",
-  () =>
-    Effect.gen(function* () {
-      const reconciler = yield* makeGitMaintenanceReconciler;
-      const observed = yield* reconciler.observe(
-        { repo: "/repo" },
-        observeCtx(maintenanceExec("/repo", ["/other-repo", "/yet-another"])),
-      );
-      expect(observed).toBeUndefined();
-    }).pipe(Effect.provide(layer)),
+it.effect("observe reports absent when other repositories are registered but this one is not", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitMaintenanceReconciler;
+    const observed = yield* reconciler.observe(
+      { repo: "/repo" },
+      observeCtx(maintenanceExec("/repo", ["/other-repo", "/yet-another"])),
+    );
+    expect(observed).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
 );
 
 it.effect("observe reports the repo when it's registered, among others", () =>
@@ -258,13 +258,14 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("unapply fails loudly (GitMaintenanceCommandFailed) rather than swallowing a real error", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeGitMaintenanceReconciler;
-    const recorded = { repo: "/repo" };
+it.effect(
+  "unapply fails loudly (GitMaintenanceCommandFailed) rather than swallowing a real error",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeGitMaintenanceReconciler;
+      const recorded = { repo: "/repo" };
 
-    const error = yield* reconciler
-      .unapply!(
+      const error = yield* reconciler.unapply!(
         { props: { repo: "/repo" }, observed: recorded, recorded },
         applyCtx(() =>
           Effect.fail(
@@ -274,11 +275,10 @@ it.effect("unapply fails loudly (GitMaintenanceCommandFailed) rather than swallo
             }),
           ),
         ),
-      )
-      .pipe(Effect.flip);
+      ).pipe(Effect.flip);
 
-    expect(error).toBeInstanceOf(GitMaintenanceCommandFailed);
-  }).pipe(Effect.provide(layer)),
+      expect(error).toBeInstanceOf(GitMaintenanceCommandFailed);
+    }).pipe(Effect.provide(layer)),
 );
 
 // --- address: shared with Git.Config's global config file, not the repo path. ---
@@ -300,8 +300,6 @@ it.effect(
       expect(reconciler.address({ repo: "/repo" })).toBe(path.join(home, ".gitconfig"));
       // Independent of which repo the props name — this is a machine-wide
       // shared file, not a per-repo address.
-      expect(reconciler.address({ repo: "/some/other/repo" })).toBe(
-        path.join(home, ".gitconfig"),
-      );
+      expect(reconciler.address({ repo: "/some/other/repo" })).toBe(path.join(home, ".gitconfig"));
     }).pipe(Effect.provide(layer)),
 );

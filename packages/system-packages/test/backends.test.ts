@@ -543,7 +543,7 @@ it.effect("flatpak backend listRepos returns [] on a real empty `flatpak remotes
 );
 
 it.effect(
-  "flatpak backend listRepos returns both bare names and reconstructed \"name url\" pairs " +
+  'flatpak backend listRepos returns both bare names and reconstructed "name url" pairs ' +
     "on a real populated `flatpak remotes` listing",
   () =>
     Effect.gen(function* () {
@@ -589,9 +589,7 @@ it.effect(
     Effect.gen(function* () {
       const backend = makeFlatpakBackend();
       const calls: string[] = [];
-      const error = yield* backend
-        .addRepo!("flathub", capturingExec("", calls))
-        .pipe(Effect.flip);
+      const error = yield* backend.addRepo!("flathub", capturingExec("", calls)).pipe(Effect.flip);
       expect(error._tag).toBe("BackendParseError");
       expect(calls).toEqual([]);
     }),
