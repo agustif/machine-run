@@ -292,8 +292,42 @@ None verified: each needs the tool installed and logged in.
 ### `CredentialHelperBackend` — 3 ids, `git`
 
 ```
-~ osxkeychain   ~ libsecret   ~ gh
+✓ osxkeychain   ✓ libsecret   ✓ gh
 ```
+
+Every id was checked two ways: does `git config` accept the exact string this
+backend contributes, and does git actually dispatch to the named command —
+never by authenticating anything, per `AGENTS.md` rule 8.
+
+**`gh`** — `docker run --rm ubuntu:24.04` with `gh` installed from its own apt
+repo (`cli.github.com/packages`, git 2.43.0, `gh version 2.97.0`). `git config
+--global credential.helper "!gh auth git-credential"` round-trips; `GIT_TRACE=1
+git credential fill` shows `run_command: 'gh auth git-credential get'`, which
+exits `0` with empty output (`gh auth status` on the same container confirms
+"not logged into any GitHub hosts") — git then tries its own interactive
+prompt and fails only on the container's missing tty.
+
+**`osxkeychain`** — the real binary is present on this machine (a real
+123280-byte `git-credential-osxkeychain` at `git --exec-path`). Since writing
+this Mac's real global config or reading its real keychain is off-limits, the
+round trip used `git -c credential.helper=osxkeychain` (a transient,
+in-process override, nothing touches `~/.gitconfig`) against a host guaranteed
+absent from the real keychain — `GIT_TRACE=1` shows git resolving and
+executing the real binary, which correctly finds nothing.
+
+**`libsecret`** — config round trip and dispatch verified on
+`fedora:latest` (git 2.55.0): `git config --global credential.helper
+libsecret` round-trips, and `GIT_TRACE=1 git credential fill` shows git
+executing the real `/usr/libexec/git-core/git-credential-libsecret`. The
+actual Secret-Service store/fetch round trip could not be completed in any
+container this session — three escalating, distinct blockers (no
+`/etc/machine-id`, then `gnome-keyring-daemon` failing to drop capabilities,
+then even `--privileged` leaving the default "login" collection
+unprovisioned) — see `backends/Libsecret.ts`'s doc comment for the exact
+error text at each step. Still distro-variant as before: Fedora ships a
+working binary via `dnf`, Debian/Ubuntu's `git` package ships only the
+`contrib/` *source*, so a recipe naming `libsecret` there sets the config
+correctly but fails at *use* time, not `apply` time, until a human builds it.
 
 ---
 
