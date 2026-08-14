@@ -1,8 +1,9 @@
-import { MachinePaths, makeSha256 } from "@machine-run/core";
+import { MachinePaths, makeSha256, readIfPresent } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
@@ -10,7 +11,6 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type { PlatformError } from "effect/PlatformError";
 import { Position } from "./ManagedBlock.ts";
-import { readIfPresent } from "./readIfPresent.ts";
 
 /**
  * A single line inside a file this tool does not own outright — `/etc/hosts`,
@@ -254,8 +254,13 @@ export const makeLineInFileReconciler: Effect.Effect<
   const paths = yield* MachinePaths;
   const sha256 = yield* makeSha256;
 
+  // Same reasoning as `ManagedBlock`: a missing file contains no matching
+  // line, which is indistinguishable here from an existing file that contains
+  // none.
   const readFileOrEmpty = (target: string) =>
-    readIfPresent(fs, target, (cause) => new LineInFileUnreadable({ path: target, cause }));
+    readIfPresent(fs, target, (cause) => new LineInFileUnreadable({ path: target, cause })).pipe(
+      Effect.map(Option.getOrElse(() => "")),
+    );
 
   return {
     address: (props) => paths.expand(props.path),

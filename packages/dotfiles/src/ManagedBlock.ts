@@ -1,15 +1,15 @@
-import { MachinePaths, makeSha256 } from "@machine-run/core";
+import { MachinePaths, makeSha256, readIfPresent } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { readIfPresent } from "./readIfPresent.ts";
 
 /** Where a new region is inserted relative to existing file content. */
 export const Position = Schema.Literals(["append", "prepend"]);
@@ -268,8 +268,16 @@ export const makeManagedBlockReconciler: Effect.Effect<
   const paths = yield* MachinePaths;
   const sha256 = yield* makeSha256;
 
+  // A file that does not exist yet holds no managed region, which is the same
+  // answer as a file that exists and holds none — so `none` collapses to `""`
+  // here deliberately. The distinction the helper preserves matters to callers
+  // that can act on "the file is missing"; this one cannot.
   const readFileOrEmpty = (target: string) =>
-    readIfPresent(fs, target, (cause) => new ManagedBlockFileUnreadable({ path: target, cause }));
+    readIfPresent(
+      fs,
+      target,
+      (cause) => new ManagedBlockFileUnreadable({ path: target, cause }),
+    ).pipe(Effect.map(Option.getOrElse(() => "")));
 
   return {
     address: (props) => paths.expand(props.path),

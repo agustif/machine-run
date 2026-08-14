@@ -196,28 +196,30 @@ it("still replaces a single well-formed region in place", () => {
  * permission drift can easily leave write access intact while removing read
  * access (a stricter ACL, a `chattr`-style flag, a mid-flight `chmod`).
  */
-it.effect("observe raises ManagedBlockFileUnreadable, not absence, when the file cannot be read", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeManagedBlockReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, ".zshrc");
+it.effect(
+  "observe raises ManagedBlockFileUnreadable, not absence, when the file cannot be read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeManagedBlockReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, ".zshrc");
 
-    yield* fs.writeFileString(target, "# hand-written setup\nexport FOO=bar\n");
-    yield* fs.chmod(target, 0o200);
+      yield* fs.writeFileString(target, "# hand-written setup\nexport FOO=bar\n");
+      yield* fs.chmod(target, 0o200);
 
-    // Restored with `Effect.ensuring` rather than `finally`, so it still runs
-    // if the assertion fails or the fiber is interrupted.
-    const failure = yield* reconciler
-      .observe({ path: target, marker: "example", content: "export A=1" }, observeCtx)
-      .pipe(
-        Effect.flip,
-        Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
-      );
+      // Restored with `Effect.ensuring` rather than `finally`, so it still runs
+      // if the assertion fails or the fiber is interrupted.
+      const failure = yield* reconciler
+        .observe({ path: target, marker: "example", content: "export A=1" }, observeCtx)
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+        );
 
-    expect(failure).toBeInstanceOf(ManagedBlockFileUnreadable);
-  }).pipe(Effect.provide(layer)),
+      expect(failure).toBeInstanceOf(ManagedBlockFileUnreadable);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect(

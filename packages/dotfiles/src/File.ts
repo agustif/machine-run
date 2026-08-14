@@ -1,15 +1,15 @@
-import { isNotFound, MachinePaths, makeSha256 } from "@machine-run/core";
+import { MachinePaths, isNotFound, makeSha256, readIfPresent } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as FileSystem from "effect/FileSystem";
 import * as Crypto from "effect/Crypto";
 import * as Path from "effect/Path";
 import * as UndefinedOr from "effect/UndefinedOr";
 import * as Schema from "effect/Schema";
 import { PlatformError } from "effect/PlatformError";
-import { readIfPresent } from "./readIfPresent.ts";
 
 /**
  * A file this tool fully owns: its entire content is generated, and anything
@@ -108,10 +108,17 @@ export const makeFileReconciler: Effect.Effect<
         // genuine not-found (the file vanishing in that same window) is
         // truly absent; anything else is the same "cannot inspect" failure
         // `stat` raises above, applied to the read.
-        const content = yield* readIfPresent(
-          fs,
-          target,
-          (cause) => new FilePathUnreadable({ path: target, cause }),
+        // `stat` above already established the file exists, so the read
+        // vanishing here means it was removed in the window between the two.
+        // Treating that as empty content is the same answer `stat` would have
+        // given a moment earlier.
+        const content = Option.getOrElse(
+          yield* readIfPresent(
+            fs,
+            target,
+            (cause) => new FilePathUnreadable({ path: target, cause }),
+          ),
+          () => "",
         );
         return {
           path: target,
