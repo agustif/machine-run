@@ -52,6 +52,24 @@ const REAL_GROK_LIST = JSON.stringify([
   },
 ]);
 
+/**
+ * Real `grok mcp list --json` output for a remote server, captured against
+ * an isolated `$HOME` inside a Docker container after `grok mcp add
+ * --transport http sentry https://mcp.sentry.dev/mcp -H "Authorization:
+ * Bearer secrettoken"`. `headers` really is present alongside `url` — an
+ * earlier `GrokServer` schema had no field for it, so `observe` silently
+ * dropped it; see this file's and `Grok.ts`'s doc comments.
+ */
+const REAL_GROK_LIST_REMOTE_WITH_HEADERS = JSON.stringify([
+  {
+    url: "https://mcp.sentry.dev/mcp",
+    headers: { Authorization: "Bearer secrettoken" },
+    enabled: true,
+    name: "sentry",
+    scope: "user",
+  },
+]);
+
 it.effect("observe finds the named server within grok's full `mcp list --json` registry", () =>
   Effect.gen(function* () {
     const observed = yield* GrokBackend.mcp!.observe("postgres", ctxWith(fakeExec(REAL_GROK_LIST)));
@@ -59,6 +77,19 @@ it.effect("observe finds the named server within grok's full `mcp list --json` r
       command: "npx",
       args: ["-y", "@modelcontextprotocol/server-postgres"],
       env: { DATABASE_URL: "postgres://localhost/mydb" },
+    });
+  }),
+);
+
+it.effect("observe reports a remote server's headers, not just its url", () =>
+  Effect.gen(function* () {
+    const observed = yield* GrokBackend.mcp!.observe(
+      "sentry",
+      ctxWith(fakeExec(REAL_GROK_LIST_REMOTE_WITH_HEADERS)),
+    );
+    expect(observed).toEqual({
+      url: "https://mcp.sentry.dev/mcp",
+      headers: { Authorization: "Bearer secrettoken" },
     });
   }),
 );

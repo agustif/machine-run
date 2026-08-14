@@ -10,10 +10,16 @@ It also owns the only `unapply` in the codebase.
 
 ## Verification
 
-- [ ] **nu's chdir hook actually firing.** Registration is verified; firing needs
-      a TTY, so a container running `nu -c` never exercises it. The hook is
-      `hooks.env_change.PWD`, which is a different mechanism from the other four
-      shells, and "registered" is not "fires".
+- [x] **nu's chdir hook actually firing.** Confirmed live: `docker exec -it
+      <container> nu` inside a `tmux` session (a real terminal emulator, not
+      just a raw pty — nu's reedline blocks on an unanswered ANSI DSR cursor
+      query, `\x1b[6n`, from a bare pty, which is what made earlier attempts
+      hang rather than a generic "no TTY" problem) got nu to a real `~>`
+      prompt; `cd`-ing into a directory matching the hook's `str starts-with`
+      prefix twice produced two lines in a marker file written from inside
+      the hook closure, and `$env.config.hooks.env_change.PWD | length` read
+      back `1` in the same session. See `docs/notes/shell-notes.md`'s nu
+      bullet for the exact commands and output.
 - [ ] **`pwsh` on real Windows**, not the Linux container it was verified in.
       Profile paths differ (`Documents\PowerShell` versus `.config/powershell`),
       and that path is the whole thing the backend contributes.

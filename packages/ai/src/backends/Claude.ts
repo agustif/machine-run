@@ -11,12 +11,24 @@ import {
 } from "../Backend.ts";
 
 /**
- * One entry under `mcpServers` in Claude Code's own config — verified by
- * running the real, installed `claude` CLI (`claude mcp add-json` and
- * `claude mcp add --transport http`) against an isolated `$HOME` and
- * inspecting what it wrote, rather than the shipped `~/.claude.json` on this
- * machine, which has none configured. A stdio entry has no `type` field at
- * all; only `http`/`sse` entries carry one.
+ * One entry under `mcpServers` in Claude Code's own config — re-verified this
+ * session directly against the real, installed `claude` CLI
+ * (`@anthropic-ai/claude-code@2.1.232`, `npm install -g
+ * @anthropic-ai/claude-code` in a `node:22-slim` container, `HOME` pointed at
+ * the container's own isolated `/root`, never this Mac's real `~/.claude`).
+ * `claude mcp add-json testserver '{"command":"npx","args":["-y","my-mcp-server"],"env":{"API_KEY":"xxx"}}'
+ * -s user` followed by `claude mcp add --transport http httptest
+ * https://example.com/mcp --header "Authorization: Bearer secrettoken" -s
+ * user` wrote exactly:
+ * ```
+ * "mcpServers": {
+ *   "testserver": { "command": "npx", "args": ["-y", "my-mcp-server"], "env": { "API_KEY": "xxx" } },
+ *   "httptest": { "type": "http", "url": "https://example.com/mcp", "headers": { "Authorization": "Bearer secrettoken" } }
+ * }
+ * ```
+ * A stdio entry really has no `type` field at all; only `http`/`sse` entries
+ * carry one — this schema's shape holds up unchanged from before this
+ * session's re-run.
  */
 const McpServerEntry = Schema.Struct({
   type: Schema.optionalKey(Schema.String),
@@ -116,13 +128,25 @@ const entryToSpec = (entry: McpServerEntry): AiMcpServerSpec =>
       };
 
 /**
- * Claude Code, verified directly: `claude mcp add-json <name> <json> -s user`
- * and `claude mcp add --transport http ... -s user` against an isolated
- * `$HOME`, then reading back what landed in `~/.claude.json`. User-scope
- * servers live at the document's top-level `mcpServers` key (project-scope
- * servers instead live under `projects["<cwd>"].mcpServers` in the same
- * file, or in a repo's own `.mcp.json` — this backend only ever targets user
- * scope, the one that applies machine-wide regardless of working directory).
+ * Claude Code, re-verified directly this session: `claude mcp add-json
+ * <name> <json> -s user` and `claude mcp add --transport http ... -s user`
+ * run against a real, freshly-installed `claude` CLI inside a Docker
+ * container (never this Mac's real `~/.claude.json`), then reading back what
+ * landed in the container's own `~/.claude.json` — see `McpServerEntry`'s
+ * doc comment above for the exact commands and exact resulting JSON. User-
+ * scope servers live at the document's top-level `mcpServers` key (project-
+ * scope servers instead live under `projects["<cwd>"].mcpServers` in the
+ * same file, or in a repo's own `.mcp.json` — this backend only ever targets
+ * user scope, the one that applies machine-wide regardless of working
+ * directory).
+ *
+ * `skillsDir: ".claude/skills"` also re-verified this session: the installed
+ * CLI's own compiled binary
+ * (`node_modules/@anthropic-ai/claude-code-linux-arm64/claude`), grepped for
+ * literal strings, contains `.claude/skills/SKILL.md`,
+ * `.claude/skills/commit/SKILL.md`, `.claude/skills/deploy/SKILL.md`, and
+ * several more — this is a real, load-bearing path baked into the binary,
+ * not merely documented.
  */
 export const ClaudeBackend: AiToolBackend = {
   id: "claude",

@@ -11,17 +11,35 @@ import {
 } from "../Backend.ts";
 
 /**
- * One entry under `mcp` in opencode's config, verified by running the real,
- * installed `opencode mcp add` against an isolated `$HOME` (`opencode mcp
- * add name --url ...` and `opencode mcp add name --env K=V -- cmd args...`)
- * and reading back the resulting `opencode.jsonc`. Field names diverge from
- * every other backend here — `command` is the whole argv as one array
- * (binary and args together), and env vars are `environment`, not `env` —
- * confirming this really is a per-tool shape, not a family everyone agrees
- * on. Also present in the installed `@opencode-ai/sdk` package's own
- * `McpLocalConfig`/`McpRemoteConfig` type declarations, which corroborate
- * every field beyond what the CLI run alone exercised (`enabled`, `oauth`,
- * `timeout`).
+ * One entry under `mcp` in opencode's config, re-verified this session
+ * directly against the real, installed `opencode` CLI
+ * (`opencode-ai@1.18.18`, `npm install -g opencode-ai` in a `node:22-slim`
+ * container, `HOME` pointed at the container's own isolated `/root`, never
+ * this Mac's real `~/.config/opencode`). `opencode mcp add httptest --url
+ * https://example.com/mcp` and `opencode mcp add testlocal --env
+ * API_KEY=xxx -- npx -y my-mcp-server` wrote, into
+ * `~/.config/opencode/opencode.jsonc`:
+ * ```
+ * "mcp": {
+ *   "httptest": { "type": "remote", "url": "https://example.com/mcp" },
+ *   "testlocal": { "type": "local", "command": ["npx", "-y", "my-mcp-server"], "environment": { "API_KEY": "xxx" } }
+ * }
+ * ```
+ * `opencode mcp add secured --url https://mcp.example.com/mcp --header
+ * "Authorization=Bearer secrettoken"` then confirmed the `remote` arm's
+ * `headers` field too — real output `{ "type": "remote", "url": ...,
+ * "headers": { "Authorization": "Bearer secrettoken" } }`. (Note: opencode's
+ * own `--header` flag takes `KEY=VALUE`, not `KEY: VALUE` like Claude/Grok's
+ * — irrelevant to this backend, which never shells out to `opencode` at all,
+ * but worth knowing if a future change makes it CLI-driven.)
+ *
+ * Field names diverge from every other backend here — `command` is the
+ * whole argv as one array (binary and args together), and env vars are
+ * `environment`, not `env` — confirming this really is a per-tool shape, not
+ * a family everyone agrees on. Also present in the installed
+ * `@opencode-ai/sdk` package's own `McpLocalConfig`/`McpRemoteConfig` type
+ * declarations, which corroborate every field beyond what the CLI run alone
+ * exercised (`enabled`, `oauth`, `timeout`).
  */
 const McpEntry = Schema.Struct({
   type: Schema.Literals(["local", "remote"]),
@@ -123,9 +141,24 @@ const entryToSpec = (entry: McpEntry): AiMcpServerSpec =>
       };
 
 /**
- * opencode, verified directly: `opencode mcp add <name> --url ...` and
- * `opencode mcp add <name> --env K=V -- cmd args...` against an isolated
- * `$HOME`, reading back the resulting `~/.config/opencode/opencode.jsonc`.
+ * opencode, re-verified this session directly: `opencode mcp add <name>
+ * --url ...` and `opencode mcp add <name> --env K=V -- cmd args...` against
+ * an isolated `$HOME` inside a Docker container, reading back the resulting
+ * `~/.config/opencode/opencode.jsonc` — see `McpEntry`'s doc comment above
+ * for the exact commands and exact resulting JSON.
+ *
+ * `skillsDir: ".config/opencode/skills"` also re-verified this session, and
+ * less directly than the other three tools: the installed CLI's own
+ * compiled binary (`node_modules/opencode-linux-arm64/bin/opencode`),
+ * grepped for literal strings, contains a bundled help/doc table row reading
+ * `| Global skills | ~/.config/opencode/skill(s)/<name>/SKILL.md |` —
+ * confirming this is the tool's own documented global skills path, not a
+ * convention this package guessed at. The same binary also contains a
+ * *separate*, project-local default of `.opencode/skills` (relative to a
+ * project root, the direct analogue of `.claude/skills` at repo root, not
+ * this backend's `~/.config/opencode/skills` concern) — the two are
+ * additive, not conflicting: one is the project-scoped lookup, the other is
+ * the user-global one this backend's `skillsDir` names.
  */
 export const OpenCodeBackend: AiToolBackend = {
   id: "config-opencode",

@@ -14,21 +14,38 @@ import { classifyCliError, isCommandNotFound, metaToken, stderrOf } from "./cliM
 
 /**
  * `codex mcp get <missing> --json` exits non-zero with this text on stderr
- * — verified against the real, installed `codex` CLI run with a name it has
- * never heard of. Matched case-insensitively and as a substring (real output
- * carries an `Error: ` prefix) so this narrows only the documented shape,
- * the same discipline `git/src/toplevel.ts`'s `showToplevel` uses for `git`'s
- * "not a git repository" text.
+ * — re-verified this session against the real, installed `codex` CLI
+ * (`@openai/codex@0.147.0`) run inside a Docker container with a name it had
+ * never heard of: `codex mcp get doesnotexist --json` printed exactly
+ * `Error: No MCP server named 'doesnotexist' found.` to stderr and exited 1.
+ * Matched case-insensitively and as a substring (the real output carries
+ * that `Error: ` prefix) so this narrows only the documented shape, the same
+ * discipline `git/src/toplevel.ts`'s `showToplevel` uses for `git`'s "not a
+ * git repository" text.
  */
 const NO_SUCH_SERVER = /No MCP server named/i;
 
 /**
- * `codex mcp get <name> --json`'s own shape, verified by running the real,
- * installed `codex` CLI against an isolated `$CODEX_HOME` and reading its
- * output. Only the two fields this backend needs are decoded — the real
- * output also carries `enabled`, `disabled_reason`, `enabled_tools`,
- * `disabled_tools`, `startup_timeout_sec`, `tool_timeout_sec`, none of which
- * this resource manages.
+ * `codex mcp get <name> --json`'s own shape, re-verified this session by
+ * running the real, installed `codex` CLI (`npm install -g @openai/codex` in
+ * a `node:22-slim` container, `HOME`/`CODEX_HOME` pointed at the container's
+ * own isolated `/root`, never this Mac's real `~/.codex`) against an isolated
+ * home and reading its output: `codex mcp add testserver --env API_KEY=xxx
+ * -- npx -y my-mcp-server` then `codex mcp get testserver --json` printed a
+ * `transport` object byte-for-byte matching the `stdio` arm below (plus
+ * `env_vars: []`/`cwd: null`, neither decoded here), and `codex mcp add
+ * httptest --url https://example.com/mcp` then `codex mcp get httptest
+ * --json` matched the `streamable_http` arm (plus `bearer_token_env_var`/
+ * `http_headers`/`env_http_headers`, all `null` and none decoded here).
+ * Only the two fields this backend needs are decoded — the real output also
+ * carries `enabled`, `disabled_reason`, `enabled_tools`, `disabled_tools`,
+ * `startup_timeout_sec`, `tool_timeout_sec`, none of which this resource
+ * manages. `codex mcp add --help` was also re-checked this session:
+ * `--env` is a plain repeatable long flag (no `-e` short form) and there is
+ * no `--header` option at all for `--url` servers — only
+ * `--bearer-token-env-var` — confirming `apply`'s
+ * `AiToolFieldUnsupported("headers")` below is still the honest answer, not
+ * a missing feature this backend forgot to wire up.
  */
 const CodexTransport = Schema.Union([
   Schema.Struct({
@@ -85,22 +102,40 @@ const classifyCodexMcpGetError = (
 };
 
 /**
- * Codex, verified directly: `codex mcp add <name> --env K=V -- cmd args...`
- * and `codex mcp add <name> --url ...` against an isolated `$CODEX_HOME`,
- * then reading back the resulting `~/.codex/config.toml` and running
- * `codex mcp get <name> --json`.
+ * Codex, re-verified this session directly against the real, installed
+ * `codex` CLI: `codex mcp add testserver --env API_KEY=xxx -- npx -y
+ * my-mcp-server` and `codex mcp add httptest --url https://example.com/mcp`
+ * against an isolated `$CODEX_HOME` inside a Docker container, then reading
+ * back the resulting `~/.codex/config.toml` (which held exactly
+ * `[mcp_servers.testserver]`/`[mcp_servers.testserver.env]` and
+ * `[mcp_servers.httptest]` with a bare `url` key — no TOML table for a
+ * headerless remote server) and running `codex mcp get <name> --json` — see
+ * `CodexTransport`'s doc comment above for the exact output.
+ *
+ * Also re-verified this session: running `codex mcp add testserver` a second
+ * time with a different `args`/`env` updated the same `[mcp_servers.testserver]`
+ * table in place (new `args`, new `env` value, no duplicate table) rather
+ * than duplicating it — genuinely a real, idempotent "add-or-update", not
+ * merely documented as one.
  *
  * No TOML library is installed in this workspace (see docs/ai-notes.md), so
- * this backend never parses `config.toml` itself. It shells out to `codex`'s
- * own add/get lifecycle instead — verified to be a real, idempotent
- * "add-or-update" (`codex mcp add` on an existing name updates it in place)
- * that reads the whole file, splices in the one server, and rewrites it,
- * which is the same operation a human running the CLI by hand would do.
- * That rewrite is not byte-identical to the original — a probe against the
- * real config on this machine showed `codex` drops an explicit `args = []`
- * and reformats `startup_timeout_sec = 120` as `120.0` — but that lossiness
- * belongs to `codex`'s own writer, not to this backend; it is exactly what
- * would happen if the operator ran `codex mcp add` themselves.
+ * this backend never parses `config.toml` itself; it shells out to `codex`'s
+ * own add/get lifecycle instead, which reads the whole file, splices in the
+ * one server, and rewrites it — the same operation a human running the CLI
+ * by hand would do. That rewrite is not necessarily byte-identical to the
+ * original (a probe against a real `~/.codex/config.toml` in a past session
+ * showed `codex` drops an explicit `args = []` and reformats
+ * `startup_timeout_sec = 120` as `120.0`), but that lossiness belongs to
+ * `codex`'s own writer, not to this backend.
+ *
+ * `skillsDir: ".codex/skills"` also re-verified this session: the installed
+ * CLI's own compiled binary
+ * (`node_modules/@openai/codex-linux-arm64/vendor/.../bin/codex`), grepped
+ * for literal strings, contains `.codex/skills`, `CODEX_HOME/skills`, and an
+ * entire embedded `ext/skills/src/...` Rust source tree (`loader/discovery.rs`,
+ * `loader/host.rs`, `tools/list.rs`, `tools/read.rs`, ...) — Codex genuinely
+ * ships a skills-loading subsystem rooted at this path, not merely a
+ * documented convention.
  */
 export const CodexBackend: AiToolBackend = {
   id: "codex",
