@@ -146,7 +146,9 @@ const QUOTED_FORM = /^"([\s\S]*)"$/;
  *   `security` itself. So neither decoded form needs the trailing-newline
  *   stripping `-w`'s output required.
  */
-const parseGeneralizedPassword = (result: CommandOutput): Option.Option<Redacted.Redacted<string>> =>
+const parseGeneralizedPassword = (
+  result: CommandOutput,
+): Option.Option<Redacted.Redacted<string>> =>
   findPasswordPayload(result).pipe(Option.flatMap(decodeGeneralizedPassword));
 
 const findPasswordPayload = (result: CommandOutput): Option.Option<string> =>

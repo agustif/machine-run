@@ -97,7 +97,11 @@ const makeFakeKeychain = () => {
             }),
           );
         }
-        return { exitCode: 0, stdout: `${value}\n`, stderr: "" };
+        // `-g`, not `-w`: the real backend switched because `-w` silently
+        // returns the ASCII-hex encoding of any value it considers
+        // unprintable, which is every multi-line secret. `-g` puts the
+        // password line on stderr and the printable form in quotes.
+        return { exitCode: 0, stdout: "", stderr: `password: "${value}"\n` };
       }
 
       if (subcommand === "add-generic-password") {

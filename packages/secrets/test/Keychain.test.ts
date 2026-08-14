@@ -162,9 +162,7 @@ it.effect(
       // test/fixtures/keychain-g-flag-transcript.txt case 10.
       const value = yield* KeychainBackend.read(
         { _tag: "Keychain", service: "mrv-utf8" },
-        fakeExecOnStderr(
-          'password: 0x636166C3A9F09F9491  "caf\\303\\251\\360\\237\\224\\221"\n',
-        ),
+        fakeExecOnStderr('password: 0x636166C3A9F09F9491  "caf\\303\\251\\360\\237\\224\\221"\n'),
       );
       expect(Redacted.value(value)).toBe("café🔑");
     }),
@@ -227,7 +225,7 @@ it.effect(
       // failure mode this whole fix exists to close off.
       const failure = yield* KeychainBackend.read(
         { _tag: "Keychain", service: "mrv-simple" },
-        fakeExecOnStderr("keychain: \"/some/keychain-db\"\nversion: 256\nclass: \"genp\"\n"),
+        fakeExecOnStderr('keychain: "/some/keychain-db"\nversion: 256\nclass: "genp"\n'),
       ).pipe(Effect.flip);
       expect(failure).toBeInstanceOf(SecretReadFailed);
     }),
