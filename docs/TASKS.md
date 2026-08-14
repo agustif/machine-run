@@ -57,14 +57,8 @@ Fourteen packages arrived faster than the invariants tying them together.
       settle it after the first real `plan`/`deploy`, when there is evidence
       about which split actually reads well, and list every old name in
       `aliases`.
-- [x] **`observe` → `Option<State>`** — done, as one atomic change across every
-      reconciler and its tests. `noNullish` 531 → 457.
 - [ ] **Two ways to express a directory** — `directoryMode` props on `File`,
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
-- [x] **The aggregate layer has no completeness test.** Closed by
-      `packages/machine/test/AggregateCompleteness.test.ts`, which enumerates
-      every resource-defining package and fails, naming it, if one is missing
-      from the merge. Verified to fail when `Tailscale.providers()` is removed.
 - [ ] **A README per package.** Source comments already reference ones that do
       not exist.
 
@@ -137,31 +131,12 @@ CI runs on `ubuntu`, `macos` and `windows` runners, which removed the last
 comment still says *unverified*. The Windows runner type-checks only — see
 "Windows" under P2 for the 16 tests that fail there and why.
 
-- [x] `winget` / `choco` parsers against captured Windows output. **Done**, and
-      it found a real bug. Output from a Windows runner is now committed as
-      `packages/system-packages/test/fixtures/{winget,choco}-list.txt`, pinned by
-      `windowsBackends.test.ts`, and re-asserted against live output every run by
-      `windowsLive.test.ts`. Three findings:
-      - `winget list` **exits 1** without `--accept-source-agreements` on any
-        machine that has not accepted the `msstore` terms, which is every fresh
-        machine. The backend already passed it; the CI step did not, and failed
-        exactly that way.
-      - winget **truncates an over-long cell with an ellipsis that consumes the
-        column padding**, leaving one space before the next column. The old
-        parser split on runs of 2+ spaces and so returned `Id` and `Version`
-        glued together for 9 of 64 rows, and nothing at all for 6 more. It now
-        slices by header column offsets.
-      - Chocolatey 2.7.3 accepts `--local-only` without error, settling that
-        open question, and `--limit-output` emits no header or footer.
 - [ ] **`winget export` instead of `winget list`.** The remaining winget gap.
       Truncated ids are unrecoverable from the table, so those packages read as
       not installed and get a no-op `winget install` on every deploy — correct,
       but the plan is never empty. `winget export` emits JSON with full
       identifiers. It writes to a file rather than stdout, so this needs a temp
       path through the `exec` seam.
-- [x] `mas`, and the `defaults` read path, against a real macOS runner.
-- [x] `snap` — a privileged, systemd-booted container reaches `snapd` fine;
-      see [MAP.md](./MAP.md#4-the-eight-backend-seams).
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).
 - [ ] `tailscale status --json`'s real shape.
 - [ ] `Git.Signing` end to end — nothing in the repo signs anything yet.
@@ -201,40 +176,6 @@ owns a `SecretBackend` seam whose `keychain` backend is exactly the right home
 for a local encryption key. The key comes from the OS keychain through a seam
 this repo already owns.
 
-- [x] **Decide the threat model first, and write it down.** Disk-at-rest reads
-      only — a stolen laptop, a synced backup, a `.alchemy/` directory
-      accidentally committed — not anything running as the user, since that
-      process can ask the keychain too. Written into
-      `packages/state/src/EncryptedState.ts`'s module doc comment.
-- [x] **`StateService` implementation**, `@machine-run/state`'s
-      `encryptedState()`, wrapping `LocalState` and encrypting the value on
-      `set`/decrypting on `get`. Envelope: a per-stack data key in the OS
-      keychain (`packages/state/src/DataKey.ts`, via `@machine-run/secrets`'s
-      `keychain` backend), AES-256-GCM through `SubtleCrypto` — Effect's
-      `Crypto` service has no AES-GCM primitive (checked against
-      `effect/src/Crypto.ts`; only `digest`/`randomBytes`), so randomness
-      comes from `Crypto` and the cipher itself from the WebCrypto global, the
-      same split Effect's own `effect/unstable/eventlog/EventLogEncryption.ts`
-      uses — with `stack\0stage\0fqn` as additional authenticated data so a
-      row cannot be moved between resources, stages, or stacks. `core` cannot
-      depend on `secrets` (would invert the dependency graph — verified by
-      reading both `package.json`s), so this is its own package rather than
-      living in `core`; see `packages/state/TASKS.md` for the fuller
-      reasoning.
-- [x] **Design for losing the key.** `get` degrades any row that fails to
-      decrypt — missing key, corrupt ciphertext, tampering, wrong resource —
-      to `undefined`, logging a warning, leaning on the existing adoption path
-      (`read` → `AdoptPolicy`). `set` does not get the same treatment: if no
-      key can be obtained or created, nothing was lost yet, so it surfaces as
-      an ordinary `StateStoreError` instead of silently writing plaintext.
-- [x] **Do not weaken the primary rule.** Nothing about `Machine.SecretFile`
-      changed; this store is unconditioned on it and is defence in depth for
-      what unavoidably lands in state regardless (Alchemy's own
-      `Redacted`-shaped attributes, cloud resource tokens).
-- [ ] **Then reconsider `Ssh.Key`.** A generated key that survives across
-      deploys is only safe once this exists — and even then, writing the private
-      half anywhere other than `~/.ssh` deserves its own argument.
-
 ---
 
 ## P2 — remaining seams
@@ -242,15 +183,6 @@ this repo already owns.
 Each follows the established shape: one interface, one module per
 implementation, dispatched from inside one generic resource.
 
-- [x] **`System.Service` + `ServiceBackend`** — `launchd` / `systemd --user` /
-      `brew services`, user-level only (`@machine-run/system-services`).
-      `launchd` and `brew-services` verified read-only against real state on a
-      real Mac (this machine); `systemd-user` verified in a genuinely booted
-      systemd container — see `packages/system-services/src/backends/linux/SystemdUser.ts`'s
-      doc comment for the transcript and the one gap (`enable`/`disable`
-      themselves were not executed). System-level services (root, `sudo brew
-      services`, plain `systemctl`) are an explicit non-goal — see
-      `packages/system-services/TASKS.md`.
   - [ ] **Not folded into `@machine-run/machine`'s aggregate `providers()`**,
         by the deliberate scope boundary of the change that added the
         package (`packages/machine` was left untouched). `examples/complete-machine`
