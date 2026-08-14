@@ -18,8 +18,13 @@ FROM node:22-bookworm
 # *container run time*, not just at image build time, and there is no reason
 # to make it pay for a redundant `apt-get update` when the image already has
 # a fresh index from the build that just happened.
+# `cron` is here for `Git.Maintenance`: `git maintenance start` schedules through
+# systemd timers or crontab, and a plain container has neither, so the resource
+# correctly refuses with `GitMaintenanceSchedulerUnavailable`. Installing cron is
+# what its own error message tells you to do, and it turns "cannot be tested here"
+# into real coverage.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends sudo ca-certificates \
+    && apt-get install -y --no-install-recommends sudo ca-certificates cron \
     && apt-get clean
 
 # A throwaway user with its own real $HOME. Every `~`-expanded path any

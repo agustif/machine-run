@@ -294,6 +294,8 @@ export const makeLineInFileReconciler: Effect.Effect<
   return {
     address: (props) => paths.expand(props.path),
     snapshotBeforeApply: true,
+    // owns one line in a file it does not own.
+    refuseUnowned: true,
 
     observe: (props) =>
       Effect.gen(function* () {

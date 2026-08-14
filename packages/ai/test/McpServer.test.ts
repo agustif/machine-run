@@ -26,7 +26,7 @@ import { jsonRecordOr } from "../src/backends/jsonConfigFile.ts";
 const envConfig = (vars: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnvRecord(vars));
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /**
  * Decodes a written config file's raw text as JSON — `Schema.Json` rather

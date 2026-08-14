@@ -312,6 +312,29 @@ export interface Reconciler<Props, State, E = never, R = never> {
   readonly snapshotBeforeApply?: boolean;
 
   /**
+   * Whether finding something at {@link address} that this resource has no record
+   * of writing should *refuse* rather than silently take it over.
+   *
+   * Set it for anything whose content a person may have written by hand. Alchemy
+   * routes it: `read` brands its result `Unowned`, and `Plan` then fails with
+   * `OwnedBySomeoneElse` unless the run passes `--adopt` (or wraps the effect in
+   * `adopt(true)`). The refusal happens at *plan* time, so the operator is told
+   * before anything is touched.
+   *
+   * This is the framework's answer to the failure mode behind four separate
+   * data-loss bugs in this repo: a reconciler finding a file it did not write and
+   * overwriting it. {@link snapshotBeforeApply} softened that by taking a backup;
+   * this prevents it, and they compose — an adopted resource is still backed up
+   * before its first write.
+   *
+   * Left unset where there is no ownership question. A package already installed,
+   * or a `defaults` key already set, is fine to adopt: there is no hand-authored
+   * content to lose, and demanding `--adopt` for every pre-installed package
+   * would make the flag meaningless.
+   */
+  readonly refuseUnowned?: boolean;
+
+  /**
    * Undo {@link apply}, when doing so is possible and safe. Optional, and
    * expected to stay unset for most resources.
    *

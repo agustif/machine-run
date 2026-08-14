@@ -14,7 +14,7 @@ import {
   makeGitRepoReconciler,
 } from "../src/Repo.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Fails the way real `git -C <path> rev-parse --show-toplevel` does when `path` is not inside any repository. */
 const notARepo = () =>

@@ -12,7 +12,7 @@ import {
   SymlinkSourceMissing,
 } from "../src/Symlink.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 const applyCtx = {
   exec: () => Effect.die("not used"),

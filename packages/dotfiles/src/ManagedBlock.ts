@@ -386,6 +386,8 @@ export const makeManagedBlockReconciler: Effect.Effect<
   return {
     address: (props) => paths.expand(props.path),
     snapshotBeforeApply: true,
+    // the resource that exists *for* files with other owners.
+    refuseUnowned: true,
 
     observe: (props) =>
       Effect.gen(function* () {

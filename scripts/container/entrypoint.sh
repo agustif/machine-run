@@ -117,6 +117,10 @@ assert_contains "initial plan proposes to create the LineInFile" "$plan1" "greet
 assert_contains "initial plan proposes to create the Download" "$plan1" "download-fixture"
 assert_contains "initial plan proposes to create the Git.Config key" "$plan1" "git-config-username"
 assert_contains "initial plan proposes to create the Git.Repo clone" "$plan1" "demo-repo-clone"
+assert_contains "initial plan proposes to create Git.Maintenance" "$plan1" "demo-repo-maintenance"
+assert_contains "initial plan proposes to create the Ssh.Key" "$plan1" "demo-ssh-key"
+assert_contains "initial plan proposes to create the Ssh.KnownHost" "$plan1" "demo-known-host"
+assert_contains "initial plan proposes to create the Ai.McpServer" "$plan1" "demo-mcp-server"
 
 note "alchemy deploy --yes"
 run_deploy initial
@@ -167,6 +171,22 @@ git config --global user.name "Tampered Name"
 note "Drift: repoint Git.Repo's origin remote (demo-repo-clone)"
 git -C "$HOME/demo-repo-clone" remote set-url origin /tmp/not-the-real-origin
 
+note "Drift: unregister Git.Maintenance's repo (demo-repo-maintenance)"
+git maintenance unregister --force || true
+
+note "Drift: remove Ssh.KnownHost's line (demo-known-host)"
+: > "$HOME/.ssh/known_hosts"
+
+note "Drift: remove the Ai.McpServer registration (demo-mcp-server)"
+# Rewritten rather than deleted, so this proves the backend notices one *absent
+# server* in a config that still exists and still holds other keys.
+printf '{"firstStartTime":"2026-01-01T00:00:00.000Z","mcpServers":{}}\n' > "$HOME/.claude.json"
+
+# NOT drifted: Ssh.Key. Its `matches` is unconditionally true by design — the
+# resource creates a keypair and never compares against what is on disk, since
+# doing so would mean reading a private key. Asserting drift detection for it
+# would be asserting something the resource deliberately does not do.
+
 note "alchemy plan (post-drift — every drifted resource must be reported)"
 run_plan post-drift
 plan3="$(plan_log post-drift)"
@@ -188,6 +208,9 @@ assert_contains "drifted Machine.LineInFile is detected" "$plan3" "greeting-line
 assert_contains "drifted Machine.Download is detected" "$plan3" "download-fixture"
 assert_contains "drifted Git.Config is detected" "$plan3" "git-config-username"
 assert_contains "drifted Git.Repo is detected" "$plan3" "demo-repo-clone"
+assert_contains "drifted Git.Maintenance is detected" "$plan3" "demo-repo-maintenance"
+assert_contains "drifted Ssh.KnownHost is detected" "$plan3" "demo-known-host"
+assert_contains "drifted Ai.McpServer is detected" "$plan3" "demo-mcp-server"
 
 note "Re-deploy to converge before destroy"
 run_deploy reconverge >/dev/null
@@ -203,6 +226,10 @@ before_line="$(sha256sum "$HOME/.config/machine-run-demo/one-line.conf" | cut -d
 before_download="$(sha256sum "$HOME/.config/machine-run-demo/downloaded-fixture.txt" | cut -d' ' -f1)"
 before_git_username="$(git config --global --get user.name)"
 before_repo_remote="$(git -C "$HOME/demo-repo-clone" remote get-url origin)"
+before_ssh_key="$(sha256sum "$HOME/.ssh/id_demo" | cut -d' ' -f1)"
+before_known_hosts="$(cat "$HOME/.ssh/known_hosts")"
+before_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))')"
+before_maintenance="$(git config --global --get-all maintenance.repo | grep -c demo-repo-clone || true)"
 
 note "alchemy destroy --yes"
 "$ALCHEMY" destroy "$RECIPE" --yes 2>&1 | tee "$LOG_DIR/destroy.log"
@@ -218,6 +245,10 @@ after_line="$(sha256sum "$HOME/.config/machine-run-demo/one-line.conf" 2>/dev/nu
 after_download="$(sha256sum "$HOME/.config/machine-run-demo/downloaded-fixture.txt" 2>/dev/null | cut -d' ' -f1 || echo MISSING)"
 after_git_username="$(git config --global --get user.name)"
 after_repo_remote="$(git -C "$HOME/demo-repo-clone" remote get-url origin 2>/dev/null || echo MISSING)"
+after_ssh_key="$(sha256sum "$HOME/.ssh/id_demo" 2>/dev/null | cut -d' ' -f1 || echo MISSING)"
+after_known_hosts="$(cat "$HOME/.ssh/known_hosts" 2>/dev/null || echo MISSING)"
+after_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))' 2>/dev/null || echo MISSING)"
+after_maintenance="$(git config --global --get-all maintenance.repo 2>/dev/null | grep -c demo-repo-clone || true)"
 
 assert_true "Machine.File content unchanged after destroy" \
   test "$before_gitconfig" = "$after_gitconfig"
@@ -239,6 +270,19 @@ assert_true "Git.Config value unchanged after destroy (retain, not reverted)" \
   test "$before_git_username" = "$after_git_username"
 assert_true "Git.Repo clone still exists with the same remote after destroy" \
   test "$before_repo_remote" = "$after_repo_remote"
+assert_true "Ssh.Key private key still on disk after destroy (no unapply, by design)" \
+  test "$before_ssh_key" = "$after_ssh_key"
+
+# These three DO define `unapply`, so under the default retain policy they must
+# still leave everything alone — the same assertion, but proving that having an
+# `unapply` is not enough to make `destroy` destructive. Only an explicit destroy
+# policy plus an `unapply` reverses anything.
+assert_true "Ssh.KnownHost line survives destroy under the default retain policy" \
+  test "$before_known_hosts" = "$after_known_hosts"
+assert_true "Ai.McpServer registration survives destroy under the default retain policy" \
+  test "$before_mcp" = "$after_mcp"
+assert_true "Git.Maintenance registration survives destroy under the default retain policy" \
+  test "$before_maintenance" = "$after_maintenance"
 
 kill "$HTTP_SERVER_PID" 2>/dev/null || true
 

@@ -16,7 +16,7 @@ import {
   type ServiceState,
 } from "../src/Service.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A `MachinePaths` whose home is a fixed temp directory — same pattern as `dotfiles/test/Symlink.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>

@@ -145,9 +145,29 @@ export type GitMaintenanceError =
  * the same repository twice never duplicates the entry, so git is comparing
  * against this same canonical form, not whatever string was passed to `-C`).
  */
+/**
+ * The repository's canonical top level, or `GitMaintenanceRepoNotFound`.
+ *
+ * The "not a repository" case arrives as a *failure*, not as an empty result —
+ * measured, because the code path suggests otherwise. Both a missing directory
+ * and an existing non-repository exit `128`, with distinct stderr:
+ *
+ *     git -C /missing     rev-parse --show-toplevel
+ *       -> fatal: cannot change to '/missing': No such file or directory
+ *     git -C /real-non-repo rev-parse --show-toplevel
+ *       -> fatal: not a git repository (or any of the parent directories): .git
+ *
+ * So this classifies on stderr. Getting it wrong meant `observe` reported a
+ * generic command failure for a repository another resource had simply not
+ * cloned yet, which made the whole plan unrenderable.
+ */
 const resolveRepo = (target: string, exec: Exec): Effect.Effect<string, GitMaintenanceError> =>
   showToplevel(target, exec).pipe(
-    Effect.mapError((cause) => new GitMaintenanceCommandFailed({ repo: target, cause })),
+    Effect.mapError((cause: CommandError) =>
+      /cannot change to|not a git repository/i.test(stderrOf(cause))
+        ? new GitMaintenanceRepoNotFound({ repo: target })
+        : new GitMaintenanceCommandFailed({ repo: target, cause }),
+    ),
     Effect.flatMap((toplevel) =>
       Option.isSome(toplevel)
         ? Effect.succeed(toplevel.value)
@@ -187,17 +207,34 @@ const isRegistered = (
 const startMaintenance = (
   repo: string,
   exec: Exec,
-): Effect.Effect<void, GitMaintenanceSchedulerUnavailable | GitMaintenanceCommandFailed> =>
+): Effect.Effect<
+  void,
+  GitMaintenanceSchedulerUnavailable | GitMaintenanceCommandFailed | GitMaintenanceRepoNotFound
+> =>
   exec({
     command: Sh.sh("git", "-C", repo, "maintenance", "start"),
     shell: true,
   }).pipe(
     Effect.asVoid,
     Effect.catch((error: CommandError) => {
-      const classified: GitMaintenanceSchedulerUnavailable | GitMaintenanceCommandFailed =
-        isExitCode(error, 128) && /neither systemd timers nor crontab/i.test(stderrOf(error))
+      // `observe` reports an absent repository as `Option.none()` so a plan can
+      // be rendered before whatever clones it has run, which leaves `apply` as
+      // the place that has to name the problem. Classified from git's own stderr
+      // rather than by running an extra `rev-parse` first: one subprocess per
+      // apply to improve a message the failure already contains is not a trade
+      // worth making, and the `SchedulerUnavailable` case beside this one
+      // already establishes the pattern.
+      const stderr = stderrOf(error);
+      const classified:
+        | GitMaintenanceSchedulerUnavailable
+        | GitMaintenanceCommandFailed
+        | GitMaintenanceRepoNotFound = isExitCode(error, 128)
+        ? /neither systemd timers nor crontab/i.test(stderr)
           ? new GitMaintenanceSchedulerUnavailable({ repo })
-          : new GitMaintenanceCommandFailed({ repo, cause: error });
+          : /cannot change to|not a git repository/i.test(stderr)
+            ? new GitMaintenanceRepoNotFound({ repo })
+            : new GitMaintenanceCommandFailed({ repo, cause: error })
+        : new GitMaintenanceCommandFailed({ repo, cause: error });
       return Effect.fail(classified);
     }),
   );
@@ -236,8 +273,21 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
     observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.repo);
-        const toplevel = yield* resolveRepo(target, ctx.exec);
-        const registered = yield* isRegistered(toplevel, ctx.exec);
+        const toplevel = yield* resolveRepo(target, ctx.exec).pipe(
+          Effect.map(Option.some),
+          // A repository that does not exist yet is not a failure to observe: no
+          // registration for it can be active, which is exactly what
+          // `Option.none()` means. Failing here instead made this resource
+          // unplannable whenever the repo is created by another resource in the
+          // same deploy — `plan` could not even be *rendered*, which is the one
+          // thing a plan has to do before anything is applied. `apply` still
+          // fails on a missing repo, where it genuinely cannot proceed.
+          Effect.catchTag("GitMaintenanceRepoNotFound", () =>
+            Effect.succeed(Option.none<string>()),
+          ),
+        );
+        if (Option.isNone(toplevel)) return Option.none();
+        const registered = yield* isRegistered(toplevel.value, ctx.exec);
         if (!registered) return Option.none();
         return Option.some({ repo: target });
       }),

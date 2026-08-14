@@ -12,7 +12,7 @@ import { makeBrewServicesBackend } from "../src/backends/macos/BrewServices.ts";
 import { makeLaunchdBackend } from "../src/backends/macos/Launchd.ts";
 import { makeSystemdUserBackend } from "../src/backends/linux/SystemdUser.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A command runner returning fixed output for every call. */
 const fakeExec =

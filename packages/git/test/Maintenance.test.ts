@@ -16,7 +16,7 @@ import {
   makeGitMaintenanceReconciler,
 } from "../src/Maintenance.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A `MachinePaths` whose home is a fixed temp directory — mirrors `Config.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>
@@ -135,13 +135,20 @@ it.effect("observe reports the repo when it's registered, among others", () =>
 );
 
 it.effect(
-  "observe fails with GitMaintenanceRepoNotFound when the path isn't a git repository at all " +
+  "apply fails with GitMaintenanceRepoNotFound when the path isn't a git repository at all " +
     "— unlike Git.Repo, this resource never creates one",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeGitMaintenanceReconciler;
+      // Asserted on `apply`, not `observe`. `observe` reporting this as a failure
+      // made the resource unplannable whenever another resource in the same
+      // recipe creates the repo — `plan` could not render at all. The diagnostic
+      // is unchanged, it just belongs where the work actually cannot proceed.
       const error = yield* reconciler
-        .observe({ repo: "/not-a-repo" }, observeCtx(notARepoExec))
+        .apply(
+          { props: { repo: "/not-a-repo" }, observed: Option.none(), desired: { repo: "/not-a-repo" } },
+          applyCtx(notARepoExec),
+        )
         .pipe(Effect.flip);
       expect(error).toBeInstanceOf(GitMaintenanceRepoNotFound);
     }).pipe(Effect.provide(layer)),
@@ -323,4 +330,24 @@ it.effect(
       // shared file, not a per-repo address.
       expect(reconciler.address({ repo: "/some/other/repo" })).toBe(path.join(home, ".gitconfig"));
     }).pipe(Effect.provide(layer)),
+);
+
+/**
+ * A repository that does not exist yet must observe as `Option.none()`, not fail.
+ *
+ * The case a real deploy hits constantly: `Git.Repo` clones and
+ * `Git.Maintenance` registers in one recipe, so at plan time the repo is not
+ * there. Failing to observe made the whole plan unrenderable — found by adding
+ * exactly that pair to the container check, where `plan` died before printing
+ * anything at all.
+ */
+it.effect("observes as absent when the repository does not exist yet", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitMaintenanceReconciler;
+    const observed = yield* reconciler.observe(
+      { repo: "/nonexistent/not-cloned-yet" },
+      { exec: notARepoExec, execution: { privilege: "none", locale: "C", defaultTimeout: "1 minute" } },
+    );
+    expect(Option.isNone(observed)).toBe(true);
+  }).pipe(Effect.provide(layer)),
 );

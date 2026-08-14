@@ -50,10 +50,12 @@
 //
 // `$HOME` here is the container's own throwaway user (see
 // `docker/Dockerfile`) — never a real machine's home directory.
+import * as Ai from "@machine-run/ai";
 import * as Core from "@machine-run/core";
 import * as Dotfiles from "@machine-run/dotfiles";
 import * as Git from "@machine-run/git";
 import * as Secrets from "@machine-run/secrets";
+import * as Ssh from "@machine-run/ssh";
 import * as SystemPackages from "@machine-run/system-packages";
 import * as Alchemy from "alchemy";
 import { CommandExecutorLive } from "alchemy/Command";
@@ -73,9 +75,11 @@ import { join } from "node:path";
 // reason not to, and when hand-assembling, remember that every composition
 // function has transitive provider requirements the call site does not show.
 const providers = Layer.mergeAll(
+  Ai.providers(),
   Dotfiles.providers(),
   Git.providers(),
   Secrets.providers(),
+  Ssh.providers(),
   SystemPackages.providers(),
 ).pipe(Layer.provideMerge(Core.services()), Layer.provide(CommandExecutorLive()));
 
@@ -165,10 +169,43 @@ export default Alchemy.Stack(
     // `remote` is not `~`-expanded by `Git.Repo` itself (only `path` is), so
     // the origin `entrypoint.sh` creates at `~/vault/origin-repo` is resolved
     // to an absolute path here rather than passed as a literal `~/...` string.
-    yield* Git.Repo("demo-repo-clone", {
+    const clone = yield* Git.Repo("demo-repo-clone", {
       path: "~/demo-repo-clone",
       remote: join(homedir(), "vault", "origin-repo"),
       branch: "main",
+    });
+
+    // `repo: clone.path` rather than the same path spelled again as a literal.
+    // Passing the *output* is what makes Alchemy order these: `Git.Maintenance`
+    // cannot register a repository that has not been cloned yet, and with two
+    // independent literals the engine reconciled them in whichever order it
+    // liked — which failed with `GitMaintenanceRepoNotFound` about half the time.
+    // Reusing the dependency edge Alchemy already derives from output references
+    // beats sequencing them by hand.
+    yield* Git.Maintenance("demo-repo-maintenance", { repo: clone.path });
+
+    // ed25519 rather than rsa: no `bits` to get wrong, and fast enough that a
+    // real `ssh-keygen` in the deploy path costs nothing.
+    yield* Ssh.Key("demo-ssh-key", {
+      path: "~/.ssh/id_demo",
+      algorithm: "ed25519",
+      comment: "machine-run deploy-check",
+    });
+
+    // A real, well-known public key, so this pins the file format rather than a
+    // value invented here. Never contacted — `Ssh.KnownHost` only writes the line.
+    yield* Ssh.KnownHost("demo-known-host", {
+      host: "demo.machine-run.invalid",
+      keyType: "ssh-ed25519",
+      publicKey: "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+    });
+
+    // The Claude backend writes `~/.claude.json` directly, with no CLI involved,
+    // so this exercises the whole AI seam in a container with nothing installed.
+    yield* Ai.McpServer("demo-mcp-server", {
+      tool: "claude",
+      name: "deploy-check-server",
+      transport: { _tag: "Stdio", command: "npx", args: ["-y", "demo-mcp"] },
     });
   }),
 );

@@ -153,7 +153,7 @@ it.effect("CRLF known_hosts: a second entry is appended using the file's own CRL
 // The reconciler, against a real temp file.
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 const observeCtx = { exec: () => Effect.die("Ssh.KnownHost never runs a command") };
 const applyCtx = { ...observeCtx, snapshot: () => Effect.succeed(undefined) };

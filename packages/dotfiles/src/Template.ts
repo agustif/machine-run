@@ -198,6 +198,8 @@ export const makeTemplateReconciler: Effect.Effect<
   return {
     address: (props) => file.address({ path: props.path, content: "" }),
     snapshotBeforeApply: true,
+    // same as File, which it delegates to.
+    refuseUnowned: true,
 
     observe: (props, ctx) => file.observe({ path: props.path, content: "" }, ctx),
 

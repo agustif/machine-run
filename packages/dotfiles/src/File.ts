@@ -121,6 +121,8 @@ export const makeFileReconciler: Effect.Effect<
   return {
     address: (props) => paths.expand(props.path),
     snapshotBeforeApply: true,
+    // owns its content outright, but not a file that predates it.
+    refuseUnowned: true,
 
     observe: (props, ctx) =>
       Effect.gen(function* () {

@@ -1,6 +1,7 @@
 import { Backups, FileLock, silentSession } from "@machine-run/core";
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
 import { CommandExecutor } from "alchemy/Command";
+import { Unowned } from "alchemy/AdoptPolicy";
 import { isResolved } from "alchemy/Diff";
 import * as Provider from "alchemy/Provider";
 import { RemovalPolicy } from "alchemy/RemovalPolicy";
@@ -182,8 +183,19 @@ export const toProvider = <Res extends ResourceLike, E, R>(
         // Alchemy's `read` contract is `undefined`-shaped: this is the one
         // place `Option.getOrUndefined` belongs, converting at the boundary
         // rather than pushing the weaker spelling back into the reconciler.
+        // `read` runs only when there is no prior state, so anything it finds was
+        // not written by a previous run of this resource. For a reconciler that
+        // sets `refuseUnowned`, that is exactly the "someone else's file" case, so
+        // the result is branded and `Plan` refuses unless the run opts into
+        // adoption. The brand is non-enumerable and Alchemy strips it before
+        // persisting, so state never carries it.
         read: Effect.fn(function* ({ olds }: { olds: Res["Props"] }) {
-          return yield* reconciler.observe(olds, observeCtx).pipe(Effect.map(Option.getOrUndefined));
+          const observed = yield* reconciler.observe(olds, observeCtx);
+          if (Option.isNone(observed)) return undefined;
+          return Boolean.match(reconciler.refuseUnowned === true, {
+            onFalse: () => observed.value,
+            onTrue: () => Unowned(observed.value),
+          });
         }),
 
         diff: Effect.fn(function* ({ news }: { news: Res["Props"] }) {

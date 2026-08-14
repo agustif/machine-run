@@ -18,7 +18,7 @@ import {
   type GitConfigProps,
 } from "../src/Config.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A `MachinePaths` whose home is a fixed temp directory — see `Symlink.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>

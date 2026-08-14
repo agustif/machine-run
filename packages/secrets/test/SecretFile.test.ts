@@ -13,7 +13,7 @@ import {
   type SecretFileProps,
 } from "../src/SecretFile.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** `ctx.exec` is unused by the `env` backend, so a stub that dies if it's ever called keeps that honest. */
 const applyCtx = {

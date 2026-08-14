@@ -2,7 +2,9 @@ import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { CommandExecutor, CommandExecutorLive } from "alchemy/Command";
 import * as Effect from "effect/Effect";
+import * as Config from "effect/Config";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { silentSession } from "@machine-run/core";
 import { makePackageReconciler } from "../src/Package.ts";
 
@@ -12,7 +14,20 @@ import { makePackageReconciler } from "../src/Package.ts";
  * and every entry names a manager and a package. Asserting a specific package
  * would pin the test to whatever happens to be installed here.
  */
-it.effect("list enumerates real packages from whichever managers are present", () =>
+/**
+ * Opt-in, like `windowsLive.test.ts` and `IcaclsLive.test.ts`: it shells out to
+ * every package manager on the host, which is slow and contends with the rest of
+ * the suite — it passed alone and failed under full-suite load, which is exactly
+ * the flakiness the `*Live` convention exists to keep out of the default run.
+ *
+ *     MACHINE_RUN_LIVE_PACKAGE_LIST=1 npx vitest run packages/system-packages/test/listLive.test.ts
+ */
+// Same shape `windowsLive.test.ts` uses for its own opt-in env vars.
+const optedIn = Option.isSome(
+  Effect.runSync(Config.option(Config.string("MACHINE_RUN_LIVE_PACKAGE_LIST"))),
+);
+
+it.effect.skipIf(!optedIn)("list enumerates real packages from whichever managers are present", () =>
   Effect.gen(function* () {
     const reconciler = yield* makePackageReconciler;
     const list = reconciler.list;

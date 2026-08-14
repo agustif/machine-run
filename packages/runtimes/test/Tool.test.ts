@@ -13,7 +13,7 @@ import {
   type RuntimeToolState,
 } from "../src/Tool.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Queues one fixture per call — `Runtime.Tool.observe` issues exactly one command against mise. */
 const queuedExec = (outputs: readonly string[]): Exec => {
