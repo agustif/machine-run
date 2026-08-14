@@ -37,7 +37,7 @@ the shape of using it directly:
 import { makeEncryptedState } from "@machine-run/state";
 import * as Alchemy from "alchemy";
 
-export default Alchemy.Stack<{}>()(
+export default Alchemy.Stack(
   "my-machine",
   {
     providers: Machine.providers(),

@@ -33,7 +33,7 @@ import { shell } from "./recipes/shell.ts";
  * resource means editing the module that owns its domain.
 
  */
-export default Alchemy.Stack<{}>()(
+export default Alchemy.Stack(
   "complete-machine",
   {
     providers: Machine.providers(),

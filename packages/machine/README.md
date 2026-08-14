@@ -30,7 +30,7 @@ import * as Machine from "@machine-run/machine";
 import * as Alchemy from "alchemy";
 import * as Effect from "effect/Effect";
 
-export default Alchemy.Stack<{}>()(
+export default Alchemy.Stack(
   "complete-machine",
   {
     providers: Machine.providers(),

@@ -1,103 +1,138 @@
-# The `plan` blocker: minimal reproduction
+# The `plan` blocker: resolved, and it was ours
 
-Evidence for an upstream report. Everything here was run, not inferred.
+This file used to be evidence for an upstream bug report. It is kept because
+the diagnosis was wrong in an instructive way, and because the wrong version
+was cited from four other documents.
 
-## What fails
-
-`alchemy plan` cannot complete. Two distinct faults sit behind it; the first is
-fixed by a patch in this repo, the second is not.
-
-## Fault 1 — layer ordering (patched here)
-
-`Stack.evalStack` wires `Layer.provideMerge(alchemy(dev), platform)`, providing
-`platform` **to** the layer that produces `AlchemyContext`. But `platform`
-contains `Logger.layer([fileLogger("out")])`, and `fileLogger` opens with
-`yield* AlchemyContext` to find the `.alchemy` directory, while
-`AlchemyContextLive` needs the `FileSystem` and `Path` that `platform` supplies.
+**Status: fixed.** `plan` runs. Against `examples/example-machine`:
 
 ```
-Error: Service not found: alchemy/Context
-    at alchemy/src/Stack.ts:307
-    at alchemy/src/Util/FileLogger.ts:7
+Plan: 3 to create, 5 to update
+[brew-fd] update
+[brew-mise] update
+[brew-ripgrep] update
+[dock-autohide] update
+[finder-toolbar] update
+[gitconfig-include-personal] create
+[gitconfig-personal] create
+[shell-path] create
 ```
 
-`patches/alchemy+2.0.0-beta.72.patch` gives the logger layer its own context,
-built from the platform services it actually needs.
+## The cause
 
-## Fault 2 — an `undefined` reaches the run loop (open)
-
-Past that, planning dies with:
-
-```
-Fiber.runLoop: Not a valid effect: undefined
-```
-
-### Minimal reproduction
-
-**Zero resources, `Layer.empty` providers, in-memory state, and no machine-run
-import of any kind:**
+Every recipe in this repo ended with:
 
 ```ts
-import * as Alchemy from "alchemy";
-import { inMemoryState } from "alchemy/State/InMemoryState";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-
-export default Alchemy.Stack<{}>()(
-  "empty",
-  { providers: Layer.empty, state: inMemoryState() },
-  Effect.gen(function* () {
-    yield* Effect.void;
-  }),
-);
+export default Alchemy.Stack<{}>()(name, options, effect);
 ```
 
-Planning this fails identically. **Nothing this repo wrote is involved.**
+`Stack` is `taggedFunction(..., (stackName, options, eff) => { if (!stackName) { ... } })`.
+Calling `Stack()` with **no arguments** takes that `if (!stackName)` branch,
+which returns
 
-### What has been ruled out, with evidence
+```ts
+(stackName) => Object.assign(Output.stackRef(stackName).pipe(effectClass), { ... })
+```
 
-| Hypothesis | How it was excluded |
+— a builder for a **cross-stack reference**, accepting only a name and
+discarding both `options` and the effect. So `Alchemy.Stack<{}>()(name, options, effect)`
+never built a stack. It built a `StackRefExpr` naming one, and threw the recipe
+away.
+
+## Why it surfaced four layers later
+
+1. `evalStack` does `const stack = yield* effect` — which yields the
+   `StackRefExpr`, whose own keys are `{ stack: "<name>", stage, kind }`.
+2. It then does `Effect.provide(stack.services)`. `StackRefExpr` is a lazy
+   property-expression proxy, so `.services` returns a `PropExpr` with
+   `identifier: "services"` rather than a `Layer`. Nothing validates it.
+3. `Layer.buildWithMemoMap` calls `self.build(memoMap, scope)` on that
+   `PropExpr`, which returns `undefined`.
+4. That `undefined` is handed to `internalEffect.map(...)`, producing a
+   `flatMap` primitive whose `args` slot is `undefined`.
+5. Evaluating it makes `current` `undefined` inside `FiberImpl.runLoop`, whose
+   `catch` block replaces the real `TypeError` with
+   `Fiber.runLoop: Not a valid effect: undefined` — discarding the only
+   information that pointed anywhere.
+
+Step 5 is why this looked like an Effect defect, and step 2 is why it looked
+like an Alchemy one. Neither was.
+
+## How it was actually found
+
+Instrumenting Effect's `dist` at three points, in this order:
+
+1. In `runLoop`, capture `current` **before** `current[evaluate](this)` and log
+   it when the result is `undefined`. The `catch` block overwrites `current`, so
+   the producer's identity is otherwise lost. This named the producer as a
+   `flatMap` primitive whose `successCont` was
+   `a => succeed(internalCall(() => f(a)))` — i.e. `Effect.map`.
+2. In `map`, log a construction stack when `self === undefined`. This pointed
+   at `Layer.js`'s `buildWithMemoMap`.
+3. In `buildWithMemoMap`, log `self` when `self.build(...)` returns `undefined`.
+   This printed `constructor: PropExpr`, `identifier: "services"` — the whole
+   answer.
+
+Each step took one run, because the CLI fails in about a second (see below).
+
+## Causation, proven with one variable
+
+Toggling only the call form on `examples/example-machine/alchemy.run.ts`, same
+build, same command:
+
+| form | result |
 |---|---|
-| The state store | Reproduces with `inMemoryState()`, not only `localState()` |
-| Our resources or providers | Reproduces with zero resources and `Layer.empty` |
-| A missing provider | `findProviderByType` dies with a clear message instead |
-| `providerForMode`'s unchecked `modes` index | Our providers carry no `modes`, so that branch never runs |
-| `Logger.layer` receiving an `Effect` | Its signature explicitly accepts one |
-| `effectify`'s resume passing `undefined` | Instrumented both branches; `succeed(result)` is never `undefined` |
-| `FiberImpl.evaluate` receiving `undefined` | Instrumented; never called with it |
+| `Alchemy.Stack<{}>()(name, options, effect)` | `Fiber.runLoop: Not a valid effect: undefined` |
+| `Alchemy.Stack(name, options, effect)` | `Plan: 3 to create, 5 to update` |
 
-### Where it comes from
+## What the curried form was for
 
-With Effect's `dist` build instrumented at the throw site:
+A real variance problem, recorded in the comment it replaced:
+`ProviderServices` contains `Provider<any>`, and `Provider<T>` declares `of` as
+a property-style function, making it invariant in `T` under
+`strictFunctionTypes` — so no `Provider<Machine.File>` was assignable to
+`Provider<any>`, and the direct overload appeared unusable.
 
-```
-Error: origin
-    at FiberImpl.runLoop      effect/src/internal/effect.ts:676
-    at FiberImpl.evaluate     effect/src/internal/effect.ts:610
-    at                        effect/src/internal/effect.ts:1117   (callback)
-    at                        effect/src/Effect.ts:24831           (effectify resume)
-    at FSReqCallback.oncomplete  node:fs
-```
+It no longer reproduces: `examples/example-machine` and
+`examples/complete-machine` both type-check against the direct form. Whatever
+the original obstacle was, the workaround outlived it — and its cost was that
+the engine could never run, for the whole life of the repo, because the
+workaround type-checked while returning a value of the wrong runtime kind.
 
-`evaluate` receives a valid effect and `current` becomes `undefined` *during*
-the loop — so a **continuation returns `undefined`** rather than an Effect,
-immediately after a filesystem read resumes. In practice that is a `yield*` on
-an undefined value, or a `flatMap` whose function returns nothing, somewhere in
-the plan path that runs after an fs read.
+## Two earlier claims in this file that were wrong
 
-### The second bug, which is arguably worse
+- **"Nothing this repo wrote is involved."** The minimal reproduction offered as
+  proof — zero resources, `Layer.empty`, `inMemoryState()`, no machine-run
+  import — used `Alchemy.Stack<{}>()(...)` itself. It reproduced our own misuse,
+  not an upstream defect, and its apparent independence is what kept the search
+  pointed upstream.
+- **"The failure is silent: Node exits 0 having printed nothing", and
+  "an `Effect.timeout` that never fired because it lived in the fiber that
+  died."** Measured: the CLI printed its full diagnosis and then hung forever
+  (exit 124 under an external timeout). `Effect.timeout` observes the defect
+  fine — verified three ways. The real second bug was that nothing exited:
+  Alchemy's concurrent plan path leaves ~1000 promise resources outstanding
+  (confirmed with `async_hooks`) and `bin.ts` never called `process.exit`. Fixed
+  by `NodeRuntime.runMain`, which forces exit on a non-zero code. That is what
+  makes the CLI fail in ~1s instead of hanging, and it is what made the
+  three-step instrumentation above practical.
 
-The failure is silent. A defect thrown inside the run loop can leave the driving
-promise unsettled: the event loop drains and **Node exits 0 having printed
-nothing**. Verified on the reproduction above — no output, no uncaught
-exception, no unhandled rejection, exit code 0, and an `Effect.timeout` that
-never fired because it lived in the fiber that died.
+## Fault 1, and the patch that addressed it
 
-That is why `alchemy plan` presents as "exits 1, prints nothing, even at
-`--log-level all`", and why this took instrumenting Effect's internals to see at
-all.
+Separately, `Stack.evalStack` wires `Layer.provideMerge(alchemy(dev), platform)`
+where `platform` contains `Logger.layer([fileLogger("out")])`, and `fileLogger`
+opens with `yield* AlchemyContext` while `AlchemyContextLive` needs the
+`FileSystem` and `Path` that `platform` supplies. That produces
+`Service not found: alchemy/Context`.
 
-`@machine-run/cli` refuses to reproduce that: every path prints, failure is
-always non-zero, and a program that never settles is raced against a plain timer
-**outside** Effect — an Effect-native timer cannot catch a defect that kills the
-fiber it lives in.
+`patches/alchemy+2.0.0-beta.72.patch` addresses it — but **only in
+`node_modules/alchemy/src/Stack.ts`**, and alchemy's `exports` map resolves
+`./Stack` to `./lib/Stack.js` under the `import` condition. `src` is reached
+only under `bun` or `worker`. So under Node the patch changes nothing, which was
+verified twice: reverting it leaves `plan` working identically, and applying the
+same change to `lib/Stack.js` by hand changed nothing either. The fault-1 stack
+trace in the original version of this file cites `alchemy/src/...` paths,
+which is the tell — it was captured from a `src`-resolving run.
+
+The patch is therefore correct for `bun`, inert for Node, and was never what
+stood between this repo and a working `plan`.

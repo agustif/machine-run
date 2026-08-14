@@ -38,7 +38,34 @@ export class RecipeNotAStack extends Data.TaggedError("RecipeNotAStack")<{
   found: string;
 }> {
   override get message() {
-    return `"${this.path}" does not default-export a stack (found ${this.found}). A recipe ends with \`export default Alchemy.Stack<{}>()(...)\`.`;
+    return `"${this.path}" does not default-export a stack (found ${this.found}). A recipe ends with \`export default Alchemy.Stack(name, options, effect)\`.`;
+  }
+}
+
+/**
+ * The default export is a *reference to* a stack rather than a stack.
+ *
+ * `Alchemy.Stack()` called with no arguments returns a cross-stack reference
+ * builder — `(stackName) => Output.stackRef(stackName)` — which accepts only a
+ * name and discards both the options and the effect. So
+ * `Alchemy.Stack<{}>()(name, options, effect)` type-checks, runs, and yields a
+ * `StackRefExpr` that names a stack it never built.
+ *
+ * That is worth its own error because of how far the consequence lands from the
+ * cause. `evalStack` reads `.services` off the reference, gets a lazy
+ * `PropExpr` instead of a `Layer`, `Layer.buildWithMemoMap` calls `.build()` on
+ * it and receives `undefined`, and the run loop finally reports
+ * `Fiber.runLoop: Not a valid effect: undefined` — four layers away, naming
+ * neither the recipe nor the call that caused it. This repo spent its entire
+ * history unable to run the engine because of it, chasing that message
+ * upstream. See docs/notes/plan-blocker-repro.md.
+ */
+export class RecipeIsStackReference extends Data.TaggedError("RecipeIsStackReference")<{
+  path: string;
+  stackName: string;
+}> {
+  override get message() {
+    return `"${this.path}" default-exports a *reference* to the stack "${this.stackName}", not a stack. That is what \`Alchemy.Stack<...>()(name, options, effect)\` produces: calling \`Stack()\` with no arguments returns a cross-stack reference builder that takes only a name and throws away the options and the effect. Write \`export default Alchemy.Stack(name, options, effect)\` — the direct three-argument form.`;
   }
 }
 
@@ -107,20 +134,39 @@ export const resolveRecipePath = (
  * this does catch is the two mistakes that are otherwise mystifying: no default
  * export at all, and a module that throws on import.
  */
+/**
+ * Whether a value is Alchemy's `StackRefExpr` — identified by the `kind` tag
+ * its own `Output.isStackRefExpr` reads, so this stays true to how Alchemy
+ * itself distinguishes them rather than inventing a second rule.
+ */
+const isStackReference = (value: object): value is { readonly stack: string } =>
+  "kind" in value && value.kind === "StackRefExpr" && "stack" in value;
+
 export const loadRecipe = (
   absolutePath: string,
-): Effect.Effect<Recipe, RecipeImportFailed | RecipeNotAStack> =>
+): Effect.Effect<Recipe, RecipeImportFailed | RecipeNotAStack | RecipeIsStackReference> =>
   Effect.tryPromise({
     try: () => importRecipeModule(absolutePath),
     catch: (cause) => new RecipeImportFailed({ path: absolutePath, cause }),
   }).pipe(
-    Effect.flatMap((module) => {
+    // Annotated because the branches below fail with three different error
+    // types and inference otherwise settles on whichever it reads first.
+    Effect.flatMap((module): Effect.Effect<Recipe, RecipeNotAStack | RecipeIsStackReference> => {
       const exported = module.default;
       if (exported === null || exported === undefined) {
         return Effect.fail(new RecipeNotAStack({ path: absolutePath, found: "no default export" }));
       }
       if (typeof exported !== "object" && typeof exported !== "function") {
         return Effect.fail(new RecipeNotAStack({ path: absolutePath, found: typeof exported }));
+      }
+      // A `StackRefExpr` reaches here as a perfectly well-formed Effect, so this
+      // is checked by its own `kind` tag rather than by shape. Cheap, and it
+      // converts the worst error message in this repo's history into one that
+      // names the mistake.
+      if (isStackReference(exported)) {
+        return Effect.fail(
+          new RecipeIsStackReference({ path: absolutePath, stackName: exported.stack }),
+        );
       }
       // The single unavoidable narrowing in this package, and it is a genuine
       // boundary: a compiled stack is an Effect carrying functions and a

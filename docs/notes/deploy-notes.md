@@ -259,7 +259,7 @@ yields `undefined` to Effect's fiber runtime where an `Effect` was expected.
    `@machine-run/core` services still wired in.
 4. Reproduced with **zero custom providers at all** — `providers: Layer.empty`,
    no `@machine-run/*` import whatsoever, just
-   `Alchemy.Stack<{}>()("debug-bare", { providers: Layer.empty, state: Alchemy.localState() }, Effect.gen(function* () { yield* Effect.void; }))`.
+   `Alchemy.Stack("debug-bare", { providers: Layer.empty, state: Alchemy.localState() }, Effect.gen(function* () { yield* Effect.void; }))`.
 5. Reproduced identically **on the host** (macOS, outside Docker entirely,
    with `HOME` overridden to a scratch directory) — ruling out anything
    Linux- or container-specific.
