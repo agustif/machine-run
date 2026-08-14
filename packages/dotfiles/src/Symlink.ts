@@ -1,4 +1,4 @@
-import { isNotFound, MachinePaths } from "@machine-run/core";
+import { isNotFound, MachinePaths, statIfPresent } from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -97,10 +97,12 @@ export const makeSymlinkReconciler: Effect.Effect<
       Effect.catchTag("PlatformError", (cause) =>
         fs.stat(linkPath).pipe(
           Effect.as(Option.none<string>()),
-          Effect.catchTag("PlatformError", () =>
-            isNotFound(cause)
-              ? Effect.succeed(Option.none<string>())
-              : Effect.fail(new SymlinkPathUnreadable({ path: linkPath, cause })),
+          Effect.catchTag("PlatformError", (statCause) =>
+            isNotFound(statCause)
+              ? isNotFound(cause)
+                ? Effect.succeed(Option.none<string>())
+                : Effect.fail(new SymlinkPathUnreadable({ path: linkPath, cause }))
+              : Effect.fail(new SymlinkPathUnreadable({ path: linkPath, cause: statCause })),
           ),
         ),
       ),
@@ -118,7 +120,12 @@ export const makeSymlinkReconciler: Effect.Effect<
   const occupied = (target: string) =>
     Effect.gen(function* () {
       if (Option.isSome(yield* currentTarget(target))) return true;
-      return yield* fs.exists(target).pipe(Effect.orElseSucceed(() => false));
+      const info = yield* statIfPresent(
+        fs,
+        target,
+        (cause) => new SymlinkPathUnreadable({ path: target, cause }),
+      );
+      return Option.isSome(info);
     });
 
   return {
@@ -161,7 +168,12 @@ export const makeSymlinkReconciler: Effect.Effect<
 
     apply: ({ desired }) =>
       Effect.gen(function* () {
-        if (!(yield* fs.exists(desired.source))) {
+        const source = yield* statIfPresent(
+          fs,
+          desired.source,
+          (cause) => new SymlinkPathUnreadable({ path: desired.source, cause }),
+        );
+        if (Option.isNone(source)) {
           return yield* Effect.fail(new SymlinkSourceMissing({ source: desired.source }));
         }
 

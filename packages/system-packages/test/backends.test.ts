@@ -1,4 +1,5 @@
 import type { ApplyContext, Exec, ExecutionContext, ObserveContext } from "@machine-run/engine";
+import { CommandError, UnexpectedExit } from "alchemy/Command";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
@@ -60,6 +61,14 @@ const capturingExec =
   (props) => {
     calls.push(props.command);
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
+  };
+
+/** Records a command and supplies output from the manager's read path only. */
+const readbackExec =
+  (output: (command: string) => string, calls: string[]): Exec =>
+  (props) => {
+    calls.push(props.command);
+    return Effect.succeed({ exitCode: 0, stdout: output(props.command), stderr: "" });
   };
 
 /** Real captured CLI output committed under `test/fixtures/` — see `languageBackends.test.ts`. */
@@ -1457,6 +1466,19 @@ it.effect(
     }),
 );
 
+it.effect("Package inventory propagates probe failures instead of hiding a broken manager", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makePackageReconciler;
+    if (reconciler.list === undefined) return yield* Effect.die("expected Package.list");
+    const error = new CommandError({
+      command: "command -v brew",
+      reason: new UnexpectedExit({ exitCode: 1, stderr: "permission denied" }),
+    });
+    const failure = yield* reconciler.list({ exec: () => Effect.fail(error) }).pipe(Effect.flip);
+    expect(failure).toBe(error);
+  }),
+);
+
 it.effect(
   "Package reconciler observe: Option.none() when the package is missing from a live listing",
   () =>
@@ -1504,12 +1526,35 @@ it.effect("Package reconciler apply: installs the package and returns its state"
 
     const result = yield* reconciler.apply(
       { props, observed: Option.none(), desired },
-      applyCtx(capturingExec("", calls)),
+      applyCtx(readbackExec((command) => (command.startsWith("brew list") ? "fd\n" : ""), calls)),
     );
 
     expect(result).toEqual({ manager: "brew", name: "fd" });
-    expect(calls).toEqual(["brew install fd"]);
+    expect(calls).toEqual(["brew install fd", "brew list --formula --full-name"]);
   }),
+);
+
+it.effect(
+  "Package reconciler apply: surfaces a successful install that never appears in a fresh listing",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const calls: string[] = [];
+      const props: PackageProps = { manager: "brew", name: "fd" };
+      const desired = yield* reconciler.desired(props);
+
+      const error = yield* reconciler
+        .apply(
+          { props, observed: Option.none(), desired },
+          applyCtx(
+            readbackExec((command) => (command.startsWith("brew list") ? "ripgrep\n" : ""), calls),
+          ),
+        )
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("PackageNotConverged");
+      expect(calls).toEqual(["brew install fd", "brew list --formula --full-name"]);
+    }),
 );
 
 it.effect(
@@ -1711,11 +1756,19 @@ it.effect(
       // refused. It must not be: `apply` should reach `install`.
       const result = yield* reconciler.apply(
         { props, observed, desired },
-        applyCtx(capturingExec("", calls)),
+        applyCtx(
+          readbackExec(
+            (command) => (command.startsWith("flatpak list") ? "org.gnome.Platform\t45\n" : ""),
+            calls,
+          ),
+        ),
       );
 
       expect(result).toEqual(desired);
-      expect(calls).toEqual(["flatpak install -y --noninteractive org.gnome.Platform//45"]);
+      expect(calls).toEqual([
+        "flatpak install -y --noninteractive org.gnome.Platform//45",
+        "flatpak list --app --columns=application,branch",
+      ]);
     }),
 );
 
@@ -1745,7 +1798,12 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makePackageReconciler;
       const calls: string[] = [];
-      const exec = capturingExec("ripgrep\n", calls);
+      let listing = 0;
+      const exec = readbackExec((command) => {
+        if (!command.startsWith("brew list")) return "";
+        listing += 1;
+        return listing === 1 ? "ripgrep\n" : listing === 2 ? "ripgrep\nfd\n" : "ripgrep\nfd\neza\n";
+      }, calls);
 
       const reconcileOne = (name: string) =>
         Effect.gen(function* () {
@@ -1764,14 +1822,15 @@ it.effect(
       yield* reconcileOne("fd");
       // A third package on the same manager: the cache was invalidated by
       // the "fd" install, so this must re-list rather than reuse the first
-      // (now-stale) snapshot.
+      // (now-stale) snapshot. The confirmation read is the second listing;
+      // installing "eza" then invalidates it and performs a third listing.
       yield* reconcileOne("eza");
 
       const listCalls = calls.filter((c) => c.includes("list"));
       const installCalls = calls.filter((c) => c.includes("install"));
-      // Two real listings (initial + one re-list after the "fd" install),
-      // NOT three — one per resource is exactly the bug this fixes.
-      expect(listCalls.length).toBe(2);
+      // Three real listings: initial, post-fd confirmation, post-eza
+      // confirmation. There is still no redundant listing for the cache hit.
+      expect(listCalls.length).toBe(3);
       expect(installCalls).toEqual(["brew install fd", "brew install eza"]);
     }),
 );
@@ -1832,11 +1891,30 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
 
     const result = yield* reconciler.apply(
       { props, observed: Option.none(), desired },
-      applyCtx(capturingExec("", calls)),
+      applyCtx(readbackExec((command) => (command === "brew tap" ? "can1357/tap\n" : ""), calls)),
     );
 
     expect(result).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
-    expect(calls).toEqual(["brew tap can1357/tap"]);
+    expect(calls).toEqual(["brew tap can1357/tap", "brew tap"]);
+  }),
+);
+
+it.effect("Repo reconciler apply: surfaces a successful add missing from a fresh listing", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRepoReconciler;
+    const calls: string[] = [];
+    const props: RepoProps = { repo: { _tag: "Brew", tap: "can1357/tap" } };
+    const desired = yield* reconciler.desired(props);
+
+    const error = yield* reconciler
+      .apply(
+        { props, observed: Option.none(), desired },
+        applyCtx(readbackExec(() => "other/tap\n", calls)),
+      )
+      .pipe(Effect.flip);
+
+    expect(error._tag).toBe("RepoNotConverged");
+    expect(calls).toEqual(["brew tap can1357/tap", "brew tap"]);
   }),
 );
 
@@ -1923,11 +2001,18 @@ it.effect(
 
       const result = yield* reconciler.apply(
         { props, observed: Option.none(), desired },
-        applyCtx(capturingExec("", calls), SUDO),
+        applyCtx(
+          readbackExec(
+            (command) =>
+              command === "dnf copr list" ? "copr.fedorainfracloud.org/atim/lazygit\n" : "",
+            calls,
+          ),
+          SUDO,
+        ),
       );
 
       expect(result).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
-      expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
+      expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit", "dnf copr list"]);
     }),
 );
 
@@ -1942,10 +2027,16 @@ it.effect(
 
       yield* reconciler.apply(
         { props, observed: Option.none(), desired },
-        applyCtx(capturingExec("", calls)),
+        applyCtx(
+          readbackExec(
+            (command) =>
+              command === "dnf copr list" ? "copr.fedorainfracloud.org/atim/lazygit\n" : "",
+            calls,
+          ),
+        ),
       );
 
-      expect(calls).toEqual(["dnf copr enable -y atim/lazygit"]);
+      expect(calls).toEqual(["dnf copr enable -y atim/lazygit", "dnf copr list"]);
     }),
 );
 
@@ -2029,12 +2120,21 @@ it.effect(
 
       const result = yield* reconciler.apply(
         { props, observed: Option.none(), desired },
-        applyCtx(capturingExec("", calls)),
+        applyCtx(
+          readbackExec(
+            (command) =>
+              command === "flatpak remotes --columns=name,url"
+                ? "flathub\thttps://dl.flathub.org/repo/\n"
+                : "",
+            calls,
+          ),
+        ),
       );
 
       expect(result).toEqual(props);
       expect(calls).toEqual([
         "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+        "flatpak remotes --columns=name,url",
       ]);
     }),
 );

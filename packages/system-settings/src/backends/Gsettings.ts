@@ -1,4 +1,5 @@
 import { Sh } from "@machine-run/core";
+import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import {
@@ -6,10 +7,21 @@ import {
   type GsettingsRelocatableIdentity,
   type SettingsBackend,
   SettingKeyInvalid,
+  SettingResetNotCommitted,
 } from "../Backend.ts";
 
 const SCHEMA_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const KEY_NAME_PATTERN = /^[A-Za-z0-9-]+$/;
+
+/**
+ * Only these two real gsettings diagnostics mean that the requested identity
+ * is absent. A missing binary, missing D-Bus session, permissions failure, or
+ * any future exit shape must remain a command error.
+ */
+const isMissingSchemaOrKey = (error: CommandError): boolean =>
+  error.reason._tag === "UnexpectedExit" &&
+  error.reason.exitCode === 1 &&
+  /No such (schema|key)/i.test(error.reason.stderr);
 
 /** A GSettings schema id is a reverse-DNS-style dotted name — never a bare word, never containing a colon. */
 const checkSchema = (schema: string): Effect.Effect<string, SettingKeyInvalid> =>
@@ -119,14 +131,13 @@ export const GsettingsBackend: SettingsBackend<GsettingsIdentity | GsettingsRelo
       Effect.flatMap(([schema, key]) =>
         exec({ command: Sh.sh("gsettings", "get", schema, key), shell: true }).pipe(
           Effect.map((result) => result.stdout.trim()),
-          // A non-zero exit means the schema isn't installed or the key
-          // doesn't exist in it ("No such schema"/"No such key", verified
-          // above) — an ordinary state to converge from, the same collapse
-          // `MacOS.Default`'s `observe` makes for a missing `defaults`
-          // domain/key. A key that exists but was never explicitly set is
-          // NOT this case: GSettings always has a schema-provided default,
-          // so `get` on such a key exits 0 and returns that default's text.
-          Effect.orElseSucceed(() => undefined),
+          // Only the captured "No such schema"/"No such key" diagnostics are
+          // ordinary absence. A key that exists but was never explicitly set
+          // still exits 0 and returns its schema default. Every other command
+          // failure remains visible to the reconciler.
+          Effect.catchTag("CommandError", (error) =>
+            isMissingSchemaOrKey(error) ? Effect.succeed(undefined) : Effect.fail(error),
+          ),
         ),
       ),
     ),
@@ -153,8 +164,13 @@ export const GsettingsBackend: SettingsBackend<GsettingsIdentity | GsettingsRelo
   reset: (identity, exec) =>
     Effect.all([schemaArg(identity), checkKeyName(identity.key)]).pipe(
       Effect.flatMap(([schema, key]) =>
-        exec({ command: Sh.sh("gsettings", "reset", schema, key), shell: true }),
+        exec({ command: Sh.sh("gsettings", "reset", schema, key), shell: true }).pipe(
+          Effect.flatMap(({ stderr }) =>
+            stderr === ""
+              ? Effect.void
+              : Effect.fail(new SettingResetNotCommitted({ backend: "gsettings", stderr })),
+          ),
+        ),
       ),
-      Effect.asVoid,
     ),
 };

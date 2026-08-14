@@ -64,12 +64,13 @@ live desktop writes back may be spelled differently from what a headless
 
 - **Does implement `unapply`** — worth calling out because it's rare in this
   repo (see [../../docs/MAP.md](../../docs/MAP.md) §5): `unapply` calls each
-  backend's `reset` (`gsettings reset` / `dconf reset`) and re-reads to confirm
-  the value actually changed, the same read-back discipline `apply` uses for
-  `write`. No Windows registry backend, and no plan to fold `MacOS.Default`
-  into this seam as a backend — property-list values are structured, this
-  seam's `value` is GVariant text, a real mismatch not just an omission. See
-  [TASKS.md](./TASKS.md).
+  backend's `reset` (`gsettings reset` / `dconf reset`) and verifies that a
+  known silent no-op was not reported as success. It deliberately does not
+  require the post-reset value to differ: a schema default may already equal
+  the value this resource recorded. No Windows registry backend, and no plan
+  to fold `MacOS.Default` into this seam as a backend — property-list values
+  are structured, this seam's `value` is GVariant text, a real mismatch not
+  just an omission. See [TASKS.md](./TASKS.md).
 
 See [TASKS.md](./TASKS.md) for the rest, including relocatable-schema
 addressing and the still-open Windows registry gap.

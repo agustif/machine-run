@@ -1,4 +1,4 @@
-import { isNotFound, MachinePaths, Sh, statIfPresent } from "@machine-run/core";
+import { isNotFound, MachinePaths, Platform, statIfPresent } from "@machine-run/core";
 import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -10,6 +10,7 @@ import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { isExitCode } from "./exitCode.ts";
 import { showToplevel } from "./toplevel.ts";
+import { gitCommand } from "./command.ts";
 
 /**
  * Ensures a clone of `remote` exists at `path` — dotfiles repos, work
@@ -160,12 +161,10 @@ export type GitRepoError = GitRepoPathOccupied | GitRepoCommandFailed | GitRepoP
  */
 const getOriginUrl = (
   target: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<string | undefined, GitRepoCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "-C", target, "remote", "get-url", "origin"),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "-C", target, "remote", "get-url", "origin")).pipe(
     Effect.map((result) => result.stdout.trim()),
     Effect.catch((error) =>
       isExitCode(error, 2)
@@ -177,10 +176,11 @@ const getOriginUrl = (
 export const makeGitRepoReconciler: Effect.Effect<
   Reconciler<GitRepoProps, GitRepoState, GitRepoError>,
   never,
-  FileSystem.FileSystem | MachinePaths
+  FileSystem.FileSystem | MachinePaths | Platform
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const paths = yield* MachinePaths;
+  const platform = yield* Platform;
 
   return {
     address: (props) => paths.expand(props.path),
@@ -217,7 +217,7 @@ export const makeGitRepoReconciler: Effect.Effect<
           }),
         );
 
-        const toplevel = yield* showToplevel(target, ctx.exec).pipe(
+        const toplevel = yield* showToplevel(target, platform, ctx.exec).pipe(
           Effect.mapError((cause) => new GitRepoCommandFailed({ path: target, cause })),
         );
 
@@ -226,13 +226,21 @@ export const makeGitRepoReconciler: Effect.Effect<
           // macOS `/tmp` is itself a symlink to `/private/tmp`, so a
           // literal-string comparison of two otherwise-identical absolute
           // paths can disagree over exactly that boundary.
-          const realRoot = yield* fs
-            .realPath(toplevel.value)
-            .pipe(Effect.orElseSucceed(() => toplevel.value));
-          const realTarget = yield* fs.realPath(target).pipe(Effect.orElseSucceed(() => target));
+          const realRoot = yield* fs.realPath(toplevel.value).pipe(
+            Effect.catchTag(
+              "PlatformError",
+              (cause) => Effect.fail(new GitRepoPathUnreadable({ path: toplevel.value, cause })),
+            ),
+          );
+          const realTarget = yield* fs.realPath(target).pipe(
+            Effect.catchTag(
+              "PlatformError",
+              (cause) => Effect.fail(new GitRepoPathUnreadable({ path: target, cause })),
+            ),
+          );
 
           if (realRoot === realTarget) {
-            const remote = yield* getOriginUrl(target, ctx.exec);
+            const remote = yield* getOriginUrl(target, platform, ctx.exec);
             return Option.some({ path: target, ...(remote !== undefined ? { remote } : {}) });
           }
         }
@@ -281,9 +289,9 @@ export const makeGitRepoReconciler: Effect.Effect<
       Effect.gen(function* () {
         if (Option.isNone(observed)) {
           yield* ctx
-            .exec({
-              command: Sh.sh(
-                "git",
+            .exec(
+              gitCommand(
+                platform,
                 "clone",
                 ...(props.branch !== undefined ? ["--branch", props.branch] : []),
                 "--origin",
@@ -291,8 +299,7 @@ export const makeGitRepoReconciler: Effect.Effect<
                 props.remote,
                 desired.path,
               ),
-              shell: true,
-            })
+            )
             .pipe(
               Effect.catch((cause) =>
                 Effect.fail(new GitRepoCommandFailed({ path: desired.path, cause })),
@@ -307,7 +314,7 @@ export const makeGitRepoReconciler: Effect.Effect<
               ? ["remote", "add", "origin", props.remote]
               : ["remote", "set-url", "origin", props.remote];
           yield* ctx
-            .exec({ command: Sh.sh("git", "-C", desired.path, ...args), shell: true })
+            .exec(gitCommand(platform, "-C", desired.path, ...args))
             .pipe(
               Effect.catch((cause) =>
                 Effect.fail(new GitRepoCommandFailed({ path: desired.path, cause })),

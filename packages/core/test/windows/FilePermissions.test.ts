@@ -1,4 +1,9 @@
 import { expect, it } from "@effect/vitest";
+import { CommandError, UnexpectedExit } from "alchemy/Command";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Fs from "node:fs";
+import * as Path from "node:path";
 import {
   fromPosixMode,
   rightsForClass,
@@ -7,6 +12,12 @@ import {
   toWindowsAclPlan,
   WELL_KNOWN_PRINCIPALS,
 } from "../../src/windows/FilePermissions.ts";
+import { applyMode, readAcl } from "../../src/windows/Permissions.ts";
+
+const icaclsFixture = Fs.readFileSync(
+  Path.join(import.meta.dirname, "..", "fixtures", "icacls-c-drive.txt"),
+  "utf8",
+);
 
 it("decomposes a POSIX mode into owner/group/other booleans", () => {
   expect(fromPosixMode(0o600, "file")).toEqual({
@@ -111,3 +122,67 @@ it("renders no /grant:r tokens at all for 0o000 — every principal omitted", ()
   const argv = toIcaclsArgv("C:\\secret", plan);
   expect(argv).toEqual(["icacls", "C:\\secret", "/inheritance:r"]);
 });
+
+it.effect("applies Windows permissions through PowerShell, not cmd.exe", () =>
+  Effect.gen(function* () {
+    const calls: Array<{ readonly command: string; readonly shell: boolean | string }> = [];
+    yield* applyMode(
+      (props) => {
+        calls.push(props);
+        return Effect.succeed({ stdout: "" });
+      },
+      "C:\\Users\\me\\secret",
+      0o600,
+      "file",
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.shell).toBe("powershell.exe");
+    expect(calls[0]?.command).toContain("*S-1-3-4:(RD,REA,RA,RC,S,WD,AD,WEA,WA)");
+  }),
+);
+
+it.effect("does not report success when icacls fails", () =>
+  Effect.gen(function* () {
+    const expected = new CommandError({
+      command: "icacls",
+      reason: new UnexpectedExit({ exitCode: 5, stderr: "Access is denied" }),
+    });
+    const failure = yield* applyMode(
+      () => Effect.fail(expected),
+      "C:\\Users\\me\\secret",
+      0o600,
+      "file",
+    ).pipe(Effect.flip);
+
+    expect(failure).toBe(expected);
+  }),
+);
+
+it.effect("keeps command failure recoverable but rejects malformed successful output", () =>
+  Effect.gen(function* () {
+    const unavailable = yield* readAcl(
+      () =>
+        Effect.fail(
+          new CommandError({
+            command: "icacls",
+            reason: new UnexpectedExit({ exitCode: 5, stderr: "Access is denied" }),
+          }),
+        ),
+      "C:\\secret",
+    );
+    expect(Option.isNone(unavailable)).toBe(true);
+
+    const malformed = yield* readAcl(
+      () => Effect.succeed({ stdout: "not an icacls listing" }),
+      "C:\\secret",
+    ).pipe(Effect.flip);
+    expect(malformed._tag).toBe("IcaclsParseError");
+
+    const parsed = yield* readAcl(
+      () => Effect.succeed({ stdout: icaclsFixture }),
+      "C:\\",
+    );
+    expect(Option.isSome(parsed)).toBe(true);
+  }),
+);

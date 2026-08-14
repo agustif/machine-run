@@ -1,4 +1,4 @@
-import { MachinePaths, Platform } from "@machine-run/core";
+import { MachinePaths, Platform, Windows } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -9,9 +9,11 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type { PlatformError } from "effect/PlatformError";
+import type { CommandError } from "alchemy/Command";
 import {
   type FileProps,
   type FileState,
+  type FilePathIsNotFile,
   type FilePathUnreadable,
   makeFileReconciler,
 } from "./File.ts";
@@ -186,12 +188,25 @@ export const makeTemplateReconciler: Effect.Effect<
   Reconciler<
     TemplateProps,
     TemplateState,
-    PlatformError | FilePathUnreadable | TemplateRenderFailed
+    | PlatformError
+    | CommandError
+    | Windows.IcaclsParseError
+    | FilePathIsNotFile
+    | FilePathUnreadable
+    | TemplateRenderFailed
   >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto | Platform
 > = Effect.gen(function* () {
-  const file: Reconciler<FileProps, FileState, PlatformError | FilePathUnreadable> =
+  const file: Reconciler<
+    FileProps,
+    FileState,
+    | PlatformError
+    | CommandError
+    | Windows.IcaclsParseError
+    | FilePathIsNotFile
+    | FilePathUnreadable
+  > =
     yield* makeFileReconciler;
   const fileUnapply = file.unapply;
 

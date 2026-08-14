@@ -69,7 +69,7 @@ jobs:
           --tmpfs /tmp:rw,noexec,nosuid,size=2g
           --mount type=bind,source=${{ github.workspace }},target=/workspace,readonly
           --workdir /workspace node:22-bookworm
-          node scripts/hermetic-tests.mjs
+          node scripts/preflight.mjs && node scripts/hermetic-tests.mjs
 
   live-tests:
     name: live tests (ubuntu)
@@ -83,21 +83,13 @@ jobs:
       - name: live transport tests
         run: npm run test:live
 
-  # Windows gets its own job because it verifies strictly less, and the job
-  # name should say so rather than a green `check (windows-latest)` implying
-  # the suite passes there. It does not: tests still fail on Windows for two
-  # remaining reasons, enumerated in docs/TASKS.md under "Windows" — POSIX modes
-  # are not representable, and `chmod 0o000` does not make a directory
-  # unreadable, so three fixtures cannot express an invariant that is itself
-  # correct. A third cause, `snapshotBeforeApply` silently taking no backup at
-  # all, turned out to be a real bug and is fixed (see `mirrorSegments` in
-  # core/src/Backups.ts).
-  #
-  # Type-checking on Windows is still worth a runner of its own: it is
-  # platform-independent, and it is what caught a second copy of `effect`
-  # reaching one OS's install and nowhere else.
-  typecheck-windows:
-    name: typecheck (windows)
+  # Windows runs the same default suite. The few tests that require POSIX
+  # chmod semantics explicitly skip on Windows; platform-specific command and
+  # ACL behavior has its own verification job below. A typecheck-only job hid
+  # regressions in the runnable test boundary, so it is intentionally not the
+  # contract anymore.
+  check-windows:
+    name: check (windows)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -105,8 +97,12 @@ jobs:
         with:
           node-version: "22"
       - run: npm ci
+      - name: patches apply
+        run: npm run patches:check
       - name: tsc -b
         run: npm run build
+      - name: vitest
+        run: npm test
 
   # ---------------------------------------------------------------------
   # Verification jobs: run the real tools this repo parses, on a machine
@@ -218,7 +214,7 @@ jobs:
         run: npx vitest run packages/core/test/windows/IcaclsLive.test.ts
 
   verify-macos:
-    name: verify defaults / mas parsers
+    name: verify defaults
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
@@ -236,10 +232,6 @@ jobs:
           defaults export com.machine-run.citest - | plutil -extract sample xml1 -o - -
           defaults delete com.machine-run.citest
 
-      - name: Capture mas surface
-        continue-on-error: true
-        run: brew install mas && mas version && mas list || echo "mas unavailable on this runner"
-
       # The steps above exercise the *commands* `MacOS.Default` depends on. This
       # runs the engine over them: plan, deploy, an empty second plan, drift, and a
       # destroy that must leave the value alone. It is the only kind no Linux
@@ -256,21 +248,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: tsc -b
+        run: npm run build
 
       # Containers rather than the runner itself: the runner is Ubuntu, and
       # these two backends parse Fedora and Arch output specifically.
       - name: Fedora (dnf)
         run: |
-          docker run --rm fedora:latest bash -lc "
-            dnf --version | head -1
-            dnf repoquery --userinstalled --qf '%{name}\n' | head -20
-          "
+          output="$RUNNER_TEMP/machine-run-dnf-list.txt"
+          docker run --rm fedora:latest bash -lc 'dnf --version >&2; dnf repoquery --userinstalled --qf "%{name}\t%{evr}"' > "$output"
+          test -s "$output"
+          echo "MACHINE_RUN_DNF_LIST=$output" >> "$GITHUB_ENV"
       - name: Arch (pacman)
         run: |
-          docker run --rm --platform linux/amd64 archlinux:latest bash -lc "
-            pacman --version | head -2
-            pacman -Qq | head -20
-          "
+          output="$RUNNER_TEMP/machine-run-pacman-list.txt"
+          docker run --rm --platform linux/amd64 archlinux:latest bash -lc 'pacman --version >&2; pacman -Q' > "$output"
+          test -s "$output"
+          echo "MACHINE_RUN_PACMAN_LIST=$output" >> "$GITHUB_ENV"
+      - name: Parse captured output with production backends
+        run: npx vitest run --config vitest.live.config.ts packages/system-packages/test/linux.live.test.ts
 
   deploy-check:
     name: deploy (plan / idempotence / drift / destroy)

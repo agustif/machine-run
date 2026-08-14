@@ -1,4 +1,4 @@
-import { MachinePaths, Sh } from "@machine-run/core";
+import { MachinePaths, Sh, statIfPresent } from "@machine-run/core";
 import {
   type Drift,
   type ObserveContext,
@@ -138,8 +138,12 @@ export const makeExecReconciler: Effect.Effect<
         // directory, say) is surfaced rather than read as "not created yet" —
         // collapsing the two would let a real problem masquerade as normal
         // not-done-yet drift, forever.
-        const exists = yield* fs.exists(paths.expand(props.creates));
-        if (!exists) return false;
+        const exists = yield* statIfPresent(
+          fs,
+          paths.expand(props.creates),
+          (cause) => cause,
+        );
+        if (Option.isNone(exists)) return false;
       }
 
       if (props.unless !== undefined) {

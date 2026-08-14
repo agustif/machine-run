@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive, Sh } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -14,7 +15,17 @@ import {
   makeGitRepoReconciler,
 } from "../src/Repo.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
+
+const expectedGit = (...argv: readonly string[]): string =>
+  process.platform === "win32" ? Sh.pwsh("git", ...argv) : Sh.sh("git", ...argv);
+
+// Windows chmod cannot make a parent directory unsearchable; the real
+// permission-error invariant is exercised by the POSIX test and the Windows
+// ACL seam is covered independently.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /** Fails the way real `git -C <path> rev-parse --show-toplevel` does when `path` is not inside any repository. */
 const notARepo = () =>
@@ -34,7 +45,11 @@ const repoAt = (root: string, remote: string | undefined) => ({
     if (props.command.includes("show-toplevel")) {
       return Effect.succeed({ exitCode: 0, stdout: `${root}\n`, stderr: "" });
     }
-    if (props.command.includes("remote get-url origin")) {
+    if (
+      props.command.includes("remote") &&
+      props.command.includes("get-url") &&
+      props.command.includes("origin")
+    ) {
       return remote === undefined
         ? Effect.fail(
             new CommandError({
@@ -170,7 +185,7 @@ it.effect("observe reports no `remote` field when the repository has no `origin`
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe fails with GitRepoPathUnreadable rather than reporting absent when the path cannot be stat'd",
   () =>
     Effect.gen(function* () {
@@ -242,7 +257,11 @@ it.effect("drift reports a 'remote' field, with no direction, for a differing re
 
     expect(reconciler.matches(observed, desired)).toBe(false);
     expect(reconciler.drift?.(observed, desired)).toEqual([
-      { field: "remote", observed: "https://example.com/old.git", desired: "https://example.com/new.git" },
+      {
+        field: "remote",
+        observed: "https://example.com/old.git",
+        desired: "https://example.com/new.git",
+      },
     ]);
   }).pipe(Effect.provide(layer)),
 );
@@ -283,7 +302,15 @@ it.effect(
 
       expect(result).toEqual(desired);
       expect(calls).toEqual([
-        `git clone --branch main --origin origin https://example.com/repo.git ${target}`,
+        expectedGit(
+          "clone",
+          "--branch",
+          "main",
+          "--origin",
+          "origin",
+          "https://example.com/repo.git",
+          target,
+        ),
       ]);
     }).pipe(Effect.provide(layer)),
 );
@@ -306,7 +333,9 @@ it.effect("apply adds `origin` when the repository exists but has none configure
     );
 
     expect(result).toEqual(desired);
-    expect(calls).toEqual([`git -C ${target} remote add origin https://example.com/repo.git`]);
+    expect(calls).toEqual([
+      expectedGit("-C", target, "remote", "add", "origin", "https://example.com/repo.git"),
+    ]);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -322,14 +351,20 @@ it.effect(
       const props = { path: target, remote: "https://example.com/new.git" };
       const desired = yield* reconciler.desired(props);
       yield* reconciler.apply(
-        { props, observed: Option.some({ path: target, remote: "https://example.com/old.git" }), desired },
+        {
+          props,
+          observed: Option.some({ path: target, remote: "https://example.com/old.git" }),
+          desired,
+        },
         applyCtx((commandProps) => {
           calls.push(commandProps.command);
           return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
         }),
       );
 
-      expect(calls).toEqual([`git -C ${target} remote set-url origin https://example.com/new.git`]);
+      expect(calls).toEqual([
+        expectedGit("-C", target, "remote", "set-url", "origin", "https://example.com/new.git"),
+      ]);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -343,7 +378,11 @@ it.effect("apply does nothing when the remote already matches", () =>
     const props = { path: target, remote: "https://example.com/repo.git" };
     const desired = yield* reconciler.desired(props);
     yield* reconciler.apply(
-      { props, observed: Option.some({ path: target, remote: "https://example.com/repo.git" }), desired },
+      {
+        props,
+        observed: Option.some({ path: target, remote: "https://example.com/repo.git" }),
+        desired,
+      },
       applyCtx((commandProps) => {
         calls.push(commandProps.command);
         return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });

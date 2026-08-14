@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive, Sh } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -19,6 +19,9 @@ import {
 } from "../src/Config.ts";
 
 const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+
+const expectedGit = (...argv: readonly string[]): string =>
+  process.platform === "win32" ? Sh.pwsh("git", ...argv) : Sh.sh("git", ...argv);
 
 /** A `MachinePaths` whose home is a fixed temp directory — see `Symlink.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>
@@ -213,7 +216,7 @@ it.effect("unapply removes the key that apply set", () =>
       applyCtx(capturingExec(calls).exec),
     );
 
-    expect(calls).toEqual(["git config --global --unset-all credential.helper"]);
+    expect(calls).toEqual([expectedGit("config", "--global", "--unset-all", "credential.helper")]);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -261,9 +264,9 @@ it.effect("apply clears every existing value before re-adding, tolerating 'nothi
 
     expect(result).toEqual(desired);
     expect(calls).toEqual([
-      "git config --global --unset-all credential.helper",
-      "git config --global --add credential.helper osxkeychain",
-      "git config --global --add credential.helper gh",
+      expectedGit("config", "--global", "--unset-all", "credential.helper"),
+      expectedGit("config", "--global", "--add", "credential.helper", "osxkeychain"),
+      expectedGit("config", "--global", "--add", "credential.helper", "gh"),
     ]);
   }).pipe(Effect.provide(layer)),
 );
@@ -280,8 +283,8 @@ it.effect("apply passes --type=bool through to both the unset key and every --ad
     );
 
     expect(calls).toEqual([
-      "git config --global --unset-all commit.gpgsign",
-      "git config --global --type=bool --add commit.gpgsign true",
+      expectedGit("config", "--global", "--unset-all", "commit.gpgsign"),
+      expectedGit("config", "--global", "--type=bool", "--add", "commit.gpgsign", "true"),
     ]);
   }).pipe(Effect.provide(layer)),
 );

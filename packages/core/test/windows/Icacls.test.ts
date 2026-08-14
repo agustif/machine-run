@@ -163,12 +163,29 @@ it("permissionsSatisfied: false when Everyone gained a right 0o600 withholds", (
 it("permissionsSatisfied: accepts the numeric SID form as well as the friendly name", () => {
   const listing: IcaclsListing = {
     path: "C:\\secret",
-    aces: [{ principal: "*S-1-3-4", inherited: false, inheritanceFlags: [], rights: ["RD"] }],
+    aces: [
+      {
+        principal: "*S-1-3-4",
+        inherited: false,
+        inheritanceFlags: [],
+        rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"],
+      },
+    ],
   };
-  // A listing granting less than 0o600's full owner bundle still satisfies —
-  // the documented asymmetry (isNoBroaderThan's doc comment): this cannot
-  // detect a principal that lost rights `mode` promised.
   expect(permissionsSatisfied(listing, fromPosixMode(0o600, "file"))).toBe(true);
+});
+
+it("permissionsSatisfied: detects a managed principal that lost a required right", () => {
+  const listing: IcaclsListing = {
+    ...listingFor0o600,
+    aces: [
+      {
+        ...listingFor0o600.aces[0]!,
+        rights: ["RD", "REA", "RA", "RC", "S"],
+      },
+    ],
+  };
+  expect(permissionsSatisfied(listing, fromPosixMode(0o600, "file"))).toBe(false);
 });
 
 it("permissionsSatisfied: BUILTIN\\Users granted read for 0o644 satisfies, granted write does not", () => {
@@ -181,8 +198,18 @@ it("permissionsSatisfied: BUILTIN\\Users granted read for 0o644 satisfies, grant
         inheritanceFlags: [],
         rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"],
       },
-      { principal: "BUILTIN\\Users", inherited: false, inheritanceFlags: [], rights: ["RD", "RC"] },
-      { principal: "Everyone", inherited: false, inheritanceFlags: [], rights: ["RD", "RC"] },
+      {
+        principal: "BUILTIN\\Users",
+        inherited: false,
+        inheritanceFlags: [],
+        rights: ["RD", "REA", "RA", "RC", "S"],
+      },
+      {
+        principal: "Everyone",
+        inherited: false,
+        inheritanceFlags: [],
+        rights: ["RD", "REA", "RA", "RC", "S"],
+      },
     ],
   };
   expect(permissionsSatisfied(readOnly, fromPosixMode(0o644, "file"))).toBe(true);

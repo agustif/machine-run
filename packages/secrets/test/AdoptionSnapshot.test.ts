@@ -11,20 +11,12 @@ import * as Path from "effect/Path";
 import { makeSecretFileReconciler, SecretFile } from "../src/SecretFile.ts";
 
 /**
- * `Machine.File` and `Machine.Symlink` both set `snapshotBeforeApply: true`,
- * so `toProvider`'s adoption-backup gate archives whatever a person put at
- * their path before this tool's first overwrite (see
- * `packages/dotfiles/test/AdoptionSnapshot.test.ts` for that gate proven
- * against `Machine.File`). `Machine.SecretFile` overwrites unconditionally
- * too — `apply` always calls `fs.writeFileString(desired.path, content, ...)`
- * regardless of what, if anything, was already there — but never sets
- * `snapshotBeforeApply`.
- *
- * That is a real gap: a person who hand-placed a key at a path this
- * resource is later pointed at (the same "adopt an existing, correct
- * machine" scenario `Machine.File` protects) gets it silently overwritten
- * with no backup at all. Recorded in `docs/test-findings.md`; this test
- * pins the current (missing-safety-net) behaviour down.
+ * `Machine.SecretFile` opts into the same adoption-backup gate as
+ * `Machine.File`: an explicit adoption can overwrite a hand-placed key only
+ * after the engine has copied it. The backup is deliberately outside Alchemy
+ * state; the secret bytes and the backup path are never persisted as secret
+ * resource attributes. `BackupsLive` also applies restrictive permissions to
+ * the backup, including the ACL path on Windows.
  */
 const CommandExecutorStub = Layer.succeed(CommandExecutor, {
   spawn: () => Effect.die("Machine.SecretFile never runs a command for the `env` backend"),
@@ -71,11 +63,9 @@ it.effect("snapshots pre-existing, hand-placed content before overwriting it", (
       bindings: [],
     });
 
-    // The secret is materialised, and the key that was already sitting
-    // there was copied first. Overwriting a hand-placed credential with no
-    // copy is unrecoverable, which is why this resource opts into the
-    // snapshot gate rather than relying on the store still holding the old
-    // value.
+    // The secret is materialised, and the key that was already sitting there
+    // was copied first. Overwriting a hand-placed credential with no copy is
+    // unrecoverable, which is why this resource opts into the snapshot gate.
     expect(yield* fs.readFileString(target)).not.toContain("hand-placed");
     expect(calls.count).toBe(1);
   }).pipe(

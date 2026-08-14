@@ -1,4 +1,12 @@
-import { MachinePaths, Platform, Windows, isNotFound, makeSha256, readIfPresent } from "@machine-run/core";
+import {
+  ensureParentDir,
+  MachinePaths,
+  Platform,
+  Windows,
+  isNotFound,
+  makeSha256,
+  readIfPresent,
+} from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Boolean from "effect/Boolean";
@@ -11,6 +19,7 @@ import * as Path from "effect/Path";
 import * as UndefinedOr from "effect/UndefinedOr";
 import * as Schema from "effect/Schema";
 import { PlatformError } from "effect/PlatformError";
+import type { CommandError } from "alchemy/Command";
 
 /**
  * A file this tool fully owns: its entire content is generated, and anything
@@ -83,6 +92,15 @@ export class FilePathUnreadable extends Data.TaggedError("FilePathUnreadable")<{
   }
 }
 
+/** Raised when a directory or other non-file occupies a file resource's path. */
+export class FilePathIsNotFile extends Data.TaggedError("FilePathIsNotFile")<{
+  path: string;
+}> {
+  override get message() {
+    return `"${this.path}" exists but is not a plain file. Machine.File will not overwrite it — remove it by hand if a file belongs there.`;
+  }
+}
+
 /**
  * Whether an observed file's permissions satisfy the desired mode — mode bits on
  * POSIX, the live ACL on Windows, where there is no mode to compare. See
@@ -108,7 +126,11 @@ const modeSatisfied = (
 };
 
 export const makeFileReconciler: Effect.Effect<
-  Reconciler<FileProps, FileState, PlatformError | FilePathUnreadable>,
+  Reconciler<
+    FileProps,
+    FileState,
+    PlatformError | CommandError | Windows.IcaclsParseError | FilePathIsNotFile | FilePathUnreadable
+  >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto | Platform
 > = Effect.gen(function* () {
@@ -137,6 +159,9 @@ export const makeFileReconciler: Effect.Effect<
             ),
           );
         if (info === undefined) return Option.none();
+        if (info.type !== "File") {
+          return yield* Effect.fail(new FilePathIsNotFile({ path: target }));
+        }
         // `stat` above already confirmed something is here, so a read
         // failure now is not "the file is empty" — it's a permission change
         // or an I/O error in the window between the two calls. Only a
@@ -195,8 +220,16 @@ export const makeFileReconciler: Effect.Effect<
           desired: desired.hash.slice(0, 12),
         });
       }
-      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+      if (desired.mode !== undefined && !modeSatisfied(platform, observed, desired)) {
         const desiredMode = desired.mode;
+        if (platform.isWindows) {
+          fields.push({
+            field: "mode",
+            observed: "ACL does not satisfy",
+            desired: desiredMode.toString(8),
+          });
+          return fields;
+        }
         // `observed.mode` can genuinely be absent (an unconstrained recipe's
         // recorded state, or a hand-built test fixture) — that is not a value
         // to order against, so `direction` is only set when there is a real
@@ -218,10 +251,7 @@ export const makeFileReconciler: Effect.Effect<
     apply: ({ props, desired, snapshot }, ctx) =>
       Effect.gen(function* () {
         const target = desired.path;
-        yield* fs.makeDirectory(path.dirname(target), {
-          recursive: true,
-          ...(props.directoryMode !== undefined ? { mode: props.directoryMode } : {}),
-        });
+        yield* ensureParentDir(fs, path, target, props.directoryMode);
         // The engine's snapshot, folded into this resource's own `State` so a
         // later `unapply` can restore rather than merely remove — the backup
         // directory is stamped fresh per run, so only persisted state carries a
@@ -240,10 +270,7 @@ export const makeFileReconciler: Effect.Effect<
         if (props.mode !== undefined) {
           yield* Boolean.match(platform.isWindows, {
             onFalse: () => fs.chmod(target, props.mode ?? 0),
-            onTrue: () =>
-              Windows.applyMode(ctx.exec, target, props.mode ?? 0, "file").pipe(
-                Effect.orElseSucceed(() => undefined),
-              ),
+            onTrue: () => Windows.applyMode(ctx.exec, target, props.mode ?? 0, "file"),
           });
         }
         const info = yield* fs.stat(target);

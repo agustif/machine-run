@@ -76,10 +76,11 @@ bolting a `sudo: boolean` onto this resource.
 
 ## What it deliberately does not do
 
-- **No `unapply`.** Only 3 of this repo's 23 resource kinds implement
-  `unapply` (`Shell.Login`, `Git.Maintenance`, `System.Setting`) — disabling
-  and stopping a service something else may depend on is not obviously the
-  right response to a recipe line disappearing.
+- **Conservative `unapply`.** Under an explicit
+  `RemovalPolicy: "destroy"`, this resource disables and stops the
+  service, but never removes its definition. The default remains `retain`,
+  so deleting a recipe line does not stop a service unless the operator opts
+  into that side effect.
 - **Does not touch launchd's persistent enable/disable override**
   (`launchctl enable`/`disable`, distinct from "currently loaded"). A recipe
   that hits a job carrying that override gets an honest `CommandError` from a

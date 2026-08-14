@@ -200,7 +200,7 @@ it.effect(
  * pins — owner-only rights, which is what 0o700 intends.
  */
 const OWNER_ONLY_ACL =
-  "C:\\data OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+  "C:\\data OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA,X)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
 
 const windowsLayer = Layer.mergeAll(MachinePathsLive(), PlatformFor("win32")).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -228,6 +228,13 @@ it.effect("on Windows a mode is satisfied by the ACL, not by comparing mode bits
       acl: OWNER_ONLY_ACL.replace("OWNER RIGHTS:(RD", "Everyone:(WD,AD)\nC:\\data OWNER RIGHTS:(RD"),
     };
     expect(reconciler.matches(broadened, desired)).toBe(false);
+
+    // Node's synthetic 0o666 mode must not leak into drift output when the ACL
+    // already satisfies the requested intent.
+    expect(reconciler.drift?.(withAcl, desired)).toEqual([]);
+    expect(reconciler.drift?.(withoutAcl, desired)).toEqual([
+      { field: "mode", observed: "ACL does not satisfy", desired: "700" },
+    ]);
   }).pipe(Effect.provide(windowsLayer)),
 );
 

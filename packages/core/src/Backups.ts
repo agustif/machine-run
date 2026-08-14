@@ -1,12 +1,39 @@
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { ensureParentDir } from "./Fs.ts";
+import type { CommandError } from "alchemy/Command";
+import { ensureParentDir, statIfPresent } from "./Fs.ts";
 import { MachinePaths } from "./Paths.ts";
+import { Platform } from "./Platform.ts";
+import type { PermissionsTarget } from "./windows/FilePermissions.ts";
+
+/**
+ * Applies the restrictive mode a backup needs on a platform where Node's
+ * `chmod` is not expressive enough. The engine supplies this from the same
+ * command session as the resource being reconciled, so a Windows backup uses
+ * the normal, observable command boundary rather than quietly falling back to
+ * a read-only attribute.
+ */
+export type BackupPermissions = (
+  path: string,
+  mode: number,
+  target: PermissionsTarget,
+) => Effect.Effect<void, CommandError>;
+
+/** A Windows backup reached the ACL boundary without the engine callback. */
+export class BackupPermissionsUnavailable extends Data.TaggedError("BackupPermissionsUnavailable")<{
+  path: string;
+}> {
+  override get message() {
+    return `Cannot secure Windows backup path "${this.path}" without the apply command boundary.`;
+  }
+}
 
 /**
  * Snapshots real, pre-existing files before this tool takes them over.
@@ -37,7 +64,10 @@ export class Backups extends Context.Service<
      * adopting something already present. Snapshotting on every apply would
      * only ever archive this tool's own previous output.
      */
-    readonly snapshot: (target: string) => Effect.Effect<string | undefined, never, never>;
+    readonly snapshot: (
+      target: string,
+      permissions?: BackupPermissions,
+    ) => Effect.Effect<string | undefined, never, never>;
     /** Absolute path of this run's backup directory, for error messages. */
     readonly root: string;
   }
@@ -90,6 +120,7 @@ export const BackupsLive = () =>
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const paths = yield* MachinePaths;
+      const platform = yield* Platform;
 
       // Clock rather than `new Date()` directly so a test can pin the stamp.
       const stamp = stampFor(yield* Clock.currentTimeMillis);
@@ -99,16 +130,40 @@ export const BackupsLive = () =>
 
       return {
         root,
-        snapshot: (target: string) =>
+        snapshot: (target: string, permissions?: BackupPermissions) =>
           Effect.gen(function* () {
             const absolute = paths.expand(target);
-            if (!(yield* fs.exists(absolute))) return undefined;
+            const present = yield* statIfPresent(fs, absolute, (cause) => cause);
+            if (Option.isNone(present)) return undefined;
 
             // Mirror the full source path under the run directory so two
             // files sharing a basename can't clobber each other's backup.
             const destination = path.join(root, ...mirrorSegments(absolute));
-            yield* ensureParentDir(fs, path, destination);
+            // Backups may contain an SSH key, token, or other hand-placed
+            // credential. Keep both the containing directories and the copy
+            // private even when the process umask is permissive. This is a
+            // backup outside Alchemy's JSON state, but it is still sensitive
+            // machine data and must not become a second world-readable copy.
+            yield* ensureParentDir(fs, path, destination, 0o700);
+            const secure = (target: string, mode: number, kind: PermissionsTarget) => {
+              if (!platform.isWindows) return fs.chmod(target, mode).pipe(Effect.asVoid);
+              if (permissions === undefined) {
+                return Effect.fail(new BackupPermissionsUnavailable({ path: target }));
+              }
+              return permissions(target, mode, kind);
+            };
+            const segments = mirrorSegments(absolute);
+            const directories = [
+              root,
+              ...segments
+                .slice(0, -1)
+                .map((_, index) => path.join(root, ...segments.slice(0, index + 1))),
+            ];
+            for (const directory of directories) {
+              yield* secure(directory, 0o700, "directory");
+            }
             yield* fs.copy(absolute, destination);
+            yield* secure(destination, 0o600, "file");
             return destination;
           }).pipe(
             // A failed backup must not abort the deploy, but it must never

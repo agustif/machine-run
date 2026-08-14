@@ -52,7 +52,27 @@ export class SettingKeyInvalid extends Data.TaggedError("SettingKeyInvalid")<{
   }
 }
 
-export type SettingsError = CommandError | SettingKeyInvalid;
+/**
+ * A reset command exited successfully but wrote a diagnostic to stderr.
+ *
+ * `gsettings reset` is known to do this when no session D-Bus is reachable:
+ * it exits 0, prints a dconf warning, and leaves the value unchanged. The
+ * backend cannot turn that into a `CommandError` because the process did
+ * exit 0, and `Setting.unapply` cannot infer failure merely because the
+ * value stayed equal (a reset is allowed to restore the value that was
+ * already present). Keep the warning typed so teardown fails closed without
+ * mistaking a legitimate no-op reset for a failure.
+ */
+export class SettingResetNotCommitted extends Data.TaggedError("SettingResetNotCommitted")<{
+  backend: SettingsBackendId;
+  stderr: string;
+}> {
+  override get message() {
+    return `${this.backend} reset returned a warning, so the reset was not confirmed as committed: ${this.stderr.trim()}`;
+  }
+}
+
+export type SettingsError = CommandError | SettingKeyInvalid | SettingResetNotCommitted;
 
 /**
  * What identifies one ordinary (non-relocatable) GSettings key: a schema id

@@ -1,5 +1,13 @@
 import { expect, it } from "@effect/vitest";
+import * as NodePath from "@effect/platform-node/NodePath";
+import { NodeServices } from "@effect/platform-node";
+import { Backups, BackupsLive, MachinePaths, PlatformFor } from "../src/index.ts";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import { mirrorSegments } from "../src/Backups.ts";
+import { expandHome } from "../src/Paths.ts";
 
 /**
  * A backup is only a safety net if its destination can actually be created.
@@ -51,3 +59,55 @@ it("keeps two files sharing a basename apart", () => {
     mirrorSegments("/home/me/.config/git/config"),
   );
 });
+
+it.effect("expands a Windows-style `~\\` path with the Windows path service", () =>
+  Effect.gen(function* () {
+    const path = yield* Path.Path;
+    expect(expandHome(path, "~\\.ssh\\config", "C:\\Users\\me")).toBe(
+      "C:\\Users\\me\\.ssh\\config",
+    );
+  }).pipe(Effect.provide(NodePath.layerWin32)),
+);
+
+it.effect("uses the apply command boundary to harden Windows backup paths", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const source = path.join(home, "source", "secret");
+    yield* fs.makeDirectory(path.dirname(source), { recursive: true });
+    yield* fs.writeFileString(source, "hand-placed secret\n");
+
+    const calls: Array<{
+      readonly path: string;
+      readonly mode: number;
+      readonly target: "file" | "directory";
+    }> = [];
+    const machinePaths = Layer.succeed(MachinePaths, {
+      home,
+      expand: (target: string) => expandHome(path, target, home),
+    });
+    const services = BackupsLive().pipe(
+      Layer.provideMerge(machinePaths),
+      Layer.provideMerge(PlatformFor("win32")),
+      Layer.provideMerge(NodeServices.layer),
+    );
+
+    yield* Effect.gen(function* () {
+      const backups = yield* Backups;
+      const backup = yield* backups.snapshot(source, (target, mode, targetType) =>
+        Effect.sync(() => {
+          calls.push({ path: target, mode, target: targetType });
+        }),
+      );
+
+      expect(backup).toBeDefined();
+      if (backup === undefined) return;
+      expect(yield* fs.readFileString(backup)).toBe("hand-placed secret\n");
+      expect(calls.at(-1)).toEqual({ path: backup, mode: 0o600, target: "file" });
+      expect(calls.some(({ mode, target }) => mode === 0o700 && target === "directory")).toBe(
+        true,
+      );
+    }).pipe(Effect.provide(services));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+);

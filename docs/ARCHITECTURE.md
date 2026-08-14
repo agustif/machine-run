@@ -262,12 +262,10 @@ recorded attributes alongside the live observation, because some undo paths
 need bookkeeping that observation cannot recover, such as where a backup was
 written.
 
-**Three of 23 resources implement `unapply`** — `Shell.Login`,
-`Git.Maintenance`, `System.Setting`. Which of the rest can honestly reverse
-themselves is deliberately still open, and is tracked in
-[V1-PLAN.md](./V1-PLAN.md#5-open-questions). Reverting a `defaults` key has no
-defined "before" if the original was never recorded, and restoring a backup is
-only correct if the backup is still the right answer.
+**Sixteen of 23 resources implement `unapply`.** The seven deliberate
+refusals are documented next to their reconcilers: execution, package/repository
+ownership, generated private keys, tool versions and tailnet membership cannot
+be reversed without guessing or risking unrelated machine state.
 
 ---
 

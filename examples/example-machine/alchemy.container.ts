@@ -87,7 +87,7 @@ const providers = Layer.mergeAll(
   Shell.providers(),
   SystemPackages.providers(),
   SystemSettings.providers(),
-).pipe(Layer.provideMerge(Core.services()), Layer.provide(CommandExecutorLive()));
+).pipe(Layer.provide(Core.services()), Layer.provide(CommandExecutorLive()));
 
 export default Alchemy.Stack(
   "example-machine-container",

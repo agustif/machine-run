@@ -161,15 +161,15 @@ Re-verified in the same kind of container (`ubuntu:24.04`, same packages) on
 
 This is why `unapply` (now implemented — `gsettings reset`/`dconf reset`) uses
 the identical read-back discipline `apply` already used for `write`: reset,
-then re-read, and fail loudly (`SettingResetNotObserved`) if the value never
-actually changed away from what this resource had recorded writing. Unlike
-`apply`, `unapply` doesn't know the *target* value to compare against (a
+then inspect the backend's result and fail loudly (`SettingResetNotCommitted`)
+when the command reports the known silent-no-op warning. It does not fail merely
+because the value equals what this resource recorded: a schema default may
+legitimately already equal that value. Unlike `apply`, `unapply` doesn't know the *target* value to compare against (a
 gsettings key's schema default isn't something this resource ever learns —
 there's no client-side way to ask "what would this be if never set"), so the
-check is inverted: "did the value change at all from what we wrote", not "did
-it become exactly X". That's still a real, non-tautological check — a
-silently-no-op'd reset leaves `read` returning precisely the value this
-resource itself wrote, which the check catches.
+it become exactly X". That makes the check backend-specific: `gsettings`'
+known warning is the observable no-op, while a successful reset with the same
+value is still a successful reset.
 
 **Decision on the other unfinished-half item — `observe` raising a typed
 error when `DBUS_SESSION_BUS_ADDRESS` is absent — is not to add it.**

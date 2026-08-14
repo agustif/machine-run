@@ -1,6 +1,7 @@
 import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -9,11 +10,14 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   makeSecretFileReconciler,
+  SecretFilePathIsNotFile,
   SecretFilePathUnreadable,
   type SecretFileProps,
 } from "../src/SecretFile.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 /** `ctx.exec` is unused by the `env` backend, so a stub that dies if it's ever called keeps that honest. */
 const applyCtx = {
@@ -21,6 +25,10 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows chmod cannot deny directory traversal; the Windows ACL path is
+// tested through the core permission domain rather than this POSIX fixture.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * Installs a fixed `ConfigProvider` for the duration of an effect, so the
@@ -51,7 +59,24 @@ const propsFor = (
  * and `apply` proceeds to fetch the secret from its backend and write it —
  * touching the vault for a fetch whose result may not even be storable.
  */
-it.effect(
+it.effect("observe raises a typed error when a directory occupies the secret path", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "directory-not-file");
+    yield* fs.makeDirectory(target);
+
+    const failure = yield* reconciler
+      .observe(propsFor(target, "SECRET"), observeCtx)
+      .pipe(Effect.flip);
+
+    expect(failure).toBeInstanceOf(SecretFilePathIsNotFile);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not absence, when the parent directory is unreadable",
   () =>
     Effect.gen(function* () {

@@ -1,5 +1,7 @@
 import {
   detectLineEnding,
+  DEFAULT_DIRECTORY_MODE,
+  ensureParentDir,
   isNotFound,
   joinLines,
   MachinePaths,
@@ -8,11 +10,13 @@ import {
 import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
+import * as Encoding from "effect/Encoding";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
 /**
@@ -125,7 +129,32 @@ export class KnownHostKeyMismatch extends Data.TaggedError("KnownHostKeyMismatch
   }
 }
 
-export type KnownHostError = PlatformError | KnownHostsFileUnreadable | KnownHostKeyMismatch;
+/** A hashed `known_hosts` field was malformed or used an unsupported version. */
+export class KnownHostsHashMalformed extends Data.TaggedError("KnownHostsHashMalformed")<{
+  path: string;
+  line: string;
+}> {
+  override get message() {
+    return `"${this.path}" contains a malformed hashed known_hosts entry: "${this.line}". Refusing to append or remove a pin without understanding the file. Expected OpenSSH's |1|<base64-salt>|<base64-hash> form.`;
+  }
+}
+
+/** WebCrypto could not calculate the OpenSSH known-host hash. */
+export class KnownHostsHashFailed extends Data.TaggedError("KnownHostsHashFailed")<{
+  host: string;
+  cause: unknown;
+}> {
+  override get message() {
+    return `Could not compare the hashed known_hosts entry for "${this.host}".`;
+  }
+}
+
+export type KnownHostError =
+  | PlatformError
+  | KnownHostsFileUnreadable
+  | KnownHostKeyMismatch
+  | KnownHostsHashMalformed
+  | KnownHostsHashFailed;
 
 export interface KnownHostEntry {
   readonly host: string;
@@ -147,6 +176,93 @@ const isIgnoredLine = (line: string): boolean => {
   if (trimmed.startsWith("@")) return true;
   return false;
 };
+
+const isHashedHostField = (field: string): boolean => field.startsWith("|");
+
+/**
+ * A literal known_hosts host field may contain several comma-separated
+ * hostnames. OpenSSH hashes those names independently when ssh-keygen -H
+ * rewrites the file, so a resource that pins the original combined field must
+ * try each candidate when matching or removing a hashed line.
+ */
+const hostCandidates = (host: string): readonly string[] =>
+  host.split(",").filter((candidate) => candidate.length > 0);
+
+interface HashedHostField {
+  readonly salt: Uint8Array;
+  readonly hash: Uint8Array;
+}
+
+const decodeBase64 = (value: string): Uint8Array | undefined =>
+  Result.match(Encoding.decodeBase64(value), {
+    onFailure: () => undefined,
+    onSuccess: (decoded) => decoded,
+  });
+
+/** Parses OpenSSH's `|1|base64(salt)|base64(HMAC-SHA1(salt, host))` form. */
+const parseHashedHostField = (field: string): HashedHostField | undefined => {
+  const pieces = field.split("|");
+  if (pieces.length !== 4 || pieces[1] !== "1") return undefined;
+  const saltText = pieces[2];
+  const hashText = pieces[3];
+  if (saltText === undefined || hashText === undefined) return undefined;
+  const salt = decodeBase64(saltText);
+  const hash = decodeBase64(hashText);
+  if (salt === undefined || hash === undefined) return undefined;
+  return { salt, hash };
+};
+
+/**
+ * OpenSSH uses HMAC-SHA1 here for protocol compatibility, not as a new secret
+ * construction. The salt is stored in the file, so an existing hashed entry
+ * can be matched without guessing or changing the host's trust material.
+ */
+const hashKnownHost = (
+  host: string,
+  salt: Uint8Array,
+): Effect.Effect<Uint8Array, KnownHostsHashFailed> =>
+  Effect.tryPromise({
+    try: () =>
+      globalThis.crypto.subtle
+        .importKey("raw", salt, { name: "HMAC", hash: "SHA-1" }, false, ["sign"])
+        .then((key) => globalThis.crypto.subtle.sign("HMAC", key, new TextEncoder().encode(host)))
+        .then((signature) => new Uint8Array(signature)),
+    catch: (cause) => new KnownHostsHashFailed({ host, cause }),
+  });
+
+/**
+ * Finds a matching hashed host entry. A malformed hashed line is an error, not
+ * an absent host: silently appending a second line would make trust state
+ * impossible to reason about.
+ */
+const findHashedHostEntry = (
+  content: string,
+  path: string,
+  host: string,
+  keyType: string,
+): Effect.Effect<KnownHostEntry | undefined, KnownHostsHashMalformed | KnownHostsHashFailed> =>
+  Effect.gen(function* () {
+    for (const line of splitLines(content)) {
+      if (isIgnoredLine(line)) continue;
+      const fields = line.trim().split(/\s+/);
+      const hostField = fields[0];
+      if (hostField === undefined || !isHashedHostField(hostField)) continue;
+      const hashed = parseHashedHostField(hostField);
+      const actualKeyType = fields[1];
+      const publicKey = fields[2];
+      if (hashed === undefined || actualKeyType === undefined || publicKey === undefined) {
+        return yield* Effect.fail(new KnownHostsHashMalformed({ path, line }));
+      }
+      if (actualKeyType !== keyType) continue;
+      for (const candidate of hostCandidates(host)) {
+        const expectedHash = yield* hashKnownHost(candidate, hashed.salt);
+        if (Encoding.encodeBase64(expectedHash) === Encoding.encodeBase64(hashed.hash)) {
+          return { host, keyType: actualKeyType, publicKey };
+        }
+      }
+    }
+    return undefined;
+  });
 
 /**
  * Every plain `host keytype key [comment...]` line in a `known_hosts` file.
@@ -171,7 +287,13 @@ export const parseKnownHosts = (content: string): readonly KnownHostEntry[] => {
     const host = fields[0];
     const keyType = fields[1];
     const publicKey = fields[2];
-    if (host === undefined || keyType === undefined || publicKey === undefined) continue;
+    if (
+      host === undefined ||
+      keyType === undefined ||
+      publicKey === undefined ||
+      isHashedHostField(host)
+    )
+      continue;
     entries.push({ host, keyType, publicKey });
   }
   return entries;
@@ -220,7 +342,6 @@ export const removeKnownHostLine = (content: string, entry: KnownHostEntry): str
 };
 
 const DEFAULT_MODE = 0o644;
-const DEFAULT_DIRECTORY_MODE = 0o700;
 const DEFAULT_PATH = "~/.ssh/known_hosts";
 
 /**
@@ -256,18 +377,14 @@ const DEFAULT_PATH = "~/.ssh/known_hosts";
  * `concurrency: "unbounded"`) could race on the read-modify-write and drop
  * one another's line.
  *
- * ## A known limitation: `HashKnownHosts`
+ * ## `HashKnownHosts`
  *
- * `parseKnownHosts` only recognises a literal hostname in the first field.
- * OpenSSH's `HashKnownHosts yes` (macOS's historical default) stores
- * `|1|<salt>|<hash>` instead, which this parser cannot match against a plain
- * `host` prop at all — an already-hashed file would never appear to already
- * contain an entry this resource is looking for, so it would append a
- * second, unhashed line for the same host. That's harmless (`ssh` accepts
- * either form), but it does mean this resource cannot report accurate drift
- * against a hashed file, only append blindly. Not fixed here — hashing
- * would need the same salt OpenSSH used, which this resource has no way to
- * discover from the file alone. See `packages/ssh/TASKS.md`.
+ * OpenSSH stores `|1|<salt>|<HMAC-SHA1>` when hashing is enabled. The salt is
+ * part of the line, so the resource can calculate the same HMAC and match the
+ * host without ever changing the pinned key. New entries remain literal: the
+ * caller owns the file's policy, and OpenSSH itself can hash them later with
+ * `ssh-keygen -H`. Malformed hashed lines fail loudly rather than causing a
+ * duplicate trust entry to be appended.
  */
 export const makeKnownHostReconciler: Effect.Effect<
   Reconciler<KnownHostProps, KnownHostState, KnownHostError>,
@@ -292,9 +409,15 @@ export const makeKnownHostReconciler: Effect.Effect<
     observe: (props) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path ?? DEFAULT_PATH);
-        const entries = parseKnownHosts(yield* readContentOrEmpty(target));
+        const content = yield* readContentOrEmpty(target);
+        const entries = parseKnownHosts(content);
         const found = findKnownHostEntry(entries, props.host, props.keyType);
-        if (found === undefined) return Option.none();
+        const hashed =
+          found === undefined
+            ? yield* findHashedHostEntry(content, target, props.host, props.keyType)
+            : undefined;
+        const matched = found ?? hashed;
+        if (matched === undefined) return Option.none();
         // Reports whatever is actually on the line — even when it doesn't
         // match `publicKey` — so `matches` below can tell the two cases
         // apart. Collapsing a mismatch into "absent" here would make
@@ -305,9 +428,9 @@ export const makeKnownHostReconciler: Effect.Effect<
         // into the literal union.
         return Option.some({
           path: target,
-          host: found.host,
+          host: matched.host,
           keyType: props.keyType,
-          publicKey: found.publicKey,
+          publicKey: matched.publicKey,
         });
       }),
 
@@ -361,10 +484,12 @@ export const makeKnownHostReconciler: Effect.Effect<
           );
         }
 
-        yield* fs.makeDirectory(path.dirname(desired.path), {
-          recursive: true,
-          mode: props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
-        });
+        yield* ensureParentDir(
+          fs,
+          path,
+          desired.path,
+          props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
+        );
 
         const existed = yield* fs.stat(desired.path).pipe(
           Effect.as(true),
@@ -375,6 +500,42 @@ export const makeKnownHostReconciler: Effect.Effect<
         );
 
         const current = yield* readContentOrEmpty(desired.path);
+        const currentEntries = parseKnownHosts(current);
+        const currentLiteral = findKnownHostEntry(currentEntries, desired.host, desired.keyType);
+        if (currentLiteral !== undefined) {
+          if (currentLiteral.publicKey !== desired.publicKey) {
+            return yield* Effect.fail(
+              new KnownHostKeyMismatch({
+                path: desired.path,
+                host: desired.host,
+                keyType: desired.keyType,
+                expected: desired.publicKey,
+                actual: currentLiteral.publicKey,
+              }),
+            );
+          }
+          return desired;
+        }
+        const currentHashed = yield* findHashedHostEntry(
+          current,
+          desired.path,
+          desired.host,
+          desired.keyType,
+        );
+        if (currentHashed !== undefined) {
+          if (currentHashed.publicKey !== desired.publicKey) {
+            return yield* Effect.fail(
+              new KnownHostKeyMismatch({
+                path: desired.path,
+                host: desired.host,
+                keyType: desired.keyType,
+                expected: desired.publicKey,
+                actual: currentHashed.publicKey,
+              }),
+            );
+          }
+          return desired;
+        }
         const updated = appendKnownHostLine(current, {
           host: desired.host,
           keyType: desired.keyType,
@@ -413,7 +574,48 @@ export const makeKnownHostReconciler: Effect.Effect<
         ? Effect.void
         : Effect.gen(function* () {
             const current = yield* readContentOrEmpty(recorded.path);
-            yield* fs.writeFileString(recorded.path, removeKnownHostLine(current, recorded));
+            const ending = detectLineEnding(current);
+            const kept: string[] = [];
+            for (const line of splitLines(current)) {
+              if (isIgnoredLine(line)) {
+                kept.push(line);
+                continue;
+              }
+              const fields = line.trim().split(/\s+/);
+              const hostField = fields[0];
+              const keyType = fields[1];
+              const publicKey = fields[2];
+              if (
+                hostField === recorded.host &&
+                keyType === recorded.keyType &&
+                publicKey === recorded.publicKey
+              ) {
+                continue;
+              }
+              if (hostField !== undefined && isHashedHostField(hostField)) {
+                const hashed = parseHashedHostField(hostField);
+                if (hashed === undefined || keyType === undefined || publicKey === undefined) {
+                  return yield* Effect.fail(
+                    new KnownHostsHashMalformed({ path: recorded.path, line }),
+                  );
+                }
+                if (keyType === recorded.keyType && publicKey === recorded.publicKey) {
+                  let matches = false;
+                  for (const candidate of hostCandidates(recorded.host)) {
+                    const expectedHash = yield* hashKnownHost(candidate, hashed.salt);
+                    if (
+                      Encoding.encodeBase64(expectedHash) === Encoding.encodeBase64(hashed.hash)
+                    ) {
+                      matches = true;
+                      break;
+                    }
+                  }
+                  if (matches) continue;
+                }
+              }
+              kept.push(line);
+            }
+            yield* fs.writeFileString(recorded.path, joinLines(kept, ending));
           }),
   };
 });

@@ -1,7 +1,9 @@
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
-import * as Match from "effect/Match";
+import * as Option from "effect/Option";
+import type { PlatformError } from "effect/PlatformError";
+import { Platform, statIfPresent } from "@machine-run/core";
 import type { PackageManagerId } from "./Package.ts";
 
 /**
@@ -21,12 +23,16 @@ export class UnsupportedPlatform extends Data.TaggedError("UnsupportedPlatform")
 }
 
 /**
- * A distro probe: a missing file means "not this distro", and so does an
- * unreadable one. The failure is absorbed here, at the individual probe,
- * rather than by widening the whole detection's declared error channel.
+ * A distro probe: a missing marker means "not this distro". An unreadable
+ * marker is a real host-inspection failure and stays in the error channel;
+ * choosing a package manager after being unable to inspect the host would be
+ * an unsafe guess.
  */
-const probe = (fs: FileSystem.FileSystem, path: string) =>
-  fs.exists(path).pipe(Effect.orElseSucceed(() => false));
+const probe = (
+  fs: FileSystem.FileSystem,
+  path: string,
+): Effect.Effect<boolean, PlatformError> =>
+  statIfPresent(fs, path, (cause) => cause).pipe(Effect.map(Option.isSome));
 
 /**
  * Marker files that identify a Linux distro family, in priority order.
@@ -52,7 +58,8 @@ const linuxManager = Effect.gen(function* () {
 
 /**
  * Picks the package manager native to this machine's OS, at recipe composition
- * time — no `CommandExecutor` or session needed, just `process.platform` and a
+ * time — no `CommandExecutor` or session needed, just the injected platform
+ * fact and a
  * few filesystem probes for the Linux distro family.
  *
  * This answers "which manager is native to this OS", not "which manager is
@@ -62,13 +69,12 @@ const linuxManager = Effect.gen(function* () {
  */
 export const detectSystemPackageManager: Effect.Effect<
   PackageManagerId,
-  UnsupportedPlatform,
-  FileSystem.FileSystem
-> = Effect.suspend(() =>
-  Match.value(process.platform).pipe(
-    Match.when("darwin", () => Effect.succeed<PackageManagerId>("brew")),
-    Match.when("linux", () => linuxManager),
-    Match.when("win32", () => Effect.succeed<PackageManagerId>("winget")),
-    Match.orElse((platform) => Effect.fail(new UnsupportedPlatform({ platform }))),
-  ),
-);
+  UnsupportedPlatform | PlatformError,
+  FileSystem.FileSystem | Platform
+> = Effect.gen(function* () {
+  const platform = yield* Platform;
+  if (platform.os === "darwin") return "brew";
+  if (platform.os === "linux") return yield* linuxManager;
+  if (platform.os === "win32") return "winget";
+  return yield* Effect.fail(new UnsupportedPlatform({ platform: platform.os }));
+});

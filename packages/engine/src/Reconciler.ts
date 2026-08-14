@@ -4,6 +4,7 @@ import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
+import type * as Duration from "effect/Duration";
 
 /**
  * The output of a command, as `CommandExecutor` returns it.
@@ -82,7 +83,7 @@ export interface ExecutionContext {
    */
   readonly locale: string;
   /** Applied to a command that does not ask for its own timeout. */
-  readonly defaultTimeout: string;
+  readonly defaultTimeout: Duration.Input;
 }
 
 /**

@@ -1,7 +1,8 @@
 import { Sh } from "@machine-run/core";
-import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -46,9 +47,9 @@ export type MacDefaultProps = typeof MacDefaultProps.Type;
  * What was at this key before the apply that last changed it.
  *
  * Tagged rather than an optional string because "the key held no value" and "we
- * never captured one" are different facts and `unapply` must act differently on
- * them: the first means delete the key, the second means do nothing. An optional
- * `previousXml` would collapse them into the same absent field.
+ * never captured one" are different facts and `unapply` must act differently
+ * on them: the first means delete the key, the second means do nothing. An
+ * optional `previousXml` would collapse them into the same absent field.
  */
 export const MacDefaultPrevious = Schema.TaggedUnion({
   /** The key did not exist before this resource wrote it. */
@@ -66,11 +67,9 @@ export const MacDefaultState = Schema.Struct({
   /**
    * Captured by `apply` so `unapply` can restore rather than guess.
    *
-   * `Reconciler.unapply`'s own doc comment cited this resource as the example of
-   * one that cannot honestly reverse itself, because its state carried no prior
-   * value. That was a gap in this schema rather than a fact about `defaults` —
-   * `apply` already receives the live value as `observed`, so capturing it costs
-   * nothing. Absent only on state written before this field existed.
+   * `apply` receives the live value as `observed`, so capturing it costs
+   * nothing. It is absent only on state written before this field existed;
+   * that legacy state is deliberately left alone by `unapply`.
    */
   previous: Schema.optionalKey(MacDefaultPrevious),
 });
@@ -80,6 +79,71 @@ export type MacDefaultState = typeof MacDefaultState.Type;
 export interface MacDefault extends Resource<"MacOS.Default", MacDefaultProps, MacDefaultState> {}
 
 export const MacDefault = Resource<MacDefault>("MacOS.Default");
+
+/**
+ * `defaults write` exited successfully, but a fresh property-list read still
+ * disagrees with the requested canonical XML. This is a typed failure rather
+ * than a returned desired state so the persisted output cannot claim a write
+ * that the preferences system did not make visible.
+ */
+export class MacDefaultNotConverged extends Data.TaggedError("MacDefaultNotConverged")<{
+  domain: string;
+  key: string;
+  expected: string;
+  actual: string | undefined;
+}> {
+  override get message() {
+    const actual = this.actual === undefined ? "absent" : `"${this.actual}"`;
+    return `macOS default ${this.domain}/${this.key} was written, but a fresh read returned ${actual} instead of the requested value.`;
+  }
+}
+
+/**
+ * The missing-key shape is the only non-zero result observe may classify as
+ * absence. A command-not-found, permission failure, broken preferences
+ * daemon, or any other non-zero result must remain a typed command error.
+ * This wording was captured from the real macOS pipeline:
+ * `plutil -extract missing xml1 -o - -`.
+ */
+const MISSING_VALUE =
+  /Could not extract value, error: No value at that key path or invalid key path:/;
+
+const isMissingValue = (error: CommandError): boolean =>
+  error.reason._tag === "UnexpectedExit" &&
+  error.reason.exitCode === 1 &&
+  MISSING_VALUE.test(error.reason.stderr);
+
+const observeMacDefault = (props: MacDefaultProps, ctx: ObserveContext) =>
+  ctx
+    .exec({
+      command: Sh.pipe(
+        Sh.sh("defaults", "export", props.domain, "-"),
+        Sh.sh("plutil", "-extract", props.key, "xml1", "-o", "-", "-"),
+      ),
+      shell: true,
+    })
+    .pipe(
+      // Only plutil's captured missing-value diagnostic means the domain or
+      // key is absent. A different command failure is unreadable state, not
+      // absence, and must not cause an invisible overwrite.
+      Effect.map((result) => Option.some(result.stdout)),
+      Effect.catchTag("CommandError", (error) =>
+        isMissingValue(error) ? Effect.succeed(Option.none<string>()) : Effect.fail(error),
+      ),
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(Option.none()),
+          // Output that will not parse is a real failure rather than
+          // "absent": `plutil` succeeded, so something is there, and
+          // silently treating it as missing would overwrite a value
+          // nobody could see.
+          onSome: (stdout) =>
+            Effect.fromResult(canonicalXml(stdout)).pipe(
+              Effect.map((xml) => Option.some({ domain: props.domain, key: props.key, xml })),
+            ),
+        }),
+      ),
+    );
 
 /**
  * `CommandError` is in the error union rather than being converted to a defect,
@@ -93,7 +157,11 @@ export const MacDefault = Resource<MacDefault>("MacOS.Default");
  * forced.
  */
 export const makeMacDefaultReconciler: Effect.Effect<
-  Reconciler<MacDefaultProps, MacDefaultState, PlistDecodeError | CommandError>
+  Reconciler<
+    MacDefaultProps,
+    MacDefaultState,
+    PlistDecodeError | CommandError | MacDefaultNotConverged
+  >
 > = Effect.succeed({
   // `defaults` serialises per domain, and two keys in one domain are two
   // read-modify-write cycles over the same plist, so applies are serialised
@@ -112,37 +180,7 @@ export const makeMacDefaultReconciler: Effect.Effect<
    * which is ambiguous: it quotes strings only when necessary and has no
    * distinct spelling for data or dates.
    */
-  observe: (props, ctx) =>
-    ctx
-      .exec({
-        command: Sh.pipe(
-          Sh.sh("defaults", "export", props.domain, "-"),
-          Sh.sh("plutil", "-extract", props.key, "xml1", "-o", "-", "-"),
-        ),
-        shell: true,
-      })
-      .pipe(
-        // A non-zero exit means the domain or the key is absent, which is an
-        // ordinary state to converge from rather than a failure. `plutil`
-        // exits 1 for a missing key path; `defaults export` of an unknown
-        // domain succeeds with an empty dictionary, which then fails the
-        // extract the same way.
-        Effect.map((result) => Option.some(result.stdout)),
-        Effect.orElseSucceed((): Option.Option<string> => Option.none()),
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.succeed(Option.none()),
-            // Output that will not parse is a real failure rather than
-            // "absent": `plutil` succeeded, so something is there, and
-            // silently treating it as missing would overwrite a value
-            // nobody could see.
-            onSome: (stdout) =>
-              Effect.fromResult(canonicalXml(stdout)).pipe(
-                Effect.map((xml) => Option.some({ domain: props.domain, key: props.key, xml })),
-              ),
-          }),
-        ),
-      ),
+  observe: observeMacDefault,
 
   desired: (props) =>
     Effect.fromResult(render(props.value)).pipe(
@@ -173,11 +211,10 @@ export const makeMacDefaultReconciler: Effect.Effect<
   },
 
   /**
-   * No `unapply`: restoring a prior value needs one captured before this
-   * resource's first write, and `MacDefaultState` never carries that (see its
-   * doc comment) — nothing calls {@link ApplyContext.snapshot} here. Deleting
-   * the key instead of restoring it would not be an undo, only a different
-   * change nobody asked for.
+   * Restores the live value captured immediately before this resource's write.
+   * Old state written before `previous` existed has no safe prior value,
+   * so `unapply` deliberately does nothing for that state rather than
+   * deleting or guessing.
    */
   apply: ({ props, observed, desired }, ctx) =>
     Effect.gen(function* () {
@@ -189,6 +226,25 @@ export const makeMacDefaultReconciler: Effect.Effect<
         command: Sh.sh("defaults", "write", props.domain, props.key, desired.xml),
         shell: true,
       });
+
+      // A successful `defaults write` is not proof that the preferences
+      // system committed the value. Read it through the same canonical path
+      // used during planning before returning persisted state.
+      const confirmed = yield* observeMacDefault(props, ctx);
+      const actual = Option.match(confirmed, {
+        onNone: () => undefined,
+        onSome: (state) => state.xml,
+      });
+      if (actual !== desired.xml) {
+        return yield* Effect.fail(
+          new MacDefaultNotConverged({
+            domain: props.domain,
+            key: props.key,
+            expected: desired.xml,
+            actual,
+          }),
+        );
+      }
 
       if (props.restartApp !== undefined) {
         yield* ctx

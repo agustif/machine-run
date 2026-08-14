@@ -1,9 +1,10 @@
-import { Sh } from "@machine-run/core";
+import { Platform } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { isExitCode, stderrOf } from "./exitCode.ts";
+import { gitCommand } from "./command.ts";
 
 /**
  * The repository root `target` is inside, or `None` if `target` is not
@@ -25,12 +26,10 @@ import { isExitCode, stderrOf } from "./exitCode.ts";
  */
 export const showToplevel = (
   target: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<Option.Option<string>, CommandError> =>
-  exec({
-    command: Sh.sh("git", "-C", target, "rev-parse", "--show-toplevel"),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "-C", target, "rev-parse", "--show-toplevel")).pipe(
     Effect.map((result) => Option.some(result.stdout.trim())),
     Effect.catch((error) =>
       isExitCode(error, 128) && /not a git repository/i.test(stderrOf(error))

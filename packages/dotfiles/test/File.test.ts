@@ -1,12 +1,14 @@
 import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
+  FilePathIsNotFile,
   FilePathUnreadable,
   makeFileReconciler,
   type FileProps,
@@ -22,6 +24,11 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows' chmod cannot express an unreadable directory/file, so the
+// permission-denied fixtures below are POSIX-only. ACL translation has its own
+// Windows coverage in the core tests.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /** A real `ctx.snapshot`, so `apply`'s own backup capture has something to
  * actually copy — the stub above always reports "nothing to preserve".
@@ -43,7 +50,7 @@ const snapshottingCtx = (fs: FileSystem.FileSystem) => ({
  * see, and would replace the error naming the permission problem with
  * whatever the subsequent write happened to fail with.
  */
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not absence, when the parent directory is unreadable",
   () =>
     Effect.gen(function* () {
@@ -80,7 +87,24 @@ it.effect(
  * regardless of the file's own mode bits, so it still succeeds; the read
  * that follows does not.
  */
-it.effect(
+it.effect("observe raises a typed error when a directory occupies the file path", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "directory-not-file");
+    yield* fs.makeDirectory(target);
+
+    const failure = yield* reconciler
+      .observe({ path: target, content: "x" }, observeCtx)
+      .pipe(Effect.flip);
+
+    expect(failure).toBeInstanceOf(FilePathIsNotFile);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not empty content, when the file itself cannot be read after stat succeeds",
   () =>
     Effect.gen(function* () {
@@ -279,7 +303,9 @@ it.effect(
       const observed: FileState = { path: "/tmp/x", hash: "aaa" };
       const desired: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
       expect(reconciler.matches(observed, desired)).toBe(false);
-      expect(drift(observed, desired)).toEqual([{ field: "mode", observed: "unset", desired: "600" }]);
+      expect(drift(observed, desired)).toEqual([
+        { field: "mode", observed: "unset", desired: "600" },
+      ]);
     }).pipe(Effect.provide(layer)),
 );
 

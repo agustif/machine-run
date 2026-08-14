@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Platform, Sh } from "@machine-run/core";
 import type { Drift, Exec, ExecutionContext, Reconciler } from "@machine-run/engine";
 import { executionOf, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as UndefinedOr from "effect/UndefinedOr";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
 /**
@@ -49,6 +50,16 @@ export interface Login extends Resource<"Shell.Login", LoginProps, LoginState> {
 
 export const Login = Resource<Login>("Shell.Login");
 
+/** The allow-list file could not be read; it is not an empty allow-list. */
+export class ShellsFileUnreadable extends Data.TaggedError("ShellsFileUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
+  override get message() {
+    return `Could not read "${this.path}" while validating a login shell: ${this.cause.reason._tag}.`;
+  }
+}
+
 /**
  * Raised when `props.shell` is not listed in `/etc/shells`.
  *
@@ -70,6 +81,22 @@ export class ShellNotAllowed extends Data.TaggedError("ShellNotAllowed")<{
 }> {
   override get message() {
     return `"${this.shell}" is not listed in /etc/shells (${this.allowed.length > 0 ? this.allowed.join(", ") : "which is empty or unreadable"}). \`chsh\` restricts a non-superuser to a shell listed there — add it to /etc/shells yourself first (most package managers that install a shell do this automatically; a manually built binary usually does not).`;
+  }
+}
+
+/**
+ * Windows has no `/etc/passwd`-style login-shell field for this resource to
+ * reconcile. Refusing here is safer than falling through to `getent`, which
+ * is not a Windows system interface and would turn an unsupported platform
+ * into a misleading "command not found" failure.
+ */
+export class LoginShellUnsupportedPlatform extends Data.TaggedError(
+  "LoginShellUnsupportedPlatform",
+)<{
+  platform: string;
+}> {
+  override get message() {
+    return `Shell.Login cannot inspect a login shell on platform "${this.platform}"; use a platform-specific Windows configuration until a Windows login-shell backend exists.`;
   }
 }
 
@@ -110,7 +137,7 @@ const currentUsername = (exec: Exec) =>
   );
 
 /**
- * The live login shell for `username`, dispatched by `process.platform` —
+ * The live login shell for `username`, dispatched by the injected platform —
  * this is a fact about which directory-service tool exists on this OS, not
  * something to detect by probing, so it's decided the same way `detect.ts`
  * decides a package manager for a platform.
@@ -124,19 +151,24 @@ const currentUsername = (exec: Exec) =>
  * field is the shell — verified in a container (Ubuntu 24.04):
  * `testuser:x:1001:1001::/home/testuser:/bin/sh`.
  */
-const readLoginShell = (username: string, exec: Exec): Effect.Effect<string, CommandError> =>
-  Match.value(process.platform).pipe(
+const readLoginShell = (
+  username: string,
+  platform: typeof Platform.Service,
+  exec: Exec,
+): Effect.Effect<string, CommandError | LoginShellUnsupportedPlatform> =>
+  Match.value(platform.os).pipe(
     Match.when("darwin", () =>
       exec({
         command: Sh.sh("dscl", ".", "-read", `/Users/${username}`, "UserShell"),
         shell: true,
       }).pipe(Effect.map((result) => result.stdout.replace(/^UserShell:\s*/, "").trim())),
     ),
-    Match.orElse(() =>
+    Match.when("linux", () =>
       exec({ command: Sh.sh("getent", "passwd", username), shell: true }).pipe(
         Effect.map((result) => result.stdout.trim().split(":")[6] ?? ""),
       ),
     ),
+    Match.orElse((os) => Effect.fail(new LoginShellUnsupportedPlatform({ platform: os }))),
   );
 
 /**
@@ -148,20 +180,36 @@ const readLoginShell = (username: string, exec: Exec): Effect.Effect<string, Com
 export const makeLoginReconcilerAt = (
   shellsPath: string,
 ): Effect.Effect<
-  Reconciler<LoginProps, LoginState, CommandError | ShellNotAllowed>,
+  Reconciler<
+    LoginProps,
+    LoginState,
+    | CommandError
+    | LoginShellUnsupportedPlatform
+    | ShellsFileUnreadable
+    | ShellNotAllowed
+  >,
   never,
-  FileSystem.FileSystem
+  FileSystem.FileSystem | Platform
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    const platform = yield* Platform;
 
-    // A missing /etc/shells reads as "nothing is allowed" rather than "nothing
-    // constrains this" — the file's absence is itself unusual enough that the
-    // safe default is to fail every shell's validation loudly, not to skip it.
+    const ensureSupported = () =>
+      platform.os === "win32"
+        ? Effect.fail(new LoginShellUnsupportedPlatform({ platform: platform.os }))
+        : Effect.void;
+
+    // A missing or unreadable /etc/shells is not an empty allow-list. It is
+    // machine state we could not inspect, so keep the typed cause instead of
+    // manufacturing ShellNotAllowed with a misleading empty list.
     const allowedShells = () =>
       fs.readFileString(shellsPath).pipe(
         Effect.map(parseEtcShells),
-        Effect.orElseSucceed((): string[] => []),
+        Effect.catchTag(
+          "PlatformError",
+          (cause) => Effect.fail(new ShellsFileUnreadable({ path: shellsPath, cause })),
+        ),
       );
 
     return {
@@ -174,8 +222,9 @@ export const makeLoginReconcilerAt = (
 
       observe: (_props, ctx) =>
         Effect.gen(function* () {
+          yield* ensureSupported();
           const username = yield* currentUsername(ctx.exec);
-          const shell = yield* readLoginShell(username, ctx.exec);
+          const shell = yield* readLoginShell(username, platform, ctx.exec);
           if (shell.length === 0) return Option.none();
           return Option.some({ shell });
         }),
@@ -185,6 +234,7 @@ export const makeLoginReconcilerAt = (
       // `plan` time, before anything runs `chsh`.
       desired: (props) =>
         Effect.gen(function* () {
+          yield* ensureSupported();
           const allowed = yield* allowedShells();
           if (!allowed.includes(props.shell)) {
             return yield* Effect.fail(new ShellNotAllowed({ shell: props.shell, allowed }));
@@ -207,6 +257,7 @@ export const makeLoginReconcilerAt = (
 
       apply: ({ observed, desired }, ctx) =>
         Effect.gen(function* () {
+          yield* ensureSupported();
           const username = yield* currentUsername(ctx.exec);
           yield* ctx.exec({
             command: chshCommand(executionOf(ctx), desired.shell, username),
@@ -236,6 +287,7 @@ export const makeLoginReconcilerAt = (
           onUndefined: () => Effect.void,
           onDefined: (previousShell) =>
             Effect.gen(function* () {
+              yield* ensureSupported();
               // Elevated the same way `apply` is: an undo that cannot run is not
               // an undo, and the shell was changed with the same privilege.
               const username = yield* currentUsername(ctx.exec);

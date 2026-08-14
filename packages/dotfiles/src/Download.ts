@@ -15,6 +15,7 @@ import * as UndefinedOr from "effect/UndefinedOr";
 import { HttpClientError } from "effect/unstable/http/HttpClientError";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
+import type { CommandError } from "alchemy/Command";
 
 /**
  * Raised when the downloaded bytes' SHA-256 does not match
@@ -172,6 +173,8 @@ export const makeDownloadReconciler: Effect.Effect<
     DownloadProps,
     DownloadState,
     | DownloadTooLarge
+    | CommandError
+    | Windows.IcaclsParseError
     | PlatformError
     | HttpClientError
     | DownloadChecksumMismatch
@@ -280,8 +283,12 @@ export const makeDownloadReconciler: Effect.Effect<
           desired: desired.hash.slice(0, 12),
         });
       }
-      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+      if (desired.mode !== undefined && !modeSatisfied(platform, observed, desired.mode)) {
         const desiredMode = desired.mode;
+        if (platform.isWindows) {
+          fields.push({ field: "mode", observed: "ACL does not satisfy", desired: desiredMode.toString(8) });
+          return fields;
+        }
         const modeField: DriftField =
           observed.mode === undefined
             ? { field: "mode", observed: "unset", desired: desiredMode.toString(8) }
@@ -367,10 +374,7 @@ export const makeDownloadReconciler: Effect.Effect<
           yield* fs.writeFile(tempPath, bytes);
           yield* Boolean.match(platform.isWindows, {
             onFalse: () => fs.chmod(tempPath, props.mode ?? 0),
-            onTrue: () =>
-              Windows.applyMode(ctx.exec, tempPath, props.mode ?? 0, "file").pipe(
-                Effect.orElseSucceed(() => undefined),
-              ),
+            onTrue: () => Windows.applyMode(ctx.exec, tempPath, props.mode ?? 0, "file"),
           });
         } else {
           yield* fs.writeFile(tempPath, bytes);

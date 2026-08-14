@@ -18,7 +18,7 @@ resource package: nothing here is an Alchemy `Resource`, and it defines no
 | `Sessions` (`silentSession`)             | A no-op `ScopedPlanStatusSession`, for the resources that must run a read-only command inside `diff`/`read`, which Alchemy gives no session to                                                  |
 | `Providers` (`services()`)               | The `Layer` every file-touching package needs: `Backups`, `FileLock`, and `NodeCrypto`, merged and provided once beneath the resource providers                                                 |
 | `Command.ts`                             | Re-exports `alchemy/Command`'s `CommandExecutor` types used throughout                                                                                                                          |
-| `windows/` (`FilePermissions`, `Icacls`) | A POSIX-mode ↔ Windows ACL translation seam and an `icacls`-output parser — built and unit-tested, but not yet called by any resource (see below)                                               |
+| `windows/` (`FilePermissions`, `Icacls`) | A POSIX-mode ↔ Windows ACL translation seam and an `icacls`-output parser, used by mode-constrained file resources and covered by the Windows CI path |
 
 ## Example
 
@@ -45,12 +45,11 @@ directly. `Backups` and `FileLock` are exercised through the resources built on
 
 ## What it deliberately does not do
 
-- **No Windows resource wiring yet.** `windows/FilePermissions.ts` and
-  `windows/Icacls.ts` exist and are unit-tested
-  ([../../docs/notes/windows-permissions.md](../../docs/notes/windows-permissions.md)),
-  but no resource's `observe`/`apply` calls either module. Wiring them into
-  `Machine.File`/`Directory`/`Download`/`SecretFile` is separate, unstarted
-  work — see [TASKS.md](./TASKS.md).
+- **Windows wiring is intentionally narrow.** `windows/FilePermissions.ts` and
+  `windows/Icacls.ts` are called by `Machine.File`, `Directory`, `Download`,
+  `SecretFile` and delegated `Template` paths. The default Windows suite and
+  the dedicated ACL job run in CI; a complete Windows Alchemy deploy and all
+  platform-specific tools remain external verification — see [TASKS.md](./TASKS.md).
 - **No cross-process locking.** `FileLock` is process-scoped: it prevents two
   resources within one `alchemy deploy` from racing, not two concurrent
   `deploy` invocations. See [TASKS.md](./TASKS.md).

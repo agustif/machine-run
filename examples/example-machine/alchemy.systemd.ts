@@ -21,7 +21,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 const providers = SystemServices.providers().pipe(
-  Layer.provideMerge(Core.services()),
+  Layer.provide(Core.services()),
   Layer.provide(CommandExecutorLive()),
 );
 

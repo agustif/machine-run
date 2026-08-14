@@ -16,131 +16,9 @@ line from an audit but were not independently re-read.
 
 ## Tier 1 — costs correctness
 
-### 1.2 Three of twenty-three resources can undo themselves
-
-`Shell.Login`, `System.Setting` and `Git.Maintenance` implement `unapply`. The
-other twenty do not, so `destroy` is a no-op for them.
-
-This is only half a smell — the removal policy defaults to `retain` precisely
-because uninstalling a package someone now depends on is not obviously correct,
-and two refusals are already reasoned in writing (`Ssh.Key`, because a generated
-private key is unrecoverable; `Tailscale.Connection`, because logging out could
-cut the operator's own access).
-
-The smell is the **silence**: eighteen resources have no recorded decision
-either way. A reader cannot tell "we decided not to" from "nobody thought about
-it", which is exactly the distinction this repo claims to care about.
-
-**Fix:** a one-line decision per resource, in its own doc comment. Not
-necessarily an implementation.
-
-### 1.3 `ExampleCoverage` checks resources, not compositions
-
-`packages/machine/test/ExampleCoverage.test.ts` enumerates every
-`Resource<T>("Type.Name")` and fails if one is unexercised. It does not look at
-the composition functions — `gitIdentity`, `aiSkill`, `sshHost`, `envVar`,
-`func`, and about a dozen more — so those can rot undetected.
-
-Found the way such things are found: `shell`'s `func` composition exists, is
-backed by `ShellBackend.renderFunction`, has its own tests, and appears in
-neither `MAP.md`'s table nor the reference example. The resource guard could not
-have caught it.
-
-**Fix:** extend the same source-reading check to exported composition functions,
-or accept the gap explicitly and say why.
-
-### 1.4 Nothing can upgrade, and no backend refreshes its index
-
-Verified by grep across all 19 package backends: **zero** occurrences of
-upgrade, update, `-Sy` or refresh. `Package.ts`'s `apply` calls only
-`backend.install`.
-
-**A machine managed by this tool never receives an update through it.** Once a
-package is present, `matches` compares presence, finds it, and reports converged
-— permanently. Combined with 2.6 (no way to pin a version) that means the tool
-installs a machine once and then reports it healthy indefinitely while it drifts
-underneath. Security updates included.
-
-Second, smaller, and immediate: no backend refreshes its index before
-installing. `apt install <pkg>` against a stale index fails with "Unable to
-locate package" for anything recent, and `pacman -S` without `-Sy` does the
-same. Any container test that works around this with a manual `apt-get update`
-is hiding it.
-
-**Fix — this is one design with 2.6, not two:**
-
-- `VersionSpec` — what the recipe wants.
-- **Drift with a direction.** `matches` returns a boolean, which cannot separate
-  "installed 1.2, want 1.3" (behind, upgradable) from "installed 1.4, want 1.3"
-  (ahead, usually *not* downgradable). A boolean forces the same action for
-  opposite situations. This is the concrete case for the `matches` → typed
-  reason change already proposed.
-- **`UpdatePolicy`** — `Never` (install once, then leave alone — defensible and
-  probably the common choice), `ToSpec`, `Latest`.
-
-That last one is what makes the whole design cohere: **`Latest` is not a version,
-it is an update policy.** Modelling it as a version is why it currently hides as
-the silent default.
-
 ---
 
-## Tier 1b — wrong results (from the audit, not independently re-verified)
-
-### 1b.1 Exit codes collapsed into a definite answer
-
-`packages/system-services/src/backends/linux/SystemdUser.ts:74-80,96-105` and
-`macos/Launchd.ts:117-123`.
-
-`observeEnabled`/`observeActive` treat *every* non-zero exit as a definite
-"disabled"/"not running", not only the verified codes. `systemctl --user`
-without a reachable D-Bus user session — cron, ssh, no lingering session — exits
-non-zero with a bus error that is indistinguishable by exit code from genuinely
-disabled. `matches` then reports false convergence and hides real drift.
-
-This is the same hazard class already found and mitigated for `gsettings`,
-reappearing in a package written later.
-
-**Fix:** collapse only the specific verified codes; propagate anything else.
-
-### 1b.2 `Codex` treats every command error as "server absent"
-
-`packages/ai/src/backends/Codex.ts:89-96`. The swallow is justified for
-"command not found" and is documented for a specific stderr message, but the
-code checks only the former, so a corrupted `$CODEX_HOME` or a permissions
-problem reads as absent and `apply` blindly re-adds the server.
-
-`Grok.ts` in the same package does the correct thing, right next to it.
-
-**Fix:** match the documented stderr text, propagate the rest — the pattern
-`git/src/toplevel.ts:36` already uses.
-
-### 1b.3 `Git.Repo` folds unreadable into absent
-
-`packages/git/src/Repo.ts:175,184-186`. Same shape as 0.2–0.4: a permission
-error on the parent reads as "nothing here", so the plan says "clone". Lower
-severity because the clone then fails loudly, so it is a wrong plan rather than
-lost data.
-
-### 1b.4 `System.Setting`'s `unapply` can report a false failure
-
-`packages/system-settings/src/Setting.ts:409-418` raises
-`SettingResetNotObserved` when the post-reset value equals what was written —
-but if the schema default happens to equal it, a successful reset reports as a
-failure. Notably the *inverse* of everything else here: a false negative, not a
-false success.
-
-### 1b.5 Read-after-write confirmation is applied to two resources out of five
-
-`System.Setting` and `System.Service` re-read after writing and raise if the
-write did not take (`Setting.ts:375-391`, `Service.ts:218-249`), citing the
-`gsettings` silent-no-op precedent. `System.Package` (`Package.ts:179-197`),
-`System.Repo` (`Repo.ts:150-165`) and `MacOS.Default` (`Default.ts:118-139`) do
-not.
-
-The audit found no live bug of this shape in the 19 package-manager backends, so
-this is a **defensive-posture gap, not a demonstrated failure**. It is listed
-because it is the same coherence problem as 0.5: a lesson learned once and
-encoded in two places out of five.
+## Tier 1b — remaining correctness risks
 
 ---
 
@@ -149,23 +27,25 @@ encoded in two places out of five.
 `Reconciler.address` is where the engine derives mutual exclusion and
 pre-overwrite snapshotting, so two resources writing one file must produce the
 same string. Addresses are paths in 13 kinds and synthetic keys in the rest
-(`defaults:<domain>`, `gsettings:<schema>:<key>`, `<manager>`). Those synthetic
-ones are right — none names a file a user would manage as a file — but the engine
-cannot tell a legitimately-synthetic address from one that should have been a
-path. `Ai.McpServer` was the latter: it keyed on `ai-mcp-config:<tool>` while
-writing `~/.claude.json`, so it shared no lock with a `Machine.File` on the same
-path.
+(`defaults:<domain>`, `gsettings:<schema>:<key>`, `<manager>`). `Ai.McpServer`
+was a concrete collision and is now fixed: supported MCP backends use their
+real config-file path, while unsupported tools retain a synthetic address only
+because they have no writable file and fail before the address matters. The
+remaining gap is that the engine has no general declaration or test that proves
+two independently-written paths share an address.
 
 **Fix:** have a reconciler declare the real paths it writes, so this is
 checkable rather than found by reading all 29 address implementations at once.
 
-## Tier 1c — the architectural finding
+## Tier 1c — the architectural finding, mostly addressed
 
-Three separate audits, hunting three different things, converged on one shape.
+Three separate audits, hunting three different things, converged on one shape;
+the high-risk instances are now fixed, but the general contracts remain
+partly conventional.
 
-**The architecture is sound. The abstractions fit. What is incoherent is that
-this repo's hard-won disciplines live as prose and imitation rather than as
-shared code.**
+**The architecture is sound. The abstractions fit. The audit's concrete
+correctness failures have been moved into shared seams where practical; the
+remaining risk is the set of disciplines that still lack a type-level contract.**
 
 The evidence, measured rather than asserted:
 
@@ -180,42 +60,21 @@ The evidence, measured rather than asserted:
   idempotent by *observing a guard*, theirs re-runs on input change. Different
   resources, and `Machine.providers()` deliberately excludes Alchemy's.
 
-Against that, the same failure recurs three times:
-
-| Discipline | Encoded where | Followed by |
-|---|---|---|
-| absent vs unreadable | prose + imitation | `ssh/Key`, `ssh/KnownHost`, `File`'s `stat` — but not `ManagedBlock`, `LineInFile`, `File`'s read, `Git.Repo`, `Codex` |
-| read-after-write confirmation | prose + imitation | `System.Setting`, `System.Service` — not `Package`, `Repo`, `MacOS.Default` |
-| collapse only verified exit codes | prose + imitation | `Git.Config`, `Grok` — not `SystemdUser`, `Launchd`, `Codex` |
-
-Each was learned the expensive way — a container proving `gsettings set` lies, a
-real `asdf` exiting non-zero while printing its answer — written into a doc
-comment, and then not followed by the next package, because nothing made
-following it easier than not following it.
-
-**This is the highest-leverage fix in this document.** Not because any single
-instance is the worst bug, but because it is the mechanism that generates them.
-Three helpers in `core` — `readIfPresent`, `confirmWrite`, `exitCodeMeaning` —
-would make the correct thing the short thing to write. Prose has now failed
-three times; the next failure is already being written.
+The review found this repetition and the high-risk instances are now encoded in
+shared seams: `readIfPresent`/`statIfPresent` preserve absent-versus-unreadable,
+the service and settings backends classify only known absence outcomes, and
+package/repository/default resources perform fresh read-after-write checks.
+The remaining work in this file is now about boundaries the shared seams do not
+model yet — ownership, address collisions, and the intentionally best-effort
+XDG config discovery in `Git.Config`.
 
 ---
 
-## Tier 1d — the framework models *what*, never *how the run behaves*
+## Tier 1d — execution context is now explicit; machine ownership remains open
 
-Every entry below is the same shape: a property of the **execution context**
-that no type carries, so each backend improvises it, hardcodes it, or forgets
-it. This is the largest structural finding in the document, and the individual
-items are symptoms.
-
-### 1d.2 Locale is never pinned — *every* parser is exposed
-
-Zero occurrences of `LC_ALL` or `LANG` anywhere in `src`. This repo parses
-human-readable output from `apt`, `dnf`, `pacman`, `brew`, `launchctl` and
-more, all of which localise. **On a French or Japanese machine every parser in
-the repo misreads**, and no test catches it because CI runs in English.
-
-Same class as the winget ellipsis, except repo-wide and invisible.
+`ExecutionContext` now carries privilege, locale and the default timeout. The
+provider boundary injects the locale and timeout defaults, while backends own
+their verified operation budgets through `core/Timeouts.ts`.
 
 ### 1d.3 File ownership is not modelled at all
 
@@ -226,16 +85,6 @@ A file written under `sudo` is owned by root. `matches` compares mode only, so
 it reports converged permanently while the user cannot read their own config.
 The gap is invisible precisely because the neighbouring concept is so carefully
 modelled.
-
-### 1d.4 Timeouts are 57 hardcoded literals
-
-Six distinct values (`"10 minutes"` ×17, `"15 minutes"` ×7, `"2 minutes"` ×6,
-`"5 minutes"` ×4, `"1 minute"` ×2, `"30 seconds"` ×2), none configurable.
-
-A slow link makes `brew install` exceed ten minutes and the deploy fails with no
-recourse — the operator cannot raise it, and the number was chosen by whoever
-wrote that backend. Timeout is a property of the run and the machine, not of the
-package manager.
 
 ### 1d.5 Paths are bare strings, held correct by hand
 
@@ -269,17 +118,13 @@ so changing one means finding all of them.
 - **No partial-failure story.** Apply dies at resource 20 of 40 and nothing
   describes the resulting state.
 
-### 1d.8 The fix is one concept
+### 1d.8 Remaining execution-context boundary
 
-An **`ExecutionContext`** threaded through the `exec` seam, carrying privilege,
-locale, architecture, platform, and timeout policy — with each backend declaring
-in its *type* what it requires, the way `VersionSpec` will declare what each
-manager can honour.
-
-`sudo` stops being a string. Locale stops being forgotten. Timeout stops being a
-literal chosen by whoever wrote the file. And the recipe gains a way to say
-things it currently cannot say at all: *this machine has no escalation*, *I am
-already root*, *this link is slow*.
+The privilege, locale and timeout parts of the proposed `ExecutionContext` are
+implemented. Architecture and file ownership are still not modelled, and
+resource paths remain plain strings expanded by convention. Those are separate
+gaps: adding architecture or uid/gid fields without a concrete backend need
+would widen every schema without making a current resource safer.
 
 ---
 
@@ -319,22 +164,14 @@ split reads well, listing every old name in `aliases`.
 
 From the duplication audit; the first entry re-verified while writing this.
 
-### 3b.2 Parent-directory creation, hand-written six times
-
-`fs.makeDirectory(path.dirname(...), { recursive: true, ...mode })` appears
-identically in `File.ts:134`, `ManagedBlock.ts:282`, `LineInFile.ts:286`,
-`SecretFile.ts:154`, `KnownHost.ts:301`, `Key.ts:372`, in two textual variants.
-
-`core`'s `Fs.ensureParentDir` already exists and only `Backups.ts` uses it.
-Migrate the six.
-
 ### 3b.3 `directoryMode`, quantified
 
 Seven resources each declare their own `directoryMode` prop
 (`File.ts:36`, `ManagedBlock.ts:73`, `LineInFile.ts:82`, `Template.ts:128`,
-`SecretFile.ts:31`, `KnownHost.ts:49`, `Key.ts:48`), and `DEFAULT_DIRECTORY_MODE
-= 0o700` is redefined verbatim in three of them with the literal hardcoded a
-fourth time in `Host.ts:96`.
+`SecretFile.ts:31`, `KnownHost.ts:49`, `Key.ts:48`). The shared
+`core` `DEFAULT_DIRECTORY_MODE` now owns the `0o700` default, and every writer
+uses `Fs.ensureParentDir`; the remaining issue is the API decision in 2.2 about
+whether these props should exist alongside `Machine.Directory` at all.
 
 The cost is sharper than "repetition": two resources can disagree about the same
 directory's mode and nothing detects it. See 2.2.
@@ -372,21 +209,6 @@ register its backends".
 ---
 
 ## Tier 4 — process smells
-
-### 4.1 A worktree build can be green and prove nothing
-
-An agent working in a git worktree reported a clean `npm run build`, `npm test`
-and `npm run lint` — and then disclosed that the worktree's `node_modules`
-lacked the `@machine-run/*` symlinks, so bare specifiers resolved to the **main
-checkout's stale copy** of the package it had just rewritten. Building the same
-change on `main` broke five files immediately.
-
-The disclosure was worth more than the refactor. The trap is silent by
-construction: every command exits 0.
-
-**Fix:** a preflight that asserts `node_modules/@machine-run/*` are symlinks
-into the current checkout, run before `build`. Turn vigilance into a failed
-command.
 
 ## Judged clean — do not "fix" these
 

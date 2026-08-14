@@ -1,6 +1,7 @@
 import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -12,13 +13,19 @@ import {
   SymlinkSourceMissing,
 } from "../src/Symlink.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 const applyCtx = {
   exec: () => Effect.die("not used"),
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows chmod cannot deny traversal of a directory; the invariant is
+// covered by the real POSIX fixture and Windows ACL translation separately.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * A `MachinePaths` whose home is a fixed temp directory, so `~/x` resolves
@@ -88,7 +95,7 @@ it.effect("apply replaces a real, non-symlink file occupying the path", () =>
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe fails with SymlinkPathUnreadable, not absence, when the path cannot be inspected",
   () =>
     Effect.gen(function* () {

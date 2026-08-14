@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive, Sh } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -17,6 +17,9 @@ import {
 } from "../src/Maintenance.ts";
 
 const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+
+const expectedGit = (...argv: readonly string[]): string =>
+  process.platform === "win32" ? Sh.pwsh("git", ...argv) : Sh.sh("git", ...argv);
 
 /** A `MachinePaths` whose home is a fixed temp directory — mirrors `Config.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>
@@ -219,7 +222,7 @@ it.effect("apply runs `git maintenance start` against the repo and returns desir
     );
 
     expect(result).toEqual({ repo: "/repo" });
-    expect(calls).toEqual(["git -C /repo maintenance start"]);
+    expect(calls).toEqual([expectedGit("-C", "/repo", "maintenance", "start")]);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -281,8 +284,8 @@ it.effect(
         applyCtx(capturingExec(calls)),
       );
 
-      expect(calls).toEqual(["git -C /repo maintenance unregister --force"]);
-      expect(calls.some((call) => call.includes(" stop"))).toBe(false);
+      expect(calls).toEqual([expectedGit("-C", "/repo", "maintenance", "unregister", "--force")]);
+      expect(calls.some((call) => call.includes("stop"))).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
 

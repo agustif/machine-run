@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as UndefinedOr from "effect/UndefinedOr";
 import { type PlatformError } from "effect/PlatformError";
+import type { CommandError } from "alchemy/Command";
 import * as Schema from "effect/Schema";
 
 /**
@@ -126,7 +127,11 @@ export const makeDirectoryReconciler: Effect.Effect<
   Reconciler<
     DirectoryProps,
     DirectoryState,
-    PlatformError | DirectoryPathIsFile | DirectoryPathUnreadable
+    | PlatformError
+    | CommandError
+    | Windows.IcaclsParseError
+    | DirectoryPathIsFile
+    | DirectoryPathUnreadable
   >,
   never,
   FileSystem.FileSystem | MachinePaths | Platform
@@ -156,9 +161,11 @@ export const makeDirectoryReconciler: Effect.Effect<
         }
         const mode = Number(info.mode) & 0o777;
         if (!platform.isWindows) return Option.some({ path: target, mode });
-        // A failed listing is left absent rather than raised: the directory is
-        // there, and `matches` treats a missing ACL as "cannot confirm", which
-        // converges by re-applying rather than by claiming satisfaction.
+        // A command failure is left absent rather than raised: the directory
+        // is there, and `matches` treats a missing ACL as "cannot confirm",
+        // which converges by re-applying. A successful command with malformed
+        // output fails as `IcaclsParseError` in `readAcl`; format drift must
+        // not be mistaken for an ACL that merely needs another write.
         const acl = yield* Windows.readAcl(ctx.exec, target);
         return Option.some({
           path: target,
@@ -181,8 +188,12 @@ export const makeDirectoryReconciler: Effect.Effect<
       if (observed.path !== desired.path) {
         fields.push({ field: "path", observed: observed.path, desired: desired.path });
       }
-      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+      if (desired.mode !== undefined && !modeSatisfied(platform, observed, desired)) {
         const desiredMode = desired.mode;
+        if (platform.isWindows) {
+          fields.push({ field: "mode", observed: "ACL does not satisfy", desired: desiredMode.toString(8) });
+          return fields;
+        }
         // `observed.mode` can genuinely be absent — not a value to order
         // against, so `direction` is only set when both sides are real.
         const modeField: DriftField =
@@ -218,10 +229,7 @@ export const makeDirectoryReconciler: Effect.Effect<
         if (props.mode !== undefined) {
           yield* Boolean.match(platform.isWindows, {
             onFalse: () => fs.chmod(target, props.mode ?? 0),
-            onTrue: () =>
-              Windows.applyMode(ctx.exec, target, props.mode ?? 0, "directory").pipe(
-                Effect.orElseSucceed(() => undefined),
-              ),
+            onTrue: () => Windows.applyMode(ctx.exec, target, props.mode ?? 0, "directory"),
           });
         }
         const info = yield* fs.stat(target);

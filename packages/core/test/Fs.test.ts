@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -16,6 +17,10 @@ class TestUnreadable extends Data.TaggedError("TestUnreadable")<{
 
 const onUnreadable = (path: string) => (cause: PlatformError) =>
   new TestUnreadable({ path, cause });
+
+// Windows' chmod only toggles the read-only attribute; it cannot create the
+// POSIX unreadable-parent fixture these two tests specifically exercise.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 it.effect("readIfPresent reports a genuinely absent file as Option.none, not an error", () =>
   Effect.gen(function* () {
@@ -45,7 +50,7 @@ it.effect("readIfPresent distinguishes a present-but-empty file from an absent o
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "readIfPresent raises the caller's typed error for an unreadable file, not Option.none",
   () =>
     Effect.gen(function* () {
@@ -83,7 +88,7 @@ it.effect("statIfPresent reports a genuinely absent path as Option.none, not an 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "statIfPresent raises the caller's typed error for an unreadable parent, not Option.none",
   () =>
     Effect.gen(function* () {

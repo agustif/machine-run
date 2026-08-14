@@ -76,10 +76,13 @@ export const posixMode = (info: FileSystem.File.Info): number => Number(info.mod
 /** Mode for a file that may carry a credential: owner read/write only. */
 export const CREDENTIAL_FILE_MODE = 0o600;
 
+/** Default mode for private directories created by a resource. */
+export const DEFAULT_DIRECTORY_MODE = 0o700;
+
 /** Mode for a directory created to hold one: owner-only, so the name of a
  * secret file is not enumerable by other users even when the file itself is
  * unreadable. */
-export const CREDENTIAL_DIRECTORY_MODE = 0o700;
+export const CREDENTIAL_DIRECTORY_MODE = DEFAULT_DIRECTORY_MODE;
 
 /**
  * Writes a file that may carry a credential, at a mode that never exposes it.

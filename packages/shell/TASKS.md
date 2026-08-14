@@ -1,13 +1,13 @@
 # `@machine-run/shell` — backlog
 
-`Shell.Login` (`chsh`) plus five rc-file compositions (`envVar`, `pathEntry`,
-`alias`, `hook`, `ensureLoginShellLoadsRc`), over a `ShellBackend` seam with five
-ids.
+`Shell.Login` (`chsh`) plus six rc-file compositions (`envVar`, `pathEntry`,
+`alias`, `func`, `hook`, `ensureLoginShellLoadsRc`), over a `ShellBackend` seam
+with five ids.
 
 This is the **best-verified seam in the repo** — all five backends were exercised
 in containers, and that verification is what found bash's login-shell behaviour.
-Three resource kinds have an `unapply` today: `Shell.Login`, `Git.Maintenance`
-and `System.Setting`.
+Sixteen resource kinds have an `unapply` today; the seven deliberate refusals
+are tracked in `docs/TASKS.md` and `docs/MAP.md`.
 
 ## Verification
 

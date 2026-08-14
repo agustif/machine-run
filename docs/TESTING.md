@@ -12,12 +12,17 @@ real home directory. Filesystem tests use scoped temporary directories and
 inject machine-wide services such as `Backups`, `MachinePaths`, and
 `CommandExecutor`. HTTP tests inject `HttpClient`.
 
+Build and test scripts first run a read-only workspace preflight. It verifies
+that every `@machine-run/*` import resolves through npm's workspace link into
+the current checkout, so a stale `node_modules` from another worktree cannot
+make a green build prove the wrong source.
+
 The project does not promise identical behavior on every operating system or
 JavaScript runtime. The supported baseline is Node 22+. The default suite runs
-on Ubuntu and macOS; Windows currently has a typecheck job plus explicit
-Windows-tool verification, not a claim of full default-suite parity. Bun and
-Deno remain unsupported unless they receive their own runtime matrix and test
-contract.
+on Ubuntu, macOS and Windows; POSIX-only permission fixtures skip explicitly
+on Windows, while Windows ACL and tool behavior has its own verification job.
+Bun and Deno remain unsupported unless they receive their own runtime matrix and
+test contract.
 
 ## Test tiers
 
