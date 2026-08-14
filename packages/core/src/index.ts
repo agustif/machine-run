@@ -1,6 +1,7 @@
 export * from "./Command.ts";
 export * from "./Backups.ts";
 export * from "./FileLock.ts";
+export * from "./Fs.ts";
 export * from "./hash.ts";
 export * from "./Providers.ts";
 export * from "./Sessions.ts";

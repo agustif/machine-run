@@ -1,5 +1,17 @@
 import { expect, it } from "@effect/vitest";
-import { pwsh, quote, quotePwsh, ref, sh } from "../src/Sh.ts";
+import type { ShellCommand } from "../src/Sh.ts";
+import { pwsh, quote, quotePwsh, ref, sh, unsafeRaw } from "../src/Sh.ts";
+
+/**
+ * `ShellCommand` exists so a command string built by ordinary template-literal
+ * interpolation cannot be handed to anything that expects the output of
+ * `sh`/`pwsh` quoting — see 0.6 and 2.5 in `MUST_CLEANUP.md`. This is a
+ * compile-time guard: reverting `ShellCommand` to a bare `string` (its shape
+ * before branding) makes the `@ts-expect-error` below stop being an error,
+ * which is exactly the regression it exists to catch.
+ */
+// @ts-expect-error -- a plain template literal is a `string`, not a `ShellCommand`.
+const _rawStringIsNotAShellCommand: ShellCommand = `rm -rf ${"whatever"}`;
 
 it("leaves shell-safe words unquoted", () => {
   expect(quote("ripgrep")).toBe("ripgrep");
@@ -57,4 +69,24 @@ it("PowerShell quoting is unconditional, because bare words depend on position",
   expect(quotePwsh("/opt/mytool")).toBe("'/opt/mytool'");
   expect(quotePwsh("winget")).toBe("'winget'");
   expect(pwsh("winget", "install", "my pkg")).toBe("'winget' 'install' 'my pkg'");
+});
+
+it("sh and pwsh both return a usable ShellCommand", () => {
+  // The runtime value is still a plain string underneath the brand; only the
+  // type changes. Assigning to the `ShellCommand`-typed binding is itself
+  // part of what's being checked — a bare `string` return would still pass
+  // the `.toBe` assertion but would not satisfy this annotation.
+  const posix: ShellCommand = sh("brew", "install", "ripgrep");
+  const windows: ShellCommand = pwsh("choco", "install", "ripgrep");
+  expect(posix).toBe("brew install ripgrep");
+  expect(windows).toBe("'choco' 'install' 'ripgrep'");
+});
+
+it("unsafeRaw builds a ShellCommand from an unquoted string, for the two documented escape hatches", () => {
+  const command: ShellCommand = unsafeRaw(
+    "echo $HOME && whoami",
+    "Machine.Exec runs operator-authored shell by design",
+  );
+  // `reason` is documentation for the call site, not part of the command.
+  expect(command).toBe("echo $HOME && whoami");
 });

@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import { ensureParentDir } from "./Fs.ts";
 import { MachinePaths } from "./Paths.ts";
 
 /**
@@ -106,9 +107,7 @@ export const BackupsLive = () =>
             // Mirror the full source path under the run directory so two
             // files sharing a basename can't clobber each other's backup.
             const destination = path.join(root, ...mirrorSegments(absolute));
-            yield* fs.makeDirectory(path.dirname(destination), {
-              recursive: true,
-            });
+            yield* ensureParentDir(fs, path, destination);
             yield* fs.copy(absolute, destination);
             return destination;
           }).pipe(
