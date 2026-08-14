@@ -4,15 +4,15 @@ import * as Fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Effect from "effect/Effect";
 import { makeYayBackend, makeParuBackend } from "../src/backends/linux/Aur.ts";
-import { makeAptBackend } from "../src/backends/linux/Apt.ts";
-import { makeFlatpakBackend } from "../src/backends/linux/Flatpak.ts";
+import { makeAptBackend, makeAptRepoBackend } from "../src/backends/linux/Apt.ts";
+import { makeFlatpakBackend, makeFlatpakRepoBackend } from "../src/backends/linux/Flatpak.ts";
 import { makeSnapBackend } from "../src/backends/linux/Snap.ts";
-import { makeBrewBackend, makeBrewCaskBackend } from "../src/backends/macos/Brew.ts";
+import { makeBrewBackend, makeBrewCaskBackend, makeBrewRepoBackend } from "../src/backends/macos/Brew.ts";
 import { makeGoBackend, parseGoVersionM } from "../src/backends/language/Go.ts";
 import { makeCargoBackend } from "../src/backends/language/Cargo.ts";
 import { makeGemBackend } from "../src/backends/language/Gem.ts";
 import { makeChocoBackend } from "../src/backends/windows/Choco.ts";
-import { makeDnfBackend } from "../src/backends/linux/Dnf.ts";
+import { makeDnfBackend, makeDnfRepoBackend } from "../src/backends/linux/Dnf.ts";
 import { makeMasBackend } from "../src/backends/macos/Mas.ts";
 import { makePortBackend } from "../src/backends/macos/MacPorts.ts";
 import { makeNpmBackend } from "../src/backends/language/Npm.ts";
@@ -23,7 +23,7 @@ import { parseWingetList } from "../src/backends/windows/Winget.ts";
 import { makePackageReconciler } from "../src/Package.ts";
 import { toId } from "../src/bulk.ts";
 import { firstTokens, lines } from "../src/parse.ts";
-import { makeRepoReconciler } from "../src/Repo.ts";
+import { makeRepoReconciler, type RepoProps } from "../src/Repo.ts";
 
 /**
  * A command runner returning fixed output, which is all a backend needs to be
@@ -105,11 +105,57 @@ it.effect("brew-cask backend uses `brew install --cask`", () =>
   }),
 );
 
+it.effect("brew repo backend listRepos parses `brew tap` output into BrewRepo specs", () =>
+  Effect.gen(function* () {
+    const backend = makeBrewRepoBackend();
+    const repos = yield* backend.listRepos(fakeExec("homebrew/cask\ncan1357/tap\n"));
+    expect(repos).toEqual([
+      { _tag: "Brew", tap: "homebrew/cask" },
+      { _tag: "Brew", tap: "can1357/tap" },
+    ]);
+  }),
+);
+
+it.effect("brew repo backend addRepo shells out to `brew tap <tap>`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeBrewRepoBackend();
+    yield* backend.addRepo({ _tag: "Brew", tap: "can1357/tap" }, capturingExec("", calls));
+    expect(calls).toEqual(["brew tap can1357/tap"]);
+  }),
+);
+
 it.effect("apt backend parses dpkg-query output into package names", () =>
   Effect.gen(function* () {
     const backend = makeAptBackend();
     const installed = yield* backend.list(fakeExec("curl\ngit\n"));
     expect(installed).toEqual(["curl", "git"]);
+  }),
+);
+
+it.effect("apt repo backend listRepos parses one-line sources into AptRepo specs", () =>
+  Effect.gen(function* () {
+    const backend = makeAptRepoBackend();
+    // Real shape verified by `apt-sources.test.ts`'s parser tests — this only
+    // exercises the repo backend's own wrapping of that parser's output.
+    const repos = yield* backend.listRepos(
+      fakeExec(
+        "deb http://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble main\n###machine-run:deb822###\n",
+      ),
+    );
+    expect(repos).toEqual([
+      { _tag: "Apt", ppa: "ppa:git-core/ppa" },
+      { _tag: "Apt", ppa: "deb http://ppa.launchpadcontent.net/git-core/ppa/ubuntu noble main" },
+    ]);
+  }),
+);
+
+it.effect("apt repo backend addRepo shells out to `sudo add-apt-repository -y <ppa>`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptRepoBackend();
+    yield* backend.addRepo({ _tag: "Apt", ppa: "ppa:git-core/ppa" }, capturingExec("", calls));
+    expect(calls).toEqual(["sudo add-apt-repository -y ppa:git-core/ppa"]);
   }),
 );
 
@@ -260,26 +306,25 @@ it.effect("dnf backend install shells out to `sudo dnf install -y <name>`", () =
 );
 
 it.effect(
-  "dnf backend listRepos parses `dnf copr list`, reporting both hub-qualified and bare forms",
+  "dnf repo backend listRepos parses `dnf copr list`, reporting both hub-qualified and bare forms",
   () =>
     Effect.gen(function* () {
-      const backend = makeDnfBackend();
-      const listRepos = backend.listRepos;
-      if (!listRepos) throw new Error("dnf backend must implement listRepos");
+      const backend = makeDnfRepoBackend();
       // Real captured output from the same container after
       // `dnf copr enable -y atim/lazygit`.
-      const repos = yield* listRepos(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n"));
-      expect(repos).toEqual(["copr.fedorainfracloud.org/atim/lazygit", "atim/lazygit"]);
+      const repos = yield* backend.listRepos(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n"));
+      expect(repos).toEqual([
+        { _tag: "Dnf", project: "copr.fedorainfracloud.org/atim/lazygit" },
+        { _tag: "Dnf", project: "atim/lazygit" },
+      ]);
     }),
 );
 
-it.effect("dnf backend addRepo shells out to `sudo dnf copr enable -y <repo>`", () =>
+it.effect("dnf repo backend addRepo shells out to `sudo dnf copr enable -y <project>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    const backend = makeDnfBackend();
-    const addRepo = backend.addRepo;
-    if (!addRepo) throw new Error("dnf backend must implement addRepo");
-    yield* addRepo("atim/lazygit", capturingExec("", calls));
+    const backend = makeDnfRepoBackend();
+    yield* backend.addRepo({ _tag: "Dnf", project: "atim/lazygit" }, capturingExec("", calls));
     expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
   }),
 );
@@ -530,20 +575,20 @@ it.effect("flatpak backend install shells out to `flatpak install -y --nonintera
   }),
 );
 
-it.effect("flatpak backend listRepos returns [] on a real empty `flatpak remotes` listing", () =>
+it.effect("flatpak repo backend listRepos returns [] on a real empty `flatpak remotes` listing", () =>
   Effect.gen(function* () {
     // Real captured output from `docker run --rm --platform linux/amd64
     // ubuntu:24.04` (flatpak 1.14.6, freshly installed, no remotes):
     // `flatpak remotes --columns=name,url` prints one blank line (not zero
     // bytes) and exits 0 — see `Flatpak.ts`'s `listRepos` doc comment.
-    const backend = makeFlatpakBackend();
-    const repos = yield* backend.listRepos!(fakeExec(fixture("flatpak-remotes-empty.txt")));
+    const backend = makeFlatpakRepoBackend();
+    const repos = yield* backend.listRepos(fakeExec(fixture("flatpak-remotes-empty.txt")));
     expect(repos).toEqual([]);
   }),
 );
 
 it.effect(
-  'flatpak backend listRepos returns both bare names and reconstructed "name url" pairs ' +
+  "flatpak repo backend listRepos returns both a bare-name entry and a name+location entry " +
     "on a real populated `flatpak remotes` listing",
   () =>
     Effect.gen(function* () {
@@ -555,25 +600,29 @@ it.effect(
       // `.flatpakrepo` URLs that were actually passed to `remote-add` — see
       // `Flatpak.ts`'s doc comment for why that's a real, unavoidable
       // limitation, not a parsing bug.
-      const backend = makeFlatpakBackend();
-      const repos = yield* backend.listRepos!(fakeExec(fixture("flatpak-remotes.txt")));
+      const backend = makeFlatpakRepoBackend();
+      const repos = yield* backend.listRepos(fakeExec(fixture("flatpak-remotes.txt")));
       expect(repos).toEqual([
-        "flathub",
-        "flathub https://dl.flathub.org/repo/",
-        "flathub-beta",
-        "flathub-beta https://dl.flathub.org/beta-repo/",
+        { _tag: "Flatpak", name: "flathub" },
+        { _tag: "Flatpak", name: "flathub", location: "https://dl.flathub.org/repo/" },
+        { _tag: "Flatpak", name: "flathub-beta" },
+        { _tag: "Flatpak", name: "flathub-beta", location: "https://dl.flathub.org/beta-repo/" },
       ]);
     }),
 );
 
 it.effect(
-  "flatpak backend addRepo shells out to `flatpak remote-add --if-not-exists <name> <location>`",
+  "flatpak repo backend addRepo shells out to `flatpak remote-add --if-not-exists <name> <location>`",
   () =>
     Effect.gen(function* () {
       const calls: string[] = [];
-      const backend = makeFlatpakBackend();
-      yield* backend.addRepo!(
-        "flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+      const backend = makeFlatpakRepoBackend();
+      yield* backend.addRepo(
+        {
+          _tag: "Flatpak",
+          name: "flathub",
+          location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
+        },
         capturingExec("", calls),
       );
       expect(calls).toEqual([
@@ -583,13 +632,15 @@ it.effect(
 );
 
 it.effect(
-  "flatpak backend addRepo fails with BackendParseError on a repo prop with no location, " +
+  "flatpak repo backend addRepo fails with BackendParseError on a repo with no location, " +
     "before running anything",
   () =>
     Effect.gen(function* () {
-      const backend = makeFlatpakBackend();
+      const backend = makeFlatpakRepoBackend();
       const calls: string[] = [];
-      const error = yield* backend.addRepo!("flathub", capturingExec("", calls)).pipe(Effect.flip);
+      const error = yield* backend
+        .addRepo({ _tag: "Flatpak", name: "flathub" }, capturingExec("", calls))
+        .pipe(Effect.flip);
       expect(error._tag).toBe("BackendParseError");
       expect(calls).toEqual([]);
     }),
@@ -818,11 +869,22 @@ it.effect(
 // Repo.ts's reconciler: same treatment as Package.ts above.
 // ---------------------------------------------------------------------------
 
-it.effect("Repo reconciler address is the manager id", () =>
+// `RepoProps.repo` is a `RepoSpec` tagged union (Brew/Apt/Dnf/Flatpak), each
+// with its own manager-specific field(s) — a manager and a repo value from a
+// different manager can no longer be paired. These are compile-time guards:
+// if `RepoSpec` regressed to a flat `{ manager, repo: string }` shape (or a
+// `repo` string were accepted where a `RepoSpec` is required), both
+// `@ts-expect-error`s below would stop being errors.
+// @ts-expect-error -- `dnf` paired with a Flatpak-shaped value: no such `RepoSpec` exists.
+const _mismatchedManagerAndField: RepoProps = { repo: { _tag: "Dnf", name: "flathub" } };
+// @ts-expect-error -- a bare string `repo` is not a `RepoSpec`.
+const _bareStringRepo: RepoProps = { repo: "can1357/tap" };
+
+it.effect("Repo reconciler address is the repo's tag", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
-    expect(reconciler.address({ manager: "brew", repo: "can1357/tap" })).toBe("brew");
-    expect(reconciler.address({ manager: "apt", repo: "ppa:some/ppa" })).toBe("apt");
+    expect(reconciler.address({ repo: { _tag: "Brew", tap: "can1357/tap" } })).toBe("Brew");
+    expect(reconciler.address({ repo: { _tag: "Apt", ppa: "ppa:some/ppa" } })).toBe("Apt");
   }),
 );
 
@@ -830,7 +892,7 @@ it.effect("Repo reconciler observe: undefined when the repo is missing from a li
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const observed = yield* reconciler.observe(
-      { manager: "brew", repo: "can1357/tap" },
+      { repo: { _tag: "Brew", tap: "can1357/tap" } },
       planCtx(fakeExec("homebrew/cask\n")),
     );
     expect(observed).toBeUndefined();
@@ -841,10 +903,10 @@ it.effect("Repo reconciler observe: the repo's state once a live listing include
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const observed = yield* reconciler.observe(
-      { manager: "brew", repo: "can1357/tap" },
+      { repo: { _tag: "Brew", tap: "can1357/tap" } },
       planCtx(fakeExec("can1357/tap\n")),
     );
-    expect(observed).toEqual({ manager: "brew", repo: "can1357/tap" });
+    expect(observed).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
   }),
 );
 
@@ -852,7 +914,7 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const calls: string[] = [];
-    const props = { manager: "brew" as const, repo: "can1357/tap" };
+    const props = { repo: { _tag: "Brew" as const, tap: "can1357/tap" } };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
@@ -860,7 +922,7 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
       applyCtx(capturingExec("", calls)),
     );
 
-    expect(result).toEqual({ manager: "brew", repo: "can1357/tap" });
+    expect(result).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
     expect(calls).toEqual(["brew tap can1357/tap"]);
   }),
 );
@@ -870,10 +932,10 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
-      const props = { manager: "brew" as const, repo: "can1357/tap" };
+      const props = { repo: { _tag: "Brew" as const, tap: "can1357/tap" } };
 
       const planned = yield* reconciler.observe(props, planCtx(fakeExec("can1357/tap\n")));
-      expect(planned).toEqual({ manager: "brew", repo: "can1357/tap" });
+      expect(planned).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
 
       const applied = yield* reconciler.observe(props, applyCtx(fakeExec("homebrew/cask\n")));
       expect(applied).toBeUndefined();
@@ -886,19 +948,19 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
       const observed = yield* reconciler.observe(
-        { manager: "dnf", repo: "atim/lazygit" },
+        { repo: { _tag: "Dnf", project: "atim/lazygit" } },
         // Real captured `dnf copr list` output — see Dnf.ts's doc comment.
         planCtx(fakeExec("copr.fedorainfracloud.org/atim/lazygit\n")),
       );
-      expect(observed).toEqual({ manager: "dnf", repo: "atim/lazygit" });
+      expect(observed).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
     }),
 );
 
-it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <repo>`", () =>
+it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <project>`", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const calls: string[] = [];
-    const props = { manager: "dnf" as const, repo: "atim/lazygit" };
+    const props = { repo: { _tag: "Dnf" as const, project: "atim/lazygit" } };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
@@ -906,7 +968,7 @@ it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <
       applyCtx(capturingExec("", calls)),
     );
 
-    expect(result).toEqual({ manager: "dnf", repo: "atim/lazygit" });
+    expect(result).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
     expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
   }),
 );
@@ -917,7 +979,13 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
       const observed = yield* reconciler.observe(
-        { manager: "flatpak", repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo" },
+        {
+          repo: {
+            _tag: "Flatpak",
+            name: "flathub",
+            location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
+          },
+        },
         planCtx(fakeExec(fixture("flatpak-remotes-empty.txt"))),
       );
       expect(observed).toBeUndefined();
@@ -932,24 +1000,30 @@ it.effect(
       // A recipe naming just the bare remote name — matching whatever this
       // resource is tracking by name — converges against a real listing.
       const observed = yield* reconciler.observe(
-        { manager: "flatpak", repo: "flathub" },
+        { repo: { _tag: "Flatpak", name: "flathub" } },
         planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
       );
-      expect(observed).toEqual({ manager: "flatpak", repo: "flathub" });
+      expect(observed).toEqual({ repo: { _tag: "Flatpak", name: "flathub" } });
     }),
 );
 
 it.effect(
-  "Repo reconciler observe: flatpak, a real bootstrap-URL repo prop never matches a live listing " +
+  "Repo reconciler observe: flatpak, a real bootstrap-URL repo never matches a live listing " +
     "— the documented, unavoidable Flatpak.ts limitation, not a bug",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
       const observed = yield* reconciler.observe(
-        { manager: "flatpak", repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo" },
+        {
+          repo: {
+            _tag: "Flatpak",
+            name: "flathub",
+            location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
+          },
+        },
         planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
       );
-      // `flatpak remotes` reports the *resolved* URL
+      // `flatpak remotes` reports the *resolved* location
       // (https://dl.flathub.org/repo/), never the bootstrap URL that was
       // actually passed to `remote-add` — so this never matches, even
       // though `flathub` really is registered.
@@ -965,8 +1039,11 @@ it.effect(
       const reconciler = yield* makeRepoReconciler;
       const calls: string[] = [];
       const props = {
-        manager: "flatpak" as const,
-        repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+        repo: {
+          _tag: "Flatpak" as const,
+          name: "flathub",
+          location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
+        },
       };
       const desired = yield* reconciler.desired(props);
 
@@ -979,5 +1056,24 @@ it.effect(
       expect(calls).toEqual([
         "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
       ]);
+    }),
+);
+
+it.effect(
+  "Repo reconciler apply: flatpak with no location fails loudly with BackendParseError, " +
+    "the typed replacement for the old malformed-repo-string parse failure",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const calls: string[] = [];
+      const props = { repo: { _tag: "Flatpak" as const, name: "flathub" } };
+      const desired = yield* reconciler.desired(props);
+
+      const error = yield* reconciler
+        .apply({ props, observed: undefined, desired }, applyCtx(capturingExec("", calls)))
+        .pipe(Effect.flip);
+
+      expect(error._tag).toBe("BackendParseError");
+      expect(calls).toEqual([]);
     }),
 );

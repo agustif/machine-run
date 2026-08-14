@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Hash from "effect/Hash";
+import * as Match from "effect/Match";
 
 /**
  * A short, stable, non-cryptographic digest of a string.
@@ -12,8 +13,9 @@ import * as Hash from "effect/Hash";
  * filesystem-safe.
  */
 const shortHash = (input: string): string => (Hash.string(input) >>> 0).toString(36);
+import type { RepoSpec } from "./Backend.ts";
 import { Package, type PackageManagerId } from "./Package.ts";
-import { Repo, type RepoManagerId } from "./Repo.ts";
+import { Repo } from "./Repo.ts";
 
 /**
  * Logical IDs need to be filesystem-safe — the real prop values are
@@ -53,9 +55,28 @@ export const packages = (manager: PackageManagerId, names: string[]) =>
     }
   });
 
-export const repos = (manager: RepoManagerId, values: string[]) =>
+/**
+ * The string a spec's own manager identifies a repo by — a tap, a PPA, a
+ * COPR project, or a Flatpak remote's name — used only to build a stable,
+ * human-legible logical id below, never to reconstruct the spec itself.
+ */
+const repoDisplayName = (spec: RepoSpec): string =>
+  Match.value(spec).pipe(
+    Match.tag("Brew", (s) => s.tap),
+    Match.tag("Apt", (s) => s.ppa),
+    Match.tag("Dnf", (s) => s.project),
+    Match.tag("Flatpak", (s) => s.name),
+    Match.exhaustive,
+  );
+
+/**
+ * Sugar over N individual {@link Repo} resources — NOT a bundle resource.
+ * Each spec still becomes its own atomic, independently-diffed `System.Repo`
+ * instance; this just saves writing the loop at every call site.
+ */
+export const repos = (specs: readonly RepoSpec[]) =>
   Effect.gen(function* () {
-    for (const repo of values) {
-      yield* Repo(`${manager}-repo-${toId(repo)}`, { manager, repo });
+    for (const spec of specs) {
+      yield* Repo(`${spec._tag.toLowerCase()}-repo-${toId(repoDisplayName(spec))}`, { repo: spec });
     }
   });

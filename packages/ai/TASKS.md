@@ -47,3 +47,20 @@ has. That makes this the second-least-verified seam in the repo after `secrets`.
       handles config or MCP. That is a seam boundary leaking into the id space;
       an `AiToolBackend` should describe one tool and declare which capabilities
       it has.
+- [x] **`McpServerProps`/`McpServerState` modelled the transport as two
+      independently-`optionalKey` halves.** `command`/`args`/`env` and
+      `url`/`headers` sat side by side, so `{}` (neither) and
+      `{ command, url }` (both) each type-checked despite the doc comments
+      calling them mutually exclusive. Fixed: `transport` is now a
+      `Schema.TaggedUnion` (`Stdio` | `Remote`), the same pattern
+      `runtimes/src/Backend.ts`'s `RuntimeScope` uses, dispatched with
+      `Match.tag`/`Match.exhaustive` in `McpServer.ts`. `env` only exists on
+      `Stdio`, `headers` only on `Remote`. This is a props-and-state schema
+      break — nothing here has ever been deployed, so nothing needed
+      migrating. `McpServerState`'s secret-never-in-state property (`envKeys`/
+      `envLiteral`/`headerKeys`/`headerLiteral`, never a resolved secret
+      value) is unchanged; only the surrounding shape moved.
+- [x] **`McpEnvValue`'s secret half moved to `@machine-run/secrets`' new
+      `SecretSource` tagged union**, replacing the old
+      `{ source: SecretBackendId, ref: string }` pair, in step with that
+      package's own typing pass (see `secrets/TASKS.md`).

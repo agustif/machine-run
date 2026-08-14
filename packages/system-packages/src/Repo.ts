@@ -5,58 +5,51 @@ import {
   toProvider,
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
-import { makeAptBackend } from "./backends/linux/Apt.ts";
-import { makeDnfBackend } from "./backends/linux/Dnf.ts";
-import { makeFlatpakBackend } from "./backends/linux/Flatpak.ts";
-import { makeBrewBackend } from "./backends/macos/Brew.ts";
-import type { BackendError, PackageManagerBackend } from "./Backend.ts";
+import { makeAptRepoBackend } from "./backends/linux/Apt.ts";
+import { makeDnfRepoBackend } from "./backends/linux/Dnf.ts";
+import { makeFlatpakRepoBackend } from "./backends/linux/Flatpak.ts";
+import { makeBrewRepoBackend } from "./backends/macos/Brew.ts";
+import { type BackendError, RepoSpec } from "./Backend.ts";
 import { makePackageIndex } from "./PackageIndex.ts";
 
 /**
  * Managers with a real, server-side "extra repo" concept: a brew tap, an
- * apt PPA, a dnf COPR project. Each is something the manager itself tracks
- * as configuration (a tapped repo, a `sources.list` entry, a
- * `/etc/yum.repos.d/*.repo` file) independent of any package installed
- * from it.
+ * apt PPA, a dnf COPR project, a Flatpak remote. Each is something the
+ * manager itself tracks as configuration (a tapped repo, a `sources.list`
+ * entry, a `/etc/yum.repos.d/*.repo` file, a registered remote) independent
+ * of any package installed from it. `RepoSpec` (`Backend.ts`) names each
+ * one's own fields — see its doc comment for what each tag means and why it
+ * replaced a flat `{ manager, repo: string }` shape.
  *
- * `pacman` is deliberately not in this list. The AUR — the only "extra
- * repo" pacman users reach for — has no equivalent: an AUR helper
- * (`yay`/`paru`, see `backends/linux/Aur.ts`) clones a PKGBUILD and runs
- * `makepkg` locally, then hands pacman an ordinary local package to
- * install. Nothing gets written to `/etc/pacman.conf` or any pacman-tracked
- * repo list, so there is nothing for `listRepos` to observe or `addRepo` to
- * create — nothing to reconcile as a distinct resource. Wanting an
- * AUR-sourced package is expressed as a `System.Package` on manager
- * `"yay"`/`"paru"` directly; there is no separate "enable the AUR" step the
- * way there is for a COPR project or a PPA.
+ * `repo` is nested one level, `RuntimeScope`'s own pattern in
+ * `runtimes/src/Backend.ts` (embedded as `RuntimeToolProps.scope`, never as a
+ * resource's entire `Props`): Alchemy's `Resource<Type, Props, Attributes>`
+ * needs `Props`/`Attributes` to be a single object type with statically
+ * known members to build its output-attribute and input-props machinery
+ * (`{ [attr in keyof Attributes]: ... }` and `PropsInput`), and a bare
+ * `RepoSpec` at the top level — a union across four disjoint tags — isn't
+ * one; nesting it under `repo` gives the resource itself one concrete
+ * `Schema.Struct` shape while keeping `RepoSpec` the tagged union that
+ * actually rules out mismatched manager/field combinations.
  *
- * `flatpak` joined this list once `listRepos`/`addRepo` were added to
- * `backends/linux/Flatpak.ts` — a Flatpak remote (Flathub, most commonly) is
- * exactly this same "extra repo" concept, just spelled `flatpak remote-add`
- * instead of `brew tap`/`add-apt-repository`/`dnf copr enable`. See that
- * module's doc comment for `props.repo`'s two-part `"<name> <location>"`
- * shape and a real, container-verified limitation in how cleanly it
- * converges.
+ * `pacman` has no tag in `RepoSpec`. The AUR — the only "extra repo" pacman
+ * users reach for — has no equivalent: an AUR helper (`yay`/`paru`, see
+ * `backends/linux/Aur.ts`) clones a PKGBUILD and runs `makepkg` locally,
+ * then hands pacman an ordinary local package to install. Nothing gets
+ * written to `/etc/pacman.conf` or any pacman-tracked repo list, so there is
+ * nothing for `listRepos` to observe or `addRepo` to create — nothing to
+ * reconcile as a distinct resource. Wanting an AUR-sourced package is
+ * expressed as a `System.Package` on manager `"yay"`/`"paru"` directly;
+ * there is no separate "enable the AUR" step the way there is for a COPR
+ * project or a PPA.
  */
-export const RepoManagerId = Schema.Literals(["brew", "apt", "dnf", "flatpak"]);
-export type RepoManagerId = typeof RepoManagerId.Type;
-
-export const RepoProps = Schema.Struct({
-  manager: RepoManagerId,
-  /** e.g. "can1357/tap" (brew), "ppa:some/ppa" (apt), or "owner/project" (dnf COPR). */
-  repo: Schema.String,
-});
-
+export const RepoProps = Schema.Struct({ repo: RepoSpec });
 export type RepoProps = typeof RepoProps.Type;
 
-export const RepoState = Schema.Struct({
-  manager: RepoManagerId,
-  repo: Schema.String,
-});
-
+export const RepoState = Schema.Struct({ repo: RepoSpec });
 export type RepoState = typeof RepoState.Type;
 
 /**
@@ -70,25 +63,26 @@ export interface Repo extends Resource<"System.Repo", RepoProps, RepoState> {}
 export const Repo = Resource<Repo>("System.Repo");
 
 /**
- * Raised when the selected manager's backend implements neither `listRepos`
- * nor `addRepo`.
+ * Structural equality over `RepoSpec` — the same value for two purposes:
+ * "is this spec already in a live listing" (`observe`) and "does an observed
+ * state already satisfy a desired one" (`matches`). Both questions are the
+ * same question here because `observe` only ever returns either `undefined`
+ * or an exact echo of `props` (see its doc comment below), so there is
+ * nothing a bespoke `matches` could compare that this doesn't already.
  *
- * Reporting success for a repository that was never added is strictly worse
- * than failing: a recipe author sees a clean apply and reasonably concludes
- * the tap or PPA is present, then hits a missing-package error somewhere
- * unrelated. Partial support — one of the two methods but not both — is
- * treated the same way, since a repo cannot be reconciled without both. This
- * is raised from `observe` (which needs `listRepos` to answer "is it already
- * there") before `apply` (which needs `addRepo`) is ever reached, so an
- * unsupported manager fails during planning, not partway through an apply.
+ * `Match.tagsExhaustive` over the tag, rather than a generic per-field walk,
+ * means a fifth `RepoSpec` member with a differently-shaped payload is a
+ * compile error here, not a silently-wrong `false`.
  */
-export class UnsupportedRepoManager extends Data.TaggedError("UnsupportedRepoManager")<{
-  manager: string;
-}> {
-  override get message() {
-    return `"${this.manager}" has no repo support (no listRepos/addRepo on its backend), but a System.Repo resource selected it. Pick a manager from RepoManagerId that actually implements both.`;
-  }
-}
+const repoEquals = (a: RepoSpec, b: RepoSpec): boolean =>
+  Match.value(a).pipe(
+    Match.tagsExhaustive({
+      Brew: (x) => b._tag === "Brew" && b.tap === x.tap,
+      Apt: (x) => b._tag === "Apt" && b.ppa === x.ppa,
+      Dnf: (x) => b._tag === "Dnf" && b.project === x.project,
+      Flatpak: (x) => b._tag === "Flatpak" && b.name === x.name && b.location === x.location,
+    }),
+  );
 
 /**
  * Same "which observe call is this" distinction as `Package.ts` — see its
@@ -100,73 +94,76 @@ const isApplyPhase = (ctx: ObserveContext): ctx is ApplyContext => "snapshot" in
  * The provider body, exported separately from `RepoProvider` — same
  * rationale as `makePackageReconciler` in `Package.ts`.
  */
-export const makeRepoReconciler: Effect.Effect<
-  Reconciler<RepoProps, RepoState, BackendError | UnsupportedRepoManager>
-> = Effect.gen(function* () {
-  const backends = {
-    brew: makeBrewBackend(),
-    apt: makeAptBackend(),
-    dnf: makeDnfBackend(),
-    flatpak: makeFlatpakBackend(),
-  } satisfies Record<RepoManagerId, PackageManagerBackend>;
-  // Shared with `Package.ts`'s notion of "one memoized listing per manager
-  // per phase" — see PackageIndex.ts and `Package.ts`'s `planIndex`/
-  // `applyIndex` doc comment for why a plan-phase and an apply-phase cache
-  // must be independent instances. `repos` is a distinct keyspace from
-  // `packages` (both live inside the one `PackageIndex` each of these is) so
-  // a "brew" *repo* listing (taps) can never satisfy a "brew" *package*
-  // listing lookup or vice versa.
-  const planIndex = yield* makePackageIndex;
-  const applyIndex = yield* makePackageIndex;
+export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, BackendError>> =
+  Effect.gen(function* () {
+    const brew = makeBrewRepoBackend();
+    const apt = makeAptRepoBackend();
+    const dnf = makeDnfRepoBackend();
+    const flatpak = makeFlatpakRepoBackend();
 
-  const observe = (props: RepoProps, ctx: ObserveContext) =>
-    Effect.gen(function* () {
-      const backend = backends[props.manager];
-      const { listRepos, addRepo } = backend;
-      if (!listRepos || !addRepo) {
-        return yield* Effect.fail(new UnsupportedRepoManager({ manager: props.manager }));
-      }
-      const index = isApplyPhase(ctx) ? applyIndex : planIndex;
-      const existing = yield* index.repos.get(props.manager, () => listRepos(ctx.exec));
-      if (!existing.includes(props.repo)) return undefined;
-      return { manager: props.manager, repo: props.repo };
-    });
+    // Shared with `Package.ts`'s notion of "one memoized listing per manager
+    // per phase" — see PackageIndex.ts and `Package.ts`'s `planIndex`/
+    // `applyIndex` doc comment for why a plan-phase and an apply-phase cache
+    // must be independent instances. `repos` is a distinct keyspace from
+    // `packages` (both live inside the one `PackageIndex` each of these is) so
+    // a "brew" *repo* listing (taps) can never satisfy a "brew" *package*
+    // listing lookup or vice versa.
+    const planIndex = yield* makePackageIndex;
+    const applyIndex = yield* makePackageIndex;
 
-  return {
-    // Same reasoning as `Package.ts`: `brew tap`/`add-apt-repository` touch
-    // the same per-manager global state (and, for apt, the same dpkg lock)
-    // that installing a package does, so a repo add serialises with every
-    // other `System.Repo`/`System.Package` on that manager rather than
-    // racing them.
-    address: (props) => props.manager,
-
-    observe,
-
-    desired: (props) => Effect.succeed({ manager: props.manager, repo: props.repo }),
-
-    matches: (observed, desired) =>
-      observed.manager === desired.manager && observed.repo === desired.repo,
-
-    apply: ({ props, desired }, ctx) =>
+    const observe = (props: RepoProps, ctx: ObserveContext) =>
       Effect.gen(function* () {
-        const backend = backends[props.manager];
-        const { addRepo } = backend;
-        // `observe` already failed loudly for a manager missing either
-        // method, and always runs before `apply` (see `toProvider.ts`'s
-        // `reconcile`), so this is unreachable in practice. It stays a typed
-        // failure rather than a non-null assertion so that invariant is
-        // never silently relied upon.
-        if (!addRepo) {
-          return yield* Effect.fail(new UnsupportedRepoManager({ manager: props.manager }));
-        }
-        yield* addRepo(props.repo, ctx.exec);
-        // Same reasoning as `Package.ts`: the cached repo listing for this
-        // manager is now stale, so the next `System.Repo` resource on the
-        // same manager must not see the pre-add snapshot.
-        yield* applyIndex.repos.invalidate(props.manager);
-        return desired;
-      }),
-  };
-});
+        const index = isApplyPhase(ctx) ? applyIndex : planIndex;
+        const existing = yield* index.repos.get(props.repo._tag, () =>
+          Match.value(props.repo).pipe(
+            Match.tagsExhaustive({
+              Brew: () => brew.listRepos(ctx.exec),
+              Apt: () => apt.listRepos(ctx.exec),
+              Dnf: () => dnf.listRepos(ctx.exec),
+              Flatpak: () => flatpak.listRepos(ctx.exec),
+            }),
+          ),
+        );
+        if (!existing.some((entry) => repoEquals(entry, props.repo))) return undefined;
+        // Every field this resource tracks about a repo lives in `props`
+        // itself — unlike `Ai.McpServer`'s state, there is nothing an
+        // observation resolves that props didn't already say, so the state
+        // this returns is exactly the spec that was found.
+        return props;
+      });
+
+    return {
+      // Same reasoning as `Package.ts`: `brew tap`/`add-apt-repository` touch
+      // the same per-manager global state (and, for apt, the same dpkg lock)
+      // that installing a package does, so a repo add serialises with every
+      // other `System.Repo`/`System.Package` on that manager rather than
+      // racing them. The tag is a stable, distinct-per-manager string by
+      // construction — no separate manager id is needed to build this.
+      address: (props) => props.repo._tag,
+
+      observe,
+
+      desired: (props) => Effect.succeed(props),
+
+      matches: (observed, desired) => repoEquals(observed.repo, desired.repo),
+
+      apply: ({ props, desired }, ctx) =>
+        Effect.gen(function* () {
+          yield* Match.value(props.repo).pipe(
+            Match.tagsExhaustive({
+              Brew: (p) => brew.addRepo(p, ctx.exec),
+              Apt: (p) => apt.addRepo(p, ctx.exec),
+              Dnf: (p) => dnf.addRepo(p, ctx.exec),
+              Flatpak: (p) => flatpak.addRepo(p, ctx.exec),
+            }),
+          );
+          // Same reasoning as `Package.ts`: the cached repo listing for this
+          // manager is now stale, so the next `System.Repo` resource on the
+          // same manager must not see the pre-add snapshot.
+          yield* applyIndex.repos.invalidate(props.repo._tag);
+          return desired;
+        }),
+    };
+  });
 
 export const RepoProvider = () => toProvider(Repo, makeRepoReconciler);

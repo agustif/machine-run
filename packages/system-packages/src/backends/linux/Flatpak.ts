@@ -1,6 +1,12 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import { BackendParseError, type PackageManagerBackend } from "../../Backend.ts";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  BackendParseError,
+  type FlatpakRepo,
+  type PackageManagerBackend,
+  type RepoBackend,
+} from "../../Backend.ts";
 import { firstTokens, lines } from "../../parse.ts";
 
 /**
@@ -25,35 +31,10 @@ import { firstTokens, lines } from "../../parse.ts";
  * `install` takes no remote argument, so it only resolves when exactly one
  * configured remote (commonly Flathub) has that app ID — a machine with no
  * remote added yet, or more than one offering the same ID, needs the remote
- * added or named explicitly first. `listRepos`/`addRepo`, below, are exactly
- * that wiring — this used to be a real, named gap (see `Repo.ts`'s doc
- * comment on `RepoManagerId`); it no longer is.
+ * added or named explicitly first. `makeFlatpakRepoBackend`'s `listRepos`/
+ * `addRepo`, below, are exactly that wiring — this used to be a real, named
+ * gap (see `Repo.ts`'s doc comment on `RepoSpec`); it no longer is.
  */
-
-/**
- * `props.repo` for `flatpak` is `"<name> <location>"` — the same two
- * arguments `flatpak remote-add NAME LOCATION` itself takes, space-separated
- * (a flatpak remote name and a repo URL never contain spaces). Kept as one
- * opaque string, not two props, for the same reason `Backend.ts`'s doc
- * comment gives for every backend here: the abstraction lives at the backend
- * layer, and `System.Repo`'s generic `matches`/`observe` never needs to know
- * a manager took two arguments to build one.
- */
-const parseRepoProp = (
-  repo: string,
-): Effect.Effect<{ name: string; location: string }, BackendParseError> => {
-  const spaceIndex = repo.indexOf(" ");
-  if (spaceIndex <= 0 || spaceIndex === repo.length - 1) {
-    return Effect.fail(
-      new BackendParseError({
-        manager: "flatpak",
-        cause: `expected "<name> <location>" (e.g. "flathub https://dl.flathub.org/repo/flathub.flatpakrepo"), got "${repo}"`,
-      }),
-    );
-  }
-  return Effect.succeed({ name: repo.slice(0, spaceIndex), location: repo.slice(spaceIndex + 1) });
-};
-
 export const makeFlatpakBackend = (): PackageManagerBackend => ({
   id: "flatpak",
   list: (exec) =>
@@ -66,7 +47,16 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
       shell: true,
       timeout: "10 minutes",
     }).pipe(Effect.asVoid),
+});
 
+/**
+ * flatpak's remote half. `FlatpakRepo`'s `name` and `location` are `Repo.ts`'s
+ * `RepoSpec` fields for exactly the two arguments `flatpak remote-add NAME
+ * LOCATION` itself takes — see that type's doc comment for why `location` is
+ * optional (matching-only usage) and the real limitation that follows from
+ * it below.
+ */
+export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
   /**
    * `flatpak remotes --columns=name,url` — verified against `docker run --rm
    * --platform linux/amd64 ubuntu:24.04` (Flatpak 1.14.6, 2026-08-14): a
@@ -78,46 +68,46 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
    * https://dl.flathub.org/repo/flathub.flatpakrepo` and the equivalent
    * `flathub-beta` call).
    *
-   * Returns both the bare name and the reconstructed `"name url"` form —
-   * the same two-forms approach `Dnf.ts`'s COPR `listRepos` uses — because
-   * of a real, container-confirmed mismatch: `flatpak remote-add NAME
-   * LOCATION` accepts a `.flatpakrepo` bootstrap URL (the standard,
-   * documented way to add Flathub) but the URL `flatpak remotes` reports
-   * back afterward is the *resolved* underlying repo URL from inside that
-   * file, not the bootstrap URL itself (verified: adding
-   * `https://dl.flathub.org/repo/flathub.flatpakrepo` left `flatpak remotes
-   * --columns=name,url` reporting `https://dl.flathub.org/repo/` — a
+   * Returns both a bare-name entry (`location` omitted) and, when a URL is
+   * reported, a second entry carrying it — the same two-forms approach
+   * `Dnf.ts`'s COPR `listRepos` uses — because of a real, container-confirmed
+   * mismatch: `flatpak remote-add NAME LOCATION` accepts a `.flatpakrepo`
+   * bootstrap URL (the standard, documented way to add Flathub) but the URL
+   * `flatpak remotes` reports back afterward is the *resolved* underlying
+   * repo URL from inside that file, not the bootstrap URL itself (verified:
+   * adding `https://dl.flathub.org/repo/flathub.flatpakrepo` left `flatpak
+   * remotes --columns=name,url` reporting `https://dl.flathub.org/repo/` — a
    * different string). Flatpak does not remember the original bootstrap URL
    * anywhere, so there is no way for `listRepos` to reconstruct it.
    *
-   * **The honest consequence**: a `System.Repo` whose `repo` prop is
-   * `"flathub https://dl.flathub.org/repo/flathub.flatpakrepo"` (the
-   * standard onboarding command every Flathub tutorial gives) will `apply`
-   * correctly every time, but will never `matches` — every `plan` reports
-   * this resource as needing an update, forever. That is safe (`addRepo`
-   * uses `--if-not-exists`, so the repeated apply is a real no-op), just not
-   * clean. Verified separately: adding the *resolved* URL directly instead
-   * (skipping the `.flatpakrepo` bootstrap) fails GPG signature verification
-   * (`Can't check signature: public key not found`, exit 1) unless
-   * `--no-gpg-verify` is also passed — a real security downgrade this
-   * backend does not add a flag for, so that path is not a fix, only a
-   * worse trade. Use the bootstrap URL and accept the always-dirty plan;
-   * this mirrors `SettingProps.value`'s own "copy the canonical form, don't
-   * expect convergence otherwise" lesson, except here no spelling of `repo`
-   * both converges *and* stays secure.
+   * **The honest consequence**: a `System.Repo` whose `FlatpakRepo` is
+   * `{ name: "flathub", location: "https://dl.flathub.org/repo/flathub.flatpakrepo" }`
+   * (the standard onboarding command every Flathub tutorial gives) will
+   * `apply` correctly every time, but will never `matches` — every `plan`
+   * reports this resource as needing an update, forever. That is safe
+   * (`addRepo` uses `--if-not-exists`, so the repeated apply is a real
+   * no-op), just not clean. Verified separately: adding the *resolved* URL
+   * directly instead (skipping the `.flatpakrepo` bootstrap) fails GPG
+   * signature verification (`Can't check signature: public key not found`,
+   * exit 1) unless `--no-gpg-verify` is also passed — a real security
+   * downgrade this backend does not add a flag for, so that path is not a
+   * fix, only a worse trade. Use the bootstrap URL and accept the
+   * always-dirty plan; this mirrors `SettingProps.value`'s own "copy the
+   * canonical form, don't expect convergence otherwise" lesson, except here
+   * no spelling of `location` both converges *and* stays secure.
    */
   listRepos: (exec) =>
     exec({ command: "flatpak remotes --columns=name,url", shell: true }).pipe(
       Effect.map((result) => {
-        const repos: string[] = [];
+        const repos: FlatpakRepo[] = [];
         for (const line of lines(result.stdout)) {
           const tabIndex = line.indexOf("\t");
           const name = tabIndex === -1 ? line : line.slice(0, tabIndex);
           if (name.length === 0) continue;
-          repos.push(name);
+          repos.push({ _tag: "Flatpak", name });
           if (tabIndex !== -1) {
-            const url = line.slice(tabIndex + 1);
-            if (url.length > 0) repos.push(`${name} ${url}`);
+            const location = line.slice(tabIndex + 1);
+            if (location.length > 0) repos.push({ _tag: "Flatpak", name, location });
           }
         }
         return repos;
@@ -133,15 +123,24 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
    * default (system-wide) for consistency within this backend — real
    * root/polkit requirements on a non-container desktop are the same
    * pre-existing, undocumented-here caveat `install` already carries.
+   *
+   * `location` being absent is a real, typed failure here — `remote-add`
+   * cannot run without it — rather than a string that failed to parse the
+   * way it was before `FlatpakRepo` gave the two arguments their own fields.
    */
   addRepo: (repo, exec) =>
-    parseRepoProp(repo).pipe(
-      Effect.flatMap(({ name, location }) =>
+    UndefinedOr.match(repo.location, {
+      onUndefined: () =>
+        Effect.fail(
+          new BackendParseError({
+            manager: "flatpak",
+            cause: `addRepo needs a location to run "flatpak remote-add", but "${repo.name}" has none — it can only be used to recognise an already-added remote (see FlatpakRepo's doc comment)`,
+          }),
+        ),
+      onDefined: (location) =>
         exec({
-          command: Sh.sh("flatpak", "remote-add", "--if-not-exists", name, location),
+          command: Sh.sh("flatpak", "remote-add", "--if-not-exists", repo.name, location),
           shell: true,
-        }),
-      ),
-      Effect.asVoid,
-    ),
+        }).pipe(Effect.asVoid),
+    }),
 });

@@ -1,6 +1,6 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
+import type { DnfRepo, PackageManagerBackend, RepoBackend } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
 /**
@@ -27,6 +27,10 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
       shell: true,
       timeout: "10 minutes",
     }).pipe(Effect.asVoid),
+});
+
+/** dnf's COPR half — see `Repo.ts`'s `RepoSpec` for the `project` field's `owner/project` shape. */
+export const makeDnfRepoBackend = (): RepoBackend<DnfRepo> => ({
   /**
    * COPR (`dnf copr list`) is dnf's real equivalent of a brew tap or an apt
    * PPA: a third-party repo a user opts into by name. Verified on the same
@@ -41,26 +45,26 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
    * A recipe names a COPR as `owner/project` (the form `dnf copr enable`
    * itself documents as primary), but `dnf copr list` always reports the
    * `hub/owner/project` form. Reporting both the raw line and its trailing
-   * `owner/project` suffix — the same two-forms approach `Apt.ts`'s
-   * `listRepos` uses for `ppa:` shorthand vs. the raw source line — means
-   * `Repo.ts`'s plain `existing.includes(props.repo)` matches the common case
-   * without every backend needing bespoke matching logic.
+   * `owner/project` suffix as two separate entries — the same two-forms
+   * approach `Apt.ts`'s `listRepos` uses for `ppa:` shorthand vs. the raw
+   * source line — means `Repo.ts`'s reconciler matches the common case
+   * without this backend needing bespoke matching logic.
    */
   listRepos: (exec) =>
     exec({ command: "dnf copr list", shell: true }).pipe(
       Effect.map((result) => {
-        const repos: string[] = [];
+        const repos: DnfRepo[] = [];
         for (const line of lines(result.stdout)) {
-          repos.push(line);
+          repos.push({ _tag: "Dnf", project: line });
           const segments = line.split("/");
-          if (segments.length >= 2) repos.push(segments.slice(-2).join("/"));
+          if (segments.length >= 2) repos.push({ _tag: "Dnf", project: segments.slice(-2).join("/") });
         }
         return repos;
       }),
     ),
   addRepo: (repo, exec) =>
     exec({
-      command: Sh.sh("sudo", "dnf", "copr", "enable", "-y", repo),
+      command: Sh.sh("sudo", "dnf", "copr", "enable", "-y", repo.project),
       shell: true,
     }).pipe(Effect.asVoid),
 });
