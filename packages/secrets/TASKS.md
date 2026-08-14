@@ -54,20 +54,31 @@ debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       still unverified (needs an authenticated account this repo
       deliberately never creates, `AGENTS.md` rule 8) — `1password` and
       `doppler` stay `~` in [docs/MAP.md](../../docs/MAP.md).
-- [ ] **`keychain` downgraded to `!`: `KeychainBackend.read` silently
-      returns hex-encoded garbage for any secret with a non-printable
-      byte.** `security find-generic-password -w` prints the ASCII-hex
-      encoding of the stored bytes, not the bytes, whenever the value
-      contains a byte outside `isprint()`'s range (verified on real macOS
-      with an embedded newline and, separately, an embedded tab) — exactly
-      the shape of an SSH key, a PEM cert, or any multi-line secret, with
-      exit code `0` and no signal anything went wrong. Fix sketch: switch
-      from `-w` to `-g` and parse both of its forms (`password: 0x<hex>` vs.
-      a bare `password: "quoted string"` — `-g`'s output disambiguates the
-      two cases where `-w`'s does not). See
-      `docs/notes/secrets-keychain-notes.md` and `docs/notes/test-findings.md`
-      #4; pinned (as a `BUG:`-prefixed test documenting current behaviour,
-      not yet fixed) in `test/Keychain.test.ts`.
+- [x] **`keychain`'s hex-corruption bug fixed: `KeychainBackend.read` now
+      reads via `-g`, not `-w`.** `security find-generic-password -w`
+      printed the ASCII-hex encoding of the stored bytes, not the bytes,
+      whenever the value contained a byte outside `isprint()`'s range —
+      exactly the shape of an SSH key, a PEM cert, or any multi-line secret,
+      with exit code `0` and no signal anything went wrong. `read` now shells
+      out with `-g` instead and parses both forms it can produce: `password:
+      0x<hex>` (decoded directly — the ground truth) and a bare `password:
+      "quoted string"` for the printable case. Verified against a disposable
+      test keychain on real macOS (never the login keychain): a plain
+      value, an embedded newline, an embedded tab, a realistic multi-line
+      PEM-shaped blob (with and without its own trailing newline), and
+      values built to probe the quoted form's escaping (an embedded quote,
+      an embedded backslash, a UTF-8 value) all round-trip exactly. Two
+      findings along the way: a literal backslash alone (no non-printable
+      byte) also triggers the `0x` fallback, and the bare quoted form never
+      escapes an embedded double quote — parsed correctly anyway since the
+      outer quotes are always the line's first and last characters. The
+      missing-entry exit `44`/stderr signal `SecretNotFound` depends on was
+      re-verified unchanged under `-g`. See
+      `test/fixtures/keychain-g-flag-transcript.txt`, `src/backends/
+      Keychain.ts`'s doc comment, and `test/Keychain.test.ts`. `keychain`'s
+      successful-read path can move from `!` to `✓` in
+      [docs/MAP.md](../../docs/MAP.md) as a follow-up (out of this fix's
+      scope, which was limited to `packages/secrets/`).
 - [ ] **Verify `op read`'s output shape (trailing newline, `--no-newline`)
       against a real vault read.** `op` itself is now installed and run in
       this session's container, but only its unauthenticated error path —
