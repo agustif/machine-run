@@ -53,6 +53,29 @@ travels through this. In short:
 - `delete` defaults to `RemovalPolicy: "retain"` — the opposite of Alchemy's
   own class-level default — and only calls `unapply` under an explicit
   `"destroy"` policy.
+- `read` brands its result `Unowned` for a reconciler that sets
+  `refuseUnowned`, so Alchemy's `Plan` refuses with `OwnedBySomeoneElse`
+  rather than taking over a file this tool has no record of writing. Pass
+  `--adopt` to take it over deliberately.
+
+## Renaming a resource
+
+`refuseUnowned` makes one thing sharper than it used to be: renaming a
+resource's id is not a no-op. The state row stays under the old id, so the new
+id plans a *create*, and a create refuses because what it finds on disk is
+unowned.
+
+Alchemy already has the answer — say what it used to be called:
+
+```ts
+yield* Dotfiles.File("new-id", { path: "~/.config/thing", content }).pipe(
+  renamedFrom("old-id"),
+);
+```
+
+The engine migrates the row instead of planning a create plus a delete.
+`renamedFrom` comes from `alchemy/Rename` and takes a bare id (resolved in the
+ambient namespace) or `{ fqn }` for a fully-qualified one.
 
 ## Verification status
 
