@@ -35,32 +35,11 @@ as a changelog.
 
 ---
 
-## P0 — closed
-
-**`plan`, `deploy`, drift detection and `destroy` all work.** The blocker was
-ours, not upstream: every recipe called `Alchemy.Stack<{}>()(name, options, effect)`,
-and `Stack()` with no arguments returns a cross-stack *reference* builder that
-discards the options and the effect. Full causal chain and the instrumentation
-that found it: [notes/plan-blocker-repro.md](./notes/plan-blocker-repro.md).
-
-`scripts/deploy-check.sh` now runs the whole sequence in a container and passes:
-
-- [x] `plan` proposes creates
-- [x] `deploy` completes without error
-- [x] **empty second plan** — no creates, updates, deletes or replaces. This is
-      the first genuine test every `observe` in the repo has ever had.
-- [x] drift is detected for all seven kinds the check drifts (`Machine.File`,
-      `ManagedBlock`, `Directory`, `Symlink`, `SecretFile`, `Exec`,
-      `System.Package`)
-- [x] `destroy` leaves the machine untouched, retain being the default
-
-One finding from running it: the `Machine.File` drift assertion had been
-grepping for the file path (`gitconfig-personal`) while `plan` prints resource
-ids (`persona-config`), so it reported a false failure for a drift that was
-always detected. The other six passed only because each of those resources is
-named after the thing it manages.
-
-What follows is no longer blocked.
+`plan`, `deploy`, drift detection and `destroy` all work —
+`scripts/deploy-check.sh` runs the sequence in a container and passes. Seven
+resource kinds have been through it (`Machine.File`, `ManagedBlock`, `Directory`,
+`Symlink`, `SecretFile`, `Exec`, `System.Package`); the other sixteen have never
+been deployed.
 
 ---
 

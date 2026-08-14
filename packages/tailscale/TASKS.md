@@ -41,7 +41,9 @@
 
 ## Dependency note
 
-- [ ] This package depends on `secrets`, which is the **least-verified seam in
-      the repo** — no `SecretBackend` has read a real secret. So the auth key
-      path is unverified twice over: once here, once there. Verifying one
-      1Password read would close both.
+- [ ] This package depends on `secrets`, generic over whichever `SecretSource`
+      a recipe names for the auth key (`Connection.ts`'s `readSecret`). `env`
+      and `pass` have read a real secret against a real backend; `1password`
+      and `doppler` still need an authenticated account this repo never
+      creates, so an auth key sourced from either is unverified twice over —
+      once there, once here against a real tailnet.

@@ -169,6 +169,23 @@ export const toProvider = <Res extends ResourceLike, E, R>(
           if (Option.isNone(observed)) return NEEDS_UPDATE;
 
           const desired = yield* reconciler.desired(news);
+
+          // A reconciler that reports *which* fields drifted gets those turned
+          // into Alchemy's own `stables` — the properties it should not expect
+          // to change — rather than the bare `update` a boolean can produce.
+          // `matches` still decides *whether* to update, so a `drift` that
+          // disagreed with its own `matches` cannot cause a spurious apply.
+          const changed = reconciler.drift;
+          if (changed !== undefined) {
+            const fields = changed(observed.value, desired);
+            if (fields.length === 0) return undefined;
+            const drifted = new Set(fields.map((field) => field.field));
+            return {
+              action: "update",
+              stables: Object.keys(desired).filter((key) => !drifted.has(key)),
+            } satisfies { readonly action: "update"; readonly stables: string[] };
+          }
+
           return Boolean.match(reconciler.matches(observed.value, desired), {
             onTrue: () => undefined,
             onFalse: () => NEEDS_UPDATE,

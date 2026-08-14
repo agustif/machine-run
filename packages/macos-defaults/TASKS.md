@@ -8,14 +8,12 @@
       prop rather than a silent merge.
 - [ ] **Byhost preferences** (`defaults -currentHost`) are a separate axis and
       currently unreachable.
-- [ ] **Generalise to `System.Setting`.** `defaults` is one settings backend;
-      `gsettings`/`dconf` and the Windows registry are the same shape. This
-      package becomes a thin alias. Verify `gsettings` in a container.
+- [ ] **Generalise to `System.Setting`.** `@machine-run/system-settings` now
+      covers `gsettings`/`dconf` as `System.Setting` backends, container-verified
+      (`docs/notes/settings-notes.md`), but macOS was deliberately left out —
+      folding `MacOS.Default` in means widening `SettingProps.value` into a
+      union keyed by backend. This package becomes a thin alias once that
+      happens; the Windows registry is still unimplemented on either side.
 - [ ] **The rest of macOS.** Dock items, login items, `ComputerName`/`HostName`,
       `hidutil` keyboard remaps, `pmset`, screenshot location, firewall. Each
       needs its own verified read path — several are not `defaults` at all.
-- [ ] **Document what cannot be automated.** TCC/privacy permissions are
-      deliberately not scriptable by Apple. Say so explicitly rather than
-      leaving it as an unexplained absence.
-- [ ] A README describing the capture-from-a-real-`defaults read` workflow,
-      which source comments already reference.

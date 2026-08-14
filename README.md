@@ -6,20 +6,15 @@ Alchemy treats a cloud account: a dotfile, an installed package, a macOS
 default, a Tailscale connection, a materialized secret are each a typed,
 reconciled **resource**, not a line in a shell script.
 
-> **Status: pre-1.0.** Nothing here has ever been `alchemy deploy`'d against a
-> real machine — `alchemy plan` cannot currently complete for *any* stack,
-> including an empty one, which is an upstream defect and the single thing
-> blocking everything else.
->
-> So the build is green and 310 tests pass (2 more run only in CI, against a
-> live Windows runner), and the CLI surfaces those tests
-> parse have been verified against real systems (Linux containers, a macOS
+> **Status: pre-1.0.** `plan`, `deploy`, drift detection and `destroy` all
+> work end to end — `scripts/deploy-check.sh` runs the full sequence against a
+> container and passes. 646 tests pass across 65 files, and resource parsers
+> are additionally checked against real systems (Linux containers, a macOS
 > runner, a Windows runner — which is how a real bug in the winget parser was
-> found). But **no resource in this repo has ever been run by the Alchemy
-> engine**, so nothing is known about how they behave under a real plan/apply.
+> found). What hasn't happened yet: a deploy against a live personal machine.
 >
 > [docs/MAP.md](./docs/MAP.md) marks every piece `✓` verified / `~` unverified /
-> `✗` not built, and [docs/V2-PLAN.md](./docs/V2-PLAN.md) has the blocker.
+> `✗` not built, and [docs/V2-PLAN.md](./docs/V2-PLAN.md) has current priorities.
 
 ## Why not a shell script
 
@@ -49,6 +44,11 @@ manager output) instead of a script dying three steps in.
 ./bootstrap.sh --deno   # opt in to deno (unverified)
 ```
 
+```sh
+node_modules/.bin/alchemy plan   <recipe.ts>          # preview; changes nothing
+node_modules/.bin/alchemy deploy <recipe.ts> --yes    # converge
+```
+
 machine-run is the framework and carries nobody's real values. Your name,
 email, SSH hosts, package lists and secret references belong in a **separate,
 private repo** that depends on this one.
@@ -74,6 +74,7 @@ Two examples, with different jobs:
 | `@machine-run/secrets` | `SecretFile` over a `SecretBackend` seam: 1Password, Doppler, Keychain, `pass`, env |
 | `@machine-run/system-packages` | `Package` / `Repo` across 19 managers: brew, cask, MacPorts, mas, apt, dnf, pacman, yay, paru, flatpak, snap, winget, choco, cargo, npm, pipx, uv-tool, gem, go-install |
 | `@machine-run/system-settings` | `Setting` over `gsettings` / `dconf` |
+| `@machine-run/system-services` | `Service` over `launchd` / `brew-services` / `systemd-user`, user-level only |
 | `@machine-run/macos-defaults` | `MacOS.Default`, full property-list values including arrays, dicts and data |
 | `@machine-run/runtimes` | `Runtime.Tool` over mise, asdf, rustup, uv — installed and active tracked separately |
 | `@machine-run/shell` | rc-file rendering across zsh, bash, fish, nu, pwsh; `Shell.Login` (`chsh`) |
@@ -111,8 +112,8 @@ ecosystem artifact that has its own identity and its own idempotent apply — a
 - [docs/MAP.md](./docs/MAP.md) — **start here.** Every package, resource, backend
   and seam, what is verified versus merely written, what is planned and does not
   exist, and the callstack one `plan` travels
-- [docs/V2-PLAN.md](./docs/V2-PLAN.md) — where things stand now, the blocker,
-  and what comes next
+- [docs/V2-PLAN.md](./docs/V2-PLAN.md) — where things stand now, and what
+  comes next
 - [docs/V1-PLAN.md](./docs/V1-PLAN.md) — the first-principles map of what a
   machine actually has, and how the breadth was chosen
 - [docs/ARCHITECTURE.md](./docs/ARCHITECTURE.md) — how it is built

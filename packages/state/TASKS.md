@@ -47,11 +47,6 @@ doesn't list `engine` even though it depends on `secrets`, which does.
       unreadable. This is a narrower version of a race `LocalState.ts` itself
       already has for state file writes generally, not something this store
       introduces.
-- [ ] **`Ssh.Key` remains blocked on this**, not unblocked by it — see
-      docs/TASKS.md. Building this store was the prerequisite; deciding
-      whether `Alchemy.KeyPair`'s persisted-private-key shape is still the
-      wrong primitive (CONCEPTS.md's "Deliberately not used" section says yes,
-      for reasons beyond encryption) is a separate decision.
 - [ ] **Never run against a real `alchemy deploy`.** Like the rest of this
       repo (`docs/MAP.md`), this has only been exercised by calling
       `makeEncryptedState` directly in tests, not through `Alchemy.Stack`'s

@@ -3,18 +3,6 @@
 `Reconciler` → Alchemy provider. Where the uniform decisions are made once.
 See [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
 
-- [x] **`observe` returns `Option<State>`.** `State | undefined` was our own
-      contract, not Alchemy's, and conflated "nothing is there" with "a field
-      that happens to be missing". `ApplyInput.observed` is an `Option<State>`
-      all the way into `apply`; `matches`, `unapply`'s `observed`/`recorded`
-      and `ApplyContext.snapshot`'s return are unaffected — they are already
-      non-optional, or `string | undefined` for an unrelated reason.
-
-      `toProvider` converts exactly once, at the Alchemy boundary that
-      genuinely requires `undefined` (`read`'s return value). Everything above
-      that boundary is total, which is the point: `Option.getOrUndefined`
-      belongs there and nowhere else in the repo.
-
 - **Decided against: a generic engine-level reuse of the plan-phase
   observation via Alchemy's `Artifacts`.** `toProvider` calls `observe`
   once in `diff` and again inside `reconcile`, immediately before a

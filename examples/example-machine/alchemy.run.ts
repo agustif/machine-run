@@ -26,25 +26,9 @@ import * as Layer from "effect/Layer";
  * deliberately excludes because none of this repo's own packages use it.
  */
 const providers = Layer.mergeAll(Machine.providers(), Command.providers());
-// `Alchemy.Stack(name, options, effect)` — the direct three-argument form, and
-// the only one that builds a stack.
-//
-// This used to read `Alchemy.Stack<{}>()(name, options, effect)`, adopted as a
-// workaround for a variance problem (`Provider<T>` declaring `of` as a
-// property-style function made it invariant in `T`, so no
-// `Provider<Machine.File>` was assignable to `Provider<any>`). That workaround
-// was the repo's P0 for its entire history: calling `Stack()` with no arguments
-// takes its `if (!stackName)` branch, which returns a *cross-stack reference*
-// builder — `Output.stackRef(stackName)` — that ignores both `options` and the
-// effect. What came back was a `StackRefExpr`, so `evalStack`'s
-// `Effect.provide(stack.services)` read `.services` off a lazy property proxy,
-// got a `PropExpr`, and `Layer.buildWithMemoMap` called `.build()` on it, which
-// returned `undefined`. That `undefined` reached `Effect.map`, and the run loop
-// reported `Fiber.runLoop: Not a valid effect: undefined` — a message four
-// layers removed from the cause, which is why it read as an upstream defect.
-//
-// The variance problem it worked around no longer reproduces: this file and
-// `examples/complete-machine` both type-check against the direct form.
+// The direct three-argument form. `Alchemy.Stack<T>()(...)` returns a
+// cross-stack *reference* that discards the options and the effect — see
+// docs/notes/plan-blocker-repro.md.
 export default Alchemy.Stack(
   "example-machine",
   {

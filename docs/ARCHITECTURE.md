@@ -155,7 +155,7 @@ A reconciler names five things:
 ```ts
 {
   address:  (props) => string                    // what real thing this manages
-  observe:  (props, ctx) => State | undefined    // what is actually there
+  observe:  (props, ctx) => Option.Option<State> // what is actually there
   unapply?: ({ props, observed, recorded }, ctx) => void   // how to undo, if it can
   desired:  (props) => State                     // what the recipe asks for
   matches:  (observed, desired) => boolean       // is the first good enough
@@ -261,9 +261,9 @@ recorded attributes alongside the live observation, because some undo paths
 need bookkeeping that observation cannot recover, such as where a backup was
 written.
 
-**No resource implements `unapply` yet.** The mechanism exists; the policy
-question — which resources can honestly claim to reverse themselves — is
-deliberately still open, and is tracked in
+**Three of 23 resources implement `unapply`** — `Shell.Login`,
+`Git.Maintenance`, `System.Setting`. Which of the rest can honestly reverse
+themselves is deliberately still open, and is tracked in
 [V1-PLAN.md](./V1-PLAN.md#5-open-questions). Reverting a `defaults` key has no
 defined "before" if the original was never recorded, and restoring a backup is
 only correct if the backup is still the right answer.
@@ -384,22 +384,23 @@ core                        no dependencies; the shared vocabulary
     ├── dotfiles            File, ManagedBlock, Symlink, Directory, Download, Exec
     │   ├── shell           rc-file rendering; Shell.Login
     │   │   └── git         Git.Config, Git.Repo, personas
-    │   ├── ssh             sshHost() composition
+    │   ├── ssh             Ssh.Key, Ssh.KnownHost, sshHost() composition
     │   └── ai ────────┐    Ai.Skill, Ai.Config, Ai.McpServer
     ├── secrets ───────┤    Secret.File, backends
     │   └── tailscale       Tailscale.Connection
     ├── macos-defaults      MacOS.Default
     ├── system-settings     Setting over gsettings / dconf
-    ├── system-packages     System.Package, 18 backends
+    ├── system-packages     System.Package, 19 backends
+    ├── system-services     System.Service — launchd / brew-services / systemd-user
     └── runtimes            Runtime.Tool
 
 machine   aggregates ai, dotfiles, git, macos-defaults, runtimes, secrets,
-          shell, system-packages, system-settings, tailscale
+          shell, ssh, system-packages, system-services, system-settings,
+          tailscale
 ```
 
 `ai` depends on `secrets` as well as `dotfiles` — it writes credentials, so the
-two branches meet there. `ssh` is composition-only and defines no resource of
-its own.
+two branches meet there.
 
 Cross-package dependencies are declared as **TypeScript project references**, not
 left to the root tsconfig's incidental listing order.

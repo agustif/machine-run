@@ -4,29 +4,6 @@
 [../../docs/notes/runtime-notes.md](../../docs/notes/runtime-notes.md) for exactly what
 was verified by running each CLI, and where the remaining gaps are.
 
-## Typing
-
-- [x] **`RuntimeToolProps` is a `Schema.TaggedUnion`** (`Mise`/`Asdf`/`Rustup`/`Uv`),
-      not `{ manager: RuntimeManagerId, tool: Schema.String, version:
-Schema.String }`. The old shape let a recipe write `{ manager: "rustup",
-tool: "node" }` — a combination that was never legal (rustup only ever
-      manages `"rust"`) and was only ever caught at runtime by
-      `RuntimeToolMismatch`. That error class is deleted: `Rustup`'s case has
-      no `tool` field for a caller to get wrong, and `Uv`'s has none either.
-      `RuntimeBackend<Identity>` is now parametrized per manager
-      (`MiseToolIdentity`/`AsdfToolIdentity`/`RustupToolIdentity`/
-      `UvToolIdentity`, `Backend.ts`), so a backend can no longer be handed
-      fields shaped for a different tool. This is a props/state schema break;
-      nothing has ever been deployed, so there is no migration to write.
-- [x] **`RuntimeToolState` stays one flat `Schema.Struct`**, not a matching
-      `TaggedUnion` — tried directly and reverted. Alchemy's
-      `Resource<Type, Props, Attributes>` maps every `Attributes` key through
-      a homomorphic mapped type that does not resolve to a plain object when
-      `Attributes` is a union, so TypeScript refuses to let `RuntimeTool`
-      extend `Resource<...>` at all. Verified directly with a throwaway
-      `Resource<"X", Struct, TaggedUnion>` repro, not assumed from the error
-      text. See `Tool.ts`'s `RuntimeToolState` doc comment.
-
 ## Verification
 
 - [ ] **asdf on macOS or native Linux.** Only verified in an `ubuntu:24.04`
@@ -51,10 +28,9 @@ tool: "node" }` — a combination that was never legal (rustup only ever
       was picked. Either follows the identical `RuntimeBackend` seam.
 - [ ] **A manifest resource** — `Mise.Toml`, `Asdf.ToolVersions` — modeling a
       whole checked-in manifest file the way `Brew.Bundle` would for Homebrew.
-      Deliberately not built in this pass; see `docs/notes/runtime-notes.md`'s
-      closing section for the suggested atomic/manifest boundary and
-      `docs/V1-PLAN.md` §3 for why the two layers are meant to coexist rather
-      than one replacing the other.
+      See `docs/notes/runtime-notes.md`'s closing section for the suggested
+      atomic/manifest boundary and `docs/V1-PLAN.md` §3 for why the two
+      layers are meant to coexist rather than one replacing the other.
 - [ ] **Cross-manager tool-name mapping does not exist, on purpose** — same
       as `system-packages`'s `PackageManagerBackend.name`. `tool` is always
       spelled in the manager's own namespace (`"node"` for mise, `"nodejs"`

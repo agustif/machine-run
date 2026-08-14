@@ -46,7 +46,58 @@ export type Exec = (props: ExecProps) => Effect.Effect<CommandOutput, CommandErr
  */
 export interface ObserveContext {
   readonly exec: Exec;
+  /**
+   * How this run behaves — privilege, locale, default timeout.
+   *
+   * Optional so it could be introduced without rewriting every construction
+   * site at once. Read it through {@link executionOf}, which supplies
+   * {@link DEFAULT_EXECUTION} when it is absent, rather than testing for
+   * `undefined` at each use.
+   */
+  readonly execution?: ExecutionContext;
 }
+
+/**
+ * The properties of the *run* rather than of any resource: things every backend
+ * needs and none should hardcode.
+ *
+ * Each field replaces a literal that was previously repeated per backend —
+ * `sudo` spelled into ten command strings, a locale nothing pinned at all, and
+ * timeouts as 57 inline duration strings.
+ */
+export interface ExecutionContext {
+  /**
+   * Whether commands that need root should be elevated, and how.
+   *
+   * `"none"` covers both "already root" and "no escalation available" — a
+   * container with no `sudo` installed is the common case, and prefixing `sudo`
+   * there fails with `command not found` rather than a permission error.
+   */
+  readonly privilege: "none" | "sudo";
+  /**
+   * Locale for subprocesses whose output is parsed. `"C"` by default: every
+   * backend that greps CLI output is otherwise at the mercy of the operator's
+   * language, and CI runs in English so nothing catches it.
+   */
+  readonly locale: string;
+  /** Applied to a command that does not ask for its own timeout. */
+  readonly defaultTimeout: string;
+}
+
+/**
+ * What a run does when nothing says otherwise: no escalation, a locale that
+ * makes CLI output parseable, and a ceiling generous enough for a package
+ * install.
+ */
+export const DEFAULT_EXECUTION: ExecutionContext = {
+  privilege: "none",
+  locale: "C",
+  defaultTimeout: "10 minutes",
+};
+
+/** The run's execution context, defaulted. */
+export const executionOf = (ctx: ObserveContext): ExecutionContext =>
+  ctx.execution === undefined ? DEFAULT_EXECUTION : ctx.execution;
 
 /**
  * What a reconciler is allowed to do while *changing* the machine.
@@ -109,6 +160,28 @@ export interface ApplyInput<Props, State> {
  *   {@link address}, so they cannot be forgotten per resource.
  * - Planning and applying get different capabilities by construction.
  */
+/**
+ * One field of an observed state that does not satisfy the desired one.
+ *
+ * `matches` answers *whether* a resource drifted; this answers *what* and, when
+ * the values are ordered, *which way*. A plan that can only print `update` is
+ * the difference between a diff and a list of names.
+ */
+export interface DriftField {
+  /** The state field that differs, as a reader would name it: `mode`, `version`. */
+  readonly field: string;
+  readonly observed: string;
+  readonly desired: string;
+  /**
+   * Set only when the two values are genuinely ordered — a version, a mode.
+   * Absent for unordered values, where "behind" would be an invented claim.
+   */
+  readonly direction?: "behind" | "ahead";
+}
+
+/** Empty means the observed state satisfies the desired one. */
+export type Drift = ReadonlyArray<DriftField>;
+
 export interface Reconciler<Props, State, E = never, R = never> {
   /**
    * The machine-level identity of what this manages — a filesystem path, a
@@ -142,6 +215,17 @@ export interface Reconciler<Props, State, E = never, R = never> {
    * the props actually constrain.
    */
   readonly matches: (observed: State, desired: State) => boolean;
+
+  /**
+   * The same judgement as {@link matches}, but reporting which fields differ so
+   * a plan can say what changed rather than only that something did.
+   *
+   * Optional and additive: a reconciler that defines it must agree with its own
+   * `matches` (empty exactly when `matches` is true), and one that does not
+   * still plans correctly with a reason-less `update`. `toProvider` prefers
+   * `drift` when present.
+   */
+  readonly drift?: (observed: State, desired: State) => Drift;
 
   /** Converge the machine. Runs only when {@link matches} returned false. */
   readonly apply: (

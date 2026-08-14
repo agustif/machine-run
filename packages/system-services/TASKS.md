@@ -70,13 +70,13 @@ print-disabled`), which survives unload/reboot and can make a future
       should reject that combination early with a typed error instead of
       letting a real command fail — currently it does the latter.
 
-- [ ] **No `unapply`.** Same conservative default as 16 of the other 17
-      resource kinds in this repo (`docs/MAP.md` section 5) — disabling and
-      stopping a service someone else may depend on is not obviously the
-      right response to a recipe line being removed. Worth revisiting
-      alongside `system-settings`' `gsettings reset`/`dconf reset` idea,
-      since `brew services stop`/`launchctl unload`/`systemctl --user
-disable` are all real, honest reversals a future `unapply` could use.
+- [ ] **No `unapply`.** Same conservative default as 19 of the other 22
+      resource kinds in this repo — only `Shell.Login`, `Git.Maintenance` and
+      `System.Setting` have one. Disabling and stopping a service someone
+      else may depend on is not obviously the right response to a recipe
+      line being removed. `brew services stop`/`launchctl unload`/
+      `systemctl --user disable` are all real, honest reversals a future
+      `unapply` could use.
 
 ## Smaller, lower-priority
 

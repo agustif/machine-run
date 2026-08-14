@@ -87,27 +87,10 @@ many files is a rule this document should be arguing about instead.
 
 ## Inline exceptions
 
-There used to be two override blocks in `.oxlintrc.json` — one relaxing
-`noThrowStatement`/`noNewError`/`noGlobals`/`noAsyncFunction` for
-`packages/*/test/**`, one relaxing `noGlobals`/`noAsyncFunction`/
-`noNewPromise`/`noDynamicImports` for `packages/cli/src/{bin,Diagnostics,
-Recipe}.ts`. Both are gone: every test-tier violation had a real fix (mostly
-`Result.getOrThrow`/`getOrThrowWith` in place of a bare `throw`, and
-`Schema.Json` codecs in place of `JSON.parse`/`JSON.stringify`), and
-`packages/cli/src` turned out to need no override at all —
-`effect/unstable/cli`'s `Command`/`Stdio` replaced `bin.ts`'s hand-rolled
-`process.argv` parsing outright, `Recipe.ts`'s dynamic `import()` already
-satisfied `noDynamicImports` once bound to a name with no cast in between, and
-`Diagnostics.ts`'s deadline is `Effect.timeout`, not a raced external timer —
-see that module's doc comment for what changed the plan (a hypothesis about
-`Effect.timeout` being unable to observe the real defect turned out to be
-false when tested against the defect directly; the real fix was
-`NodeRuntime.runMain` forcing the process to exit on a non-zero code, because
-Alchemy's own concurrent plan path leaves the process otherwise unable to
-drain on its own after that defect).
-
-What remains is inline, at the exact line, with a reason — visible to the next
-reader instead of buried in a glob:
+`.oxlintrc.json` carries no override blocks — no root overrides, no
+per-package or per-glob relaxation. Every exception is inline, at the exact
+line, with a reason, visible to the next reader instead of buried in a glob.
+The complete list:
 
 - **`packages/cli/src/Commands.ts`, `withoutEvalStackInternals`** —
   `effect as Effect.Effect<A, E, never>`. Named, bounded to exactly the two
@@ -145,3 +128,8 @@ reader instead of buried in a glob:
   actually stores an `Envelope` in the same slot once encryption is in the
   loop — a real mismatch between what the interface declares and what this
   fake double holds, not a convenience.
+- **`packages/git/test/Identity.test.ts`, `runThroughRealShell`** —
+  `noGlobals` for `{ ...process.env, PATH: ... }`. The test's whole point is a
+  real `/bin/sh` inheriting the actual process environment and `PATH` to find
+  a stub `gh` ahead of the real one; reaching for `process.env` directly is
+  the mechanism under test, not a shortcut around one.

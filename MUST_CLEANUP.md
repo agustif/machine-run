@@ -1,229 +1,20 @@
 # MUST_CLEANUP
 
-Code smells and anti-patterns in this repo, with the evidence for each.
+Things that are *wrong* rather than missing. [docs/TASKS.md](./docs/TASKS.md) is
+the work backlog; this is the defect list, ordered by cost.
 
-**The bar for an entry here:** a file and line, a reason, and a cost. Not a
-feeling. An entry that cannot name where it lives does not belong, because the
-cost of a false positive is somebody "fixing" working code — and this repo has
-already had one near miss, where a mechanical scan for unused exports flagged
-error classes that exist precisely to be matched on by consumers.
+**Bar for an entry:** a file and line, a reason, and a cost — not a feeling. A
+false positive here gets working code "fixed".
 
-**The bar for removing an entry:** the smell is gone, not renamed.
+**Bar for removal:** the smell is gone, not renamed. Fixed entries are deleted,
+not annotated.
 
-**Provenance.** Entries marked *verified* were re-read line by line while
-writing this. The rest come from a three-part audit and carry file and line but
-were not independently re-read — the distinction is kept because publishing
-someone else's confidence as your own is how a document like this rots.
-
-Ordered by what it costs, not by how easy it is. [TASKS.md](./docs/TASKS.md) is
-the work backlog; this is the list of things that are *wrong* rather than
-missing. Where they overlap, this file explains why and TASKS.md tracks the doing.
+Entries marked *verified* were re-read line by line. The rest carry a file and
+line from an audit but were not independently re-read.
 
 ---
 
-## Tier 0 — data loss, verified
-
-These destroy data that cannot be recovered. Each was re-read line by line
-before being written down here.
-
-### 0.1 A locked keychain silently destroys every encrypted state row
-
-> **FIXED.** `SecretNotFound` is now a distinct error, recognised from exit 44 *and* the specific stderr together, and `ensureDataKey` mints on that tag alone. Measured rather than assumed — and a locked keychain turned out to return no programmatic error at all, blocking on an interactive prompt instead, so the dangerous cases are the headless "user interaction is not allowed" and transient failures.
-
-`packages/state/src/DataKey.ts:136-147`.
-
-`ensureDataKey` wraps `readDataKey` in `Effect.catch(() => ...)` — catching
-*every* failure — and responds by minting a fresh random key and persisting it
-with `security add-generic-password -U`, which updates in place.
-
-`readDataKey` folds every `SecretError` into one `DataKeyUnavailable`, so
-"there is no key yet" and "the keychain is locked", "user interaction is not
-allowed" (the headless case), or "`security` was momentarily busy" are
-indistinguishable at the catch. A transient read failure therefore **overwrites
-the real key**. Every row already encrypted under it becomes permanently
-undecryptable, and `EncryptedState.get` degrades that to `undefined` with a log
-warning — so the next plan reads the whole machine as unmanaged.
-
-The tests cover the entry being deleted and the ciphertext being tampered with.
-They do not cover a read failing while the entry still exists, which is the case
-that loses the data.
-
-**Fix:** only mint on a genuine absent signal. The keychain backend needs a
-distinct "no such entry" case rather than folding it into a general read
-failure — the same distinction `isNotFound` already draws for the filesystem.
-
-### 0.2 `ManagedBlock` can overwrite a file it does not own
-
-> **FIXED.** Now uses `core`'s `readIfPresent`, with a typed `ManagedBlockFileUnreadable`. Test verified to fail without the fix.
-
-`packages/dotfiles/src/ManagedBlock.ts:247-248` — `readFileOrEmpty` is
-`fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""))`, used by both
-`observe` and `apply`.
-
-Any read failure becomes "the file is empty". `ManagedBlock` exists precisely
-for files this tool does *not* own outright — `~/.zshrc`, `~/.gitconfig`,
-`~/.ssh/config` — so a permission change or I/O error makes `apply` write just
-the marker block over somebody's hand-written shell config.
-
-`snapshotBeforeApply` is set, but it only fires on adoption (`output === undefined
-|| olds === undefined`). On an ordinary re-apply of an already-managed file there
-is no backup, which is exactly when this fires.
-
-**Fix:** the `stat` + `isNotFound` pattern from `File.ts:94-102`.
-
-### 0.3 `LineInFile` has the same bug
-
-> **FIXED.** Same, with `LineInFileUnreadable`.
-
-`packages/dotfiles/src/LineInFile.ts:233-234`. Identical mechanism, identical
-consequence, on files like `/etc/hosts`. Same fix.
-
-### 0.4 `File` throws away its own discipline one line later
-
-> **FIXED.** The read now carries the same discipline as the `stat` above it.
-
-`packages/dotfiles/src/File.ts:104`.
-
-The sharpest illustration in the repo. Lines 94-102 do the careful thing: `stat`,
-and raise `FilePathUnreadable` for anything that is not a not-found. Line 104
-then reads the file with `Effect.orElseSucceed(() => "")`, discarding it. A
-permission change between the two, or any read error, reads as empty content →
-drift → overwrite.
-
-Lower practical severity than 0.2 because `File` owns its content outright, but
-it is the same bug, and the doc comment fifteen lines above describes this exact
-failure mode as the thing being prevented.
-
-**Fix:** same `catchTag` + `isNotFound` treatment as the `stat` two lines up.
-`Template` inherits the fix for free through `makeFileReconciler`.
-
-### 0.6 A prop is interpolated raw into a shell command — *verified*
-
-> **FIXED.** `Sh.sh("gh", "auth", "switch", "--user", ghAccount)`, with a test that spawns a real shell against a stubbed `gh` and a companion guard proving the old form *does* execute the injection.
-
-`packages/git/src/Identity.ts:149`:
-
-```ts
-command: `gh auth switch --user ${ghAccount} >/dev/null 2>&1`
-```
-
-`ghAccount` is a caller-supplied prop, interpolated without `Sh.quote`. This
-contradicts the repo's own rule that shell commands go through `Sh`, and it is
-worse than a normal injection site because the result is **written into a shell
-rc file** and re-executed on every directory change — a value containing `;` or
-a space becomes a permanent hazard in the operator's own `.zshrc`, not a
-one-shot failure.
-
-The blast radius is limited: it is the operator's own recipe, so this is
-self-inflicted rather than a remote attack. It is still a bug, and it is exactly
-the bug a type could have prevented — see 2.5.
-
-**Fix:** `Sh.sh("gh", "auth", "switch", "--user", ghAccount)` plus the
-redirection appended as a literal.
-
-### 0.7 `security -w` silently hex-encodes any secret with a non-printable byte
-
-`packages/secrets/src/backends/Keychain.ts` — verified on real macOS.
-
-`security find-generic-password -w` returns the **ASCII-hex encoding of the
-stored bytes rather than the bytes** whenever the value contains a byte outside
-`isprint()`. Exit 0, no warning, nothing in stderr. A value with embedded
-newlines came back as `6c696e65310a6c696e65320a6c696e6533`; a value with a
-single tab behaved identically.
-
-This corrupts exactly what `Machine.SecretFile` exists to place: an SSH private
-key and a PEM certificate are multi-line by definition, so either would be
-written to `~/.ssh` as hex text. OpenSSH would then reject it as an invalid
-format — the failure at least being loud, though only at use time, long after
-the deploy reported success.
-
-`-g` disambiguates where `-w` cannot: it prints `password: 0x<hex>` for the
-raw-byte fallback and `password: "quoted"` for the printable case.
-
-Pinned as a `BUG:` test rather than fixed, so the behaviour is recorded and the
-fix has a failing test waiting for it.
-
-**Fix:** read with `-g` and parse both forms.
-
-### 0.8 Credentials written world-readable — *fixed, with the measurements*
-
-`packages/ai/src/backends/{Claude,OpenCode}.ts`, plus a narrower window in
-`packages/dotfiles/src/{Download,File}.ts`.
-
-Three facts, each measured on this machine rather than assumed, because every
-one of them is the opposite of what the API's shape suggests:
-
-| Measured | Result | Consequence |
-| --- | --- | --- |
-| `writeFileString(p, c)` with no mode | **0644** | at umask 022, world-readable |
-| `writeFileString(p, c, {mode: 0o600})` on an **existing** 0644 file | **stays 0644** | mode applies only on *create*; chmod is still required, or a reconciler observing mode never converges |
-| `makeTempFile()` | **0644** | not the 0600 the name suggests |
-| `chmod(p, 0o400)` then write, as the owner | **EACCES** | the owner is not exempt from their own permission bits |
-
-Against those: both AI backends wrote their config with **no mode and no
-chmod** — so 0644, in a 0755 directory. That file is a credential store *by
-design*: `mcpServers[].env` and `headers` are typed to accept
-`Redacted<string>`, so the API key of every registered MCP server was
-world-readable on every machine this ever ran on. `SecretFile` had derived the
-correct pair on its own — and its comment states exactly what the second row
-above measures — but the discipline lived in one file instead of a shared one.
-
-`Download` additionally carried a comment claiming the file "never exists, even
-momentarily, with the wrong permissions", which row three falsifies: its temp
-file is created 0644 *in the target's own directory* and only restricted after
-the bytes are in it. `File` had the same write-then-chmod window, without the
-false claim.
-
-**Fixed:** `Fs.writeCredentialFileString` in core now encodes both halves
-(mode on create *and* chmod after) with the measurements in its doc comment,
-and both AI backends use it with a 0700 directory. `Download` restricts its
-temp file to 0600 *before* the write and applies `props.mode` after — 0600
-rather than the final mode precisely because of row four, and conditional on
-`props.mode` being set so an unmoded download is not quietly tightened.
-
-Regression tests assert both directions per backend (fresh file, and a file
-another tool already created 0644), the read-only `mode: 0o444` download that
-row four would have broken, and that an unmoded download keeps the platform
-default.
-
-### 0.5 The pattern behind 0.1–0.4
-
-These are one architectural problem wearing four faces: **the repo has a house
-rule for telling "absent" from "unreadable", and nothing makes following it
-easier than not.**
-
-`ssh/src/Key.ts` and `ssh/src/KnownHost.ts` are the gold standard;
-`File.ts`'s `stat` is correct and its read is not. The discipline lives in prose
-and in imitation, so each new resource re-derives it — and `ManagedBlock`,
-`LineInFile`, `Git.Repo` and `Codex` each got it wrong in a different place.
-
-**Fix that actually closes it:** put the pattern in `core` as a named helper
-(`readIfPresent`, `statIfPresent`) that returns "absent" only for a real
-not-found and raises otherwise. Then the correct thing is the short thing to
-write. A lint rule cannot express this; a helper can.
-
 ## Tier 1 — costs correctness
-
-### 1.1 `list` is stubbed to empty at the engine seam
-
-> **FIXED.** `Reconciler.list` is optional and passed through; no resource implements it yet, which is now an explicit absence rather than the adapter's decision.
-
-`packages/engine/src/toProvider.ts:179` — `list: () => Effect.succeed([])`, for
-all 23 resources.
-
-Alchemy models `list` as a real provider capability. Every resource this repo
-defines returns "there is nothing" instead, which is not true and is not
-knowable from an empty array by any caller.
-
-The cost is concrete rather than theoretical: `packages/system-packages/TASKS.md`
-carries "**Implement `list`** so an existing machine can be inventoried into a
-recipe" — a capability the adapter currently makes unreachable, because a
-resource has nowhere to put its implementation. `System.Package` genuinely can
-enumerate (`brew list` is right there); the seam is what blocks it.
-
-**Fix:** let a `Reconciler` optionally provide `list`, and pass it through.
-Resources that cannot enumerate keep returning empty *explicitly*, which is a
-different statement from the adapter deciding for them.
 
 ### 1.2 Three of twenty-three resources can undo themselves
 
@@ -338,39 +129,6 @@ but if the schema default happens to equal it, a successful reset reports as a
 failure. Notably the *inverse* of everything else here: a false negative, not a
 false success.
 
-### 1b.6 Two reconcilers turned every command failure into a defect — *fixed*
-
-`packages/macos-defaults/src/Default.ts` and
-`packages/tailscale/src/Connection.ts`.
-
-Both declared an error union without `CommandError` and then had `apply` end in
-`Effect.catchTag("CommandError", (e) => Effect.die(e))`. A defect is not a
-failure: nothing can catch it, and it aborts the run rather than marking one
-resource failed.
-
-What that covered up is not exotic. `defaults write` fails when the domain needs
-privileges the run does not have, when there is no real preferences daemon
-(any container), or when a sandboxed app's container is unwritable. `tailscale
-up` fails on a rejected or expired auth key, an unreachable control plane, a
-daemon that is not running, or a run without the privileges to join a tailnet
-— which is to say the single most likely outcome in that package was the one
-routed to a defect.
-
-It was a choice, not a constraint: `Dotfiles.Exec` and `Shell.Login` already
-carry `CommandError` in `E`, and `toProvider` is generic in `E`. This is the
-behavioural sibling of the `as never` family — the type system objected, and
-rather than widening the error channel the objection was silenced, here by
-converting the value instead of the type.
-
-**Fixed:** both unions widened, both dies replaced with `Effect.fail`. Tailscale
-keeps `TailscaleNotInstalled` as a distinct error because the remedy differs
-(install it, versus find out why the join was refused), with the handler
-explicitly annotated so the two failing branches unify without a cast.
-
-The one remaining `Effect.die` in the repo (`PackageIndex`) guards a real
-invariant — a fetcher missing for a key `get` always registers first — and is
-correct. There are no `orDie`, `runSync` or `throw` sites in any source file.
-
 ### 1b.5 Read-after-write confirmation is applied to two resources out of five
 
 `System.Setting` and `System.Service` re-read after writing and raise if the
@@ -386,39 +144,20 @@ encoded in two places out of five.
 
 ---
 
-### 1b.7 A resource addressed the file it writes by a name no other resource could produce — *fixed*
+### 1b.7 Nothing checks that resources sharing a file share an address
 
-`packages/ai/src/McpServer.ts`.
-
-`address` is the engine's serialisation key: the doc comment on
-`Reconciler.address` says mutual exclusion and pre-overwrite snapshotting are
-both derived from it, "so they cannot be forgotten per resource". `Ai.McpServer`
-returned `ai-mcp-config:${props.tool}`.
-
-That achieved exactly what its comment claimed — two `Ai.McpServer` resources for
-one tool serialise against each other — and nothing more. `~/.claude.json` is a
-real file, and a `Machine.File`, `Machine.ManagedBlock` or `Machine.Template`
-pointed at it computes `paths.expand(props.path)`. Two different strings, so no
-shared lock and no shared snapshot, so two read-modify-write cycles over one
-document could interleave and lose the loser's write silently.
-
-**Fixed:** `AiMcpBackend` gained `configFile(home, path)`, implemented by all
-four MCP backends, and `address` returns it. Claude and OpenCode also stopped
-computing that path inline in two places each. A tool with no MCP support keeps a
-synthetic address, since there is no file to name and `observe` fails with
-`AiToolMcpUnsupported` first. The test asserts the address equals
-`paths.expand("~/.claude.json")` — the same expression every path-addressed
-reconciler uses, so it compares the two things that must agree — and that two
-tools do *not* share an address.
-
-**What remains, and is not fixed:** nothing checks this property. Addresses are
-paths in 13 kinds and synthetic keys in the rest, and the synthetic ones are
-mostly right (`defaults:<domain>`, `gsettings:<schema>:<key>`, `<manager>` — none
-of those name a file a user would reasonably manage as a file). But the engine
+`Reconciler.address` is where the engine derives mutual exclusion and
+pre-overwrite snapshotting, so two resources writing one file must produce the
+same string. Addresses are paths in 13 kinds and synthetic keys in the rest
+(`defaults:<domain>`, `gsettings:<schema>:<key>`, `<manager>`). Those synthetic
+ones are right — none names a file a user would manage as a file — but the engine
 cannot tell a legitimately-synthetic address from one that should have been a
-path, so the next instance of this bug is found the same way this one was: by
-reading all twenty-nine address implementations at once. A reconciler declaring
-the set of real paths it writes would make it checkable.
+path. `Ai.McpServer` was the latter: it keyed on `ai-mcp-config:<tool>` while
+writing `~/.claude.json`, so it shared no lock with a `Machine.File` on the same
+path.
+
+**Fix:** have a reconciler declare the real paths it writes, so this is
+checkable rather than found by reading all 29 address implementations at once.
 
 ## Tier 1c — the architectural finding
 
@@ -469,7 +208,7 @@ that no type carries, so each backend improvises it, hardcodes it, or forgets
 it. This is the largest structural finding in the document, and the individual
 items are symptoms.
 
-### 1d.1 Privilege is a string prefix in 4 of 19 backends
+### 1d.1 Privilege is a hardcoded `sudo` at 16 call sites
 
 `apt`, `dnf`, `pacman` and `snap` shell out to `Sh.sh("sudo", ...)`
 unconditionally. `flatpak` does not, and nothing says whether that is a
@@ -506,7 +245,7 @@ it reports converged permanently while the user cannot read their own config.
 The gap is invisible precisely because the neighbouring concept is so carefully
 modelled.
 
-### 1d.4 Timeouts are 38 hardcoded literals
+### 1d.4 Timeouts are 57 hardcoded literals
 
 Six distinct values (`"10 minutes"` ×17, `"15 minutes"` ×7, `"2 minutes"` ×6,
 `"5 minutes"` ×4, `"1 minute"` ×2, `"30 seconds"` ×2), none configurable.
@@ -564,102 +303,6 @@ already root*, *this link is slow*.
 
 ## Tier 2 — design drift
 
-### 2.1 `ProviderOverrides` is dead code
-
-> **FIXED.** Deleted. Alchemy's `Provider.effect` already defaults a missing `list` to an empty array, so omitting the key is behaviourally identical to the stub — but the claim now belongs to whoever decided it.
-
-`packages/engine/src/toProvider.ts:20` defines it; line 157 accepts it. **Zero
-of the 23 `toProvider` call sites pass it.** It is referenced nowhere else in
-`src` or `test`.
-
-Worth stating plainly because I got this wrong out loud before measuring it: I
-described this escape hatch as evidence that the `Reconciler` abstraction could
-not express Alchemy's real contract. The measurement says the opposite. An
-abstraction that 23 of 23 consumers use *without ever needing to escape* is a
-well-fitting abstraction, and the parameter is speculative generality that was
-never needed.
-
-**Fix:** delete `ProviderOverrides` and the third parameter. Anything genuinely
-needing `version`/`stables`/`precreate` can call `Provider.effect` directly,
-which the doc comment already says.
-
-
-### 2.5 `Sh` returns `string`, so quoting is a convention rather than a type
-
-> **FIXED.** `ExecProps` (`engine/src/Reconciler.ts`) and `state/src/DataKey.ts`'s
-> local `Exec` now require `command: Sh.ShellCommand` instead of `string`, so a raw
-> template literal no longer compiles at the one place every reconciler actually
-> runs a command. Every non-`Sh.sh`/`Sh.pwsh` site the compiler then rejected was
-> resolved as one of: routed through `Sh.sh` (the fixed literal commands with no
-> untrusted interpolation — `brew list --formula --full-name` and its many
-> siblings across `system-packages`/`runtimes`/`tailscale`), or `Sh.unsafeRaw`
-> with a named reason. `Machine.Exec` and `Ai.McpServer` are the two escape
-> hatches this entry already named; three more turned up in the doing and are now
-> named too: a fixed multi-statement shell script (`;`, an unquoted glob, command
-> substitution) that argv-quoting cannot represent at all (`Go.ts`'s `list`,
-> `Npm.ts`'s `list`, `Apt.ts`'s `listRepos`), a command that must reference an
-> env var via `"$VAR"` for secrecy — `Sh.sh` would single-quote the `$` and
-> suppress the very expansion needed (`Tailscale.Connection`, `DataKey.persistDataKey`),
-> and gluing two already-safe `ShellCommand`s into one pipeline, now `Sh.pipe`
-> (`macos-defaults/src/Default.ts`'s `defaults export | plutil -extract`, the
-> case this entry's own fix note anticipated). None of these three are the
-> accidental kind 0.6 found — each is a real command shape `Sh.sh`'s per-argument
-> quoting cannot express, not a value that needed quoting and didn't get it.
-
-`Sh.sh()` and `Sh.pwsh()` exist to make shell interpolation safe, and return a
-bare `string` — indistinguishable from an unquoted one. Nothing stops
-`command: \`...${x}...\``, and 0.6 is that gap being taken.
-
-Of 190 `command:` sites, 107 go through `Sh`. Most of the rest are legitimate:
-`Machine.Exec` runs arbitrary shell *by design*, and `Ai.McpServer` launches a
-user-named binary. The problem is that the deliberate escape hatches and the
-accidental one look identical.
-
-**Fix:** brand the return of `Sh.sh`/`Sh.pwsh` (`ShellCommand`), require it at
-`exec({ command })`, and give the escape hatches an explicit
-`Sh.unsafeRaw(reason)`. Raw interpolation then stops compiling, and every
-remaining unsafe site has to say so out loud. The 107 compliant sites migrate for
-free; the ~20 that do not are precisely the list worth reviewing.
-
-### 2.6 Versions are spelled four ways and pinning is not a concept
-
-Eleven declaration sites, four vocabularies, no shared meaning:
-
-| Spelling | Where | What it really is |
-|---|---|---|
-| `version: Schema.String` | `runtimes` mise/asdf/uv (×6), `Runtime.Tool` state | a *range* — `"22"` is satisfied by any 22.x, per `versionSatisfies` |
-| `channel: Schema.String` | `runtimes` rustup | not a version at all; `stable`/`nightly` — discovered only by running rustup |
-| `checksum: Schema.String` | `Machine.Download` | content-addressed pinning, the strongest form |
-| `branch` | `Git.Repo` | a moving ref — "latest" wearing a different word |
-| *nothing* | `System.Package`, `System.Repo` | every install means whatever is latest today |
-
-`packages/runtimes/src/version.ts` already implements matching semantics
-(`versionSatisfies`) that nothing outside `runtimes` reuses, so any future
-version comparison will be written a fifth time.
-
-**The cost is reproducibility, which is the product.** `System.Package` cannot
-pin, and `matches` compares presence only — so a package that moved three major
-versions still reports converged, and `plan` says nothing changed. A recipe that
-cannot reproduce a machine is running an installer, not reconciling.
-
-It also produces concrete failures that get misdiagnosed. `Go.ts` carries a long
-comment explaining why `go install pkg@latest` failing on a toolchain floor
-"cannot be helped" — it can: the resource simply has no way to say which version
-it wants.
-
-**The idea that makes this a framework concept rather than a field:** *`latest`
-is not a version, it is a policy.* It means "re-resolve on every run", which
-makes a resource non-reproducible by construction. Today that is the silent
-default for every package. It should be something a recipe says out loud and a
-plan can show.
-
-**Fix:** a `VersionSpec` tagged union in `core` — `Exact`, `AtLeast`, `Channel`,
-`Latest`, `Digest` — with each backend declaring in its *type* which forms it
-can honour, since `snap` takes channels, `mas` takes an App Store id, and
-several managers can pin at install but cannot downgrade. A backend that
-silently ignores a pin is the same bug class as everything else in this
-document.
-
 ### 2.2 One directory, two mechanisms — and it is spreading
 
 `Machine.Directory` is a resource for "a directory should exist with this mode".
@@ -678,109 +321,21 @@ directories only and that is written down where the eight can see it.
 ### 2.3 Nine namespaces for twenty-three resource kinds
 
 `Machine.*`, `System.*`, `MacOS.*`, `Runtime.*`, `Shell.*`, `Git.*`, `Ai.*`,
-`Tailscale.*`, `Ssh.*`.
+`Tailscale.*`, `Ssh.*`. `Machine.SecretFile` lives in `secrets`, `Machine.File`
+in `dotfiles`, `System.Package` in `system-packages` but `System.Setting` in
+`system-settings`. The `Machine`/`System` split tracks nothing a reader can
+predict, and every new resource picks a namespace by imitation.
 
-`Machine.SecretFile` lives in `secrets`; `Machine.File` in `dotfiles`;
-`System.Package` in `system-packages` but `System.Setting` in `system-settings`
-and `System.Service` in `system-services`. The `Machine`/`System` split tracks
-nothing a reader can predict.
+Safe to do whenever: `Resource(type, { aliases })` carries pre-rename names and
+`tryFindProviderByType` falls back to them, so persisted state keeps resolving
+(`packages/engine/test/aliases.test.ts`). Not a release blocker.
 
-Deferred deliberately, not forgotten — but **not for the reason recorded here
-until now.** This entry claimed a rename is a state-schema break. It is not:
-Alchemy has a first-class rename path we simply had not read for. `Resource`'s
-second options argument takes `aliases`; `Provider.succeed`/`.effect` copy them
-off the class onto the provider service; and `tryFindProviderByType` falls back
-to scanning `aliases` when nothing is registered under the requested type. So a
-state row persisted as `Machine.File` keeps resolving after the type becomes
-something else, for the cost of one array literal per resource.
-
-`toProvider` needs no change at all — it builds through `Provider.effect`, which
-does the copying itself. Verified live in `packages/engine/test/aliases.test.ts`:
-lookup by a pre-rename name resolves, resolves to the *same service instance* as
-the current name, and a name nobody claims still resolves to nothing.
-
-What remains is the real reason to wait: renaming before the engine has ever run
-risks renaming to a second wrong thing. The cost of waiting is unchanged — every
-new resource picks a namespace by imitation.
-
-**Fix:** settle it immediately after the first successful `plan`/`deploy`,
-carrying every old type name in `aliases`. Not a release blocker.
-
-### 2.4 `observe` returns `Option<State>` — resolved
-
-`Reconciler.observe` and `ApplyInput.observed` are `Option.Option<State>`. The
-weaker spelling conflated "not there" with "a field that happens to be
-missing", which is the same conflation behind four prior data-loss bugs, and it
-was the single largest contributor to the `noNullish` count below.
-
-All 23 reconcilers moved together, because the interface change is atomic:
-`Option`'s runtime shape is not compatible with `undefined`, so nothing
-compiles until every implementation is converted. `Option.getOrUndefined`
-converts exactly once, at the Alchemy boundary in `toProvider.ts`'s `read` —
-everything above that boundary is total.
-
----
-
-## Tier 3 — consistency and hygiene
-
-### 3.1 762 lint warnings
-
-All 25 `oxlint-plugin-effect` rules are enabled and **errors are at zero**;
-these are the `warn` tier, and they have grown with every package.
-
-| Rule | Count | What it means here |
-|---|---:|---|
-| `noNullish` | 413 | Alchemy's own optional-prop contract, plus backend-internal helpers |
-| `noTernary` | 165 | Effect has `Match`, `UndefinedOr.match`, `Boolean.match` |
-| `noAs` | 94 | see 3.2 |
-| `noConditionalEmptyObjectSpread` | 56 | the omit-a-key pattern, uncentralised |
-| `noNodeBuiltinImport` | 16 | should be Effect platform services |
-| `noRuntimeTypeof` | 14 | should be `Schema` at a boundary |
-| `noUnknownParameters` | 4 | |
-
-Concentrated in `ai` (213), `runtimes` (104) and `dotfiles` (101).
-
-`noNullish` fell from 516 when 2.4 moved `observe` to `Option`. What remains is
-mostly not the same shape: optional *props* (Alchemy's contract) and helpers
-private to a backend, neither of which is the resource-level presence question
-`Option` was the right answer for.
-
-### 3.2 `noAs` is a warning, and it has been hiding real bugs
-
-91 occurrences. This tier is not cosmetic: removing **one** `as never` at the
-engine seam exposed genuine unsoundness — the reconciler's `State` was never
-tied to the resource's declared `Attributes`, so a reconciler could return state
-its resource had never declared, and `output` from a previous run was typed as
-the narrower state when Alchemy hands back attributes.
-
-Two `as unknown as` also remain in `packages/state/src`.
-
-**Fix:** promote `noAs` to `error` and clear the 91. Expect some of them to
-expose modelling holes rather than needing a cast.
-
-### 3.3 No package has a README
-
-**17 of 17.** Source doc comments already reference READMEs that do not exist —
-`macos-defaults`' capture workflow and `ai`'s vault-directory setup are both
-pointed at from code.
-
----
+**Fix:** settle it now that `deploy` works and there is evidence about which
+split reads well, listing every old name in `aliases`.
 
 ## Tier 3b — duplication, counted
 
 From the duplication audit; the first entry re-verified while writing this.
-
-### 3b.1 `isNotFound` is exported by `core` and reinvented three times — *verified*
-
-> **FIXED.** The three private copies are gone.
-
-`packages/core/src/Paths.ts:73` exports it. `dotfiles/src/Directory.ts:85`,
-`Download.ts:142` and `Symlink.ts:71` each define a byte-identical private copy.
-
-The cheapest fix in this document — delete three lines, extend an existing
-import — and the most telling, because this is the very predicate the Tier 0
-bugs are about. The discipline of 0.5 has a helper already; three files did not
-find it and wrote their own instead. That is the mechanism, caught in the act.
 
 ### 3b.2 Parent-directory creation, hand-written six times
 
@@ -788,9 +343,8 @@ find it and wrote their own instead. That is the mechanism, caught in the act.
 identically in `File.ts:134`, `ManagedBlock.ts:282`, `LineInFile.ts:286`,
 `SecretFile.ts:154`, `KnownHost.ts:301`, `Key.ts:372`, in two textual variants.
 
-`Template.ts` does **not** duplicate it — it delegates to `makeFileReconciler`,
-which is the pattern the other six should have followed. One file already proves
-it is fixable. Extract `ensureParentDir(fs, path, mode)` into `core`.
+`core`'s `Fs.ensureParentDir` already exists and only `Backups.ts` uses it.
+Migrate the six.
 
 ### 3b.3 `directoryMode`, quantified
 
@@ -810,25 +364,12 @@ same class with the same runtime `_tag`. `system-services/src/Backend.ts:22-28`
 is a third with the field renamed. Two distinct classes sharing one tag string
 breaks the moment anything unions them or keys telemetry by tag.
 
-### 3b.5 `Number(info.mode) & 0o777` — seven times — *verified*
-
-Across `Directory.ts`, `File.ts`, `Download.ts`, `SecretFile.ts`. An unclaimed
-`posixMode(info)` helper that four files independently reinvented.
-
 ### 3b.6 `fakeExec` copied into seven test files
 
 Identical four-line helper in `runtimes`, `system-packages` (×2),
 `system-services`, `system-settings` (×2) and `secrets` tests. If `Exec`'s result
 shape gains a field, seven files need the same edit. `git`'s variants genuinely
 differ (they model exit codes) and should stay.
-
-### 3b.7 `core/src/windows/` has zero callers
-
-`FilePermissions.ts` and `Icacls.ts` — 494 lines with three test files and **no
-consumer in any of the 16 resource packages**. It is honestly labelled as a
-prototype in `docs/MAP.md`, so it is not hidden. But nothing forces it to stay
-correct, and if the real Windows integration needs a different shape, this has
-had no pressure to match it. Wire it up or delete it; do not let it age.
 
 ### 3b.8 One fact, five documents
 
@@ -864,19 +405,6 @@ construction: every command exits 0.
 **Fix:** a preflight that asserts `node_modules/@machine-run/*` are symlinks
 into the current checkout, run before `build`. Turn vigilance into a failed
 command.
-
-### 4.2 Tests passing does not mean it compiles
-
-After one merge, 526 tests passed while `tsc -b` failed. Vitest transpiles
-without type-checking, so a type error is invisible to the test suite. The cause
-was itself a real bug in a guard: `@ts-expect-error` suppresses only the *next*
-line, and the object literal it guarded spanned several, so the error landed
-outside its scope and the guard proved nothing.
-
-**Fix:** never read a green test run as a green build. CI already runs both;
-the habit is what needs fixing.
-
----
 
 ## Judged clean — do not "fix" these
 
