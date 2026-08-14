@@ -225,6 +225,19 @@ the other's output — Alchemy has no user-facing `dependsOn`.
 
 ---
 
+## 7b. Never run a repo-wide git command in a shared checkout
+
+`git stash`, `git checkout .`, `git reset --hard` and `git clean` act on the
+whole working tree, not on your files. Several agents often share one checkout,
+so a stash to "get a clean baseline" silently removes everyone else's
+uncommitted work, and `git stash pop` then refuses if any of it changed
+underneath. This has already cost a real edit that only turned up by diffing the
+stash against disk afterwards.
+
+To compare against a baseline, read the committed version of the specific file
+(`git show HEAD:path`) instead. Stage and commit by explicit path, never
+`git add -A`.
+
 ## 8. Secrets never touch state
 
 Alchemy persists props *and* attributes, and `localState()` is unencrypted JSON.

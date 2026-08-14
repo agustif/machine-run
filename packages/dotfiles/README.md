@@ -77,9 +77,11 @@ directly against real temporary directories (`test/*.test.ts`), including
 ambiguous-match guards, each verified to actually fail their test when
 temporarily disabled. What is **not** covered: `Symlink`'s dangling-link and
 path-normalisation cases, and `File`/`ManagedBlock`'s reconciler-level drift
-paths — see [TASKS.md](./TASKS.md). Like every resource in this repo, none of
-these have been run by the real Alchemy engine — see
-[../../docs/MAP.md](../../docs/MAP.md).
+paths — see [TASKS.md](./TASKS.md). `Machine.File`, `ManagedBlock`,
+`Directory`, `Symlink`, and `Exec` have each also been through a real
+`plan` → `deploy` → drift → `destroy` cycle in a container
+(`scripts/deploy-check.sh`); `Download`, `Template`, and `LineInFile` have not
+— see [../../docs/MAP.md](../../docs/MAP.md).
 
 ## What it deliberately does not do
 

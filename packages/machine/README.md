@@ -49,22 +49,9 @@ each sibling needs is actually satisfied). `test/AggregateCompleteness.test.ts`
 proves something stronger and different: it reads `src/Providers.ts`'s source
 and fails, naming the package, if any workspace package that defines a
 `Resource<T>(...)` is missing from the merge — a layer that resolves cleanly
-with nine of ten packages looks identical to one with all ten, so resolving is
-not enough to prove completeness. Neither test runs against a real `alchemy
-plan`/`deploy` — see [../../docs/MAP.md](../../docs/MAP.md).
-
-## A finding worth flagging
-
-[`../../docs/MAP.md`](../../docs/MAP.md) §1 currently says `system-services` is
-"NOT YET AGGREGATED" and directs the reader to `docs/TASKS.md`, and this
-package's own [TASKS.md](./TASKS.md) still says `@machine-run/ssh` is
-"deliberately absent" from the merge. Neither is true of the code as it stands:
-`src/Providers.ts` already merges both `Ssh.providers()` and
-`SystemServices.providers()`, and `package.json`'s `dependencies` list both
-packages. `test/AggregateCompleteness.test.ts` — which reads source, not
-memory — passes with all twelve resource-defining packages present. This
-README follows the source; the two docs above are stale and worth fixing
-separately.
+with eleven of twelve packages looks identical to one with all twelve, so
+resolving is not enough to prove completeness. Neither test runs against a
+real `alchemy plan`/`deploy` — see [../../docs/MAP.md](../../docs/MAP.md).
 
 ## What it deliberately does not do
 

@@ -25,7 +25,7 @@ resource package: nothing here is an Alchemy `Resource`, and it defines no
 ```ts
 import { Sh } from "@machine-run/core";
 
-const command = Sh.sh("brew", ["install", packageName]);
+const command = Sh.sh("brew", "install", packageName);
 // run with { shell: true } — see AGENTS.md rule 9
 ```
 
@@ -37,9 +37,11 @@ its own `Providers.ts`.
 
 Pure logic (`MachinePaths.expand`, `Sh` quoting, hashing) is unit-tested
 directly. `Backups` and `FileLock` are exercised through the resources built on
-`@machine-run/engine`'s `toProvider`, not through a real `alchemy deploy` —
-see [../../docs/MAP.md](../../docs/MAP.md) for why nothing in this repo has
-been.
+`@machine-run/engine`'s `toProvider`, including under a real
+`plan` → `deploy` → drift → `destroy` cycle in a container
+(`scripts/deploy-check.sh`) for `Machine.File`, `ManagedBlock`, `Directory`,
+`Symlink`, `SecretFile`, and `Exec` — see
+[../../docs/MAP.md](../../docs/MAP.md).
 
 ## What it deliberately does not do
 

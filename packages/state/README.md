@@ -23,25 +23,26 @@ state at rest" for the finding that motivated building this at all.
 
 | Export                                                                          | What it's for                                                                                                                        |
 | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `makeEncryptedState(...)` (`EncryptedState.ts`)                                 | Builds a `StateService` that wraps `alchemy/State`'s `makeLocalState`, encrypting/decrypting each row's `set`/`get`                  |
+| `encryptedState()` (`EncryptedState.ts`)                                        | A `Layer<State>` for a stack's `state:` option — the drop-in replacement for `Alchemy.localState()`                                  |
+| `makeEncryptedState` (`EncryptedState.ts`)                                      | The `Effect<StateService>` `encryptedState()` wraps into a `Layer`: builds `alchemy/State`'s `makeLocalState` and wraps it to encrypt/decrypt each row's `set`/`get`                |
 | `ensureDataKey` / `readDataKey` (`DataKey.ts`)                                  | Generates (or reads back) this stack's AES-256-GCM key, stored in the macOS keychain via `@machine-run/secrets`'s `Keychain` backend |
 | `Envelope.ts` (`encrypt`, `decrypt`, `Envelope`, `additionalData`, `KEY_BYTES`) | The actual AES-256-GCM envelope format — ciphertext, nonce, and AAD binding the value to its row                                     |
 
 ## Example
 
 There is no recipe in `examples/` using this — every example uses Alchemy's
-own `Alchemy.localState()` instead. Derived from `test/EncryptedState.test.ts`,
-the shape of using it directly:
+own `Alchemy.localState()` instead. `encryptedState()` is the direct
+substitute:
 
 ```ts
-import { makeEncryptedState } from "@machine-run/state";
+import { encryptedState } from "@machine-run/state";
 import * as Alchemy from "alchemy";
 
 export default Alchemy.Stack(
   "my-machine",
   {
     providers: Machine.providers(),
-    state: makeEncryptedState(), // in place of Alchemy.localState()
+    state: encryptedState(), // in place of Alchemy.localState()
   },
   Effect.gen(function* () {
     /* ... */
@@ -51,11 +52,12 @@ export default Alchemy.Stack(
 
 ## Verification status
 
-Exercised only by calling `makeEncryptedState` and the `Envelope`
-encrypt/decrypt functions directly in tests
-(`test/EncryptedState.test.ts`, `test/Envelope.test.ts`). Never run against a
-real `alchemy deploy`'s `state:` field — like everything else in this repo, it
-has not been run by the Alchemy engine (see
+Exercised by calling `wrapState` — the encrypt/decrypt wrapper
+`encryptedState()` builds on — and the `Envelope` encrypt/decrypt functions
+directly in tests (`test/EncryptedState.test.ts`, `test/Envelope.test.ts`).
+Not yet exercised through a real `alchemy deploy`'s
+`state:` field — every example, and the container's `deploy-check.sh`, use
+Alchemy's own `localState()` instead (see
 [../../docs/MAP.md](../../docs/MAP.md)).
 
 ## What it deliberately does not do

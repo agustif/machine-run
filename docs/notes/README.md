@@ -23,8 +23,8 @@ findings here contradicted assumptions the code had been written on:
 - `asdf current` prints its answer and exits non-zero (`runtime-notes.md`).
 - 20 of 30 concurrent `git config --global` writers fail on the lock
   (`git-notes.md`).
-- `alchemy plan` cannot complete for any stack, including an empty one
-  (`deploy-notes.md`).
+- `alchemy plan` could not complete for any stack, including an empty one
+  (`deploy-notes.md`; since fixed, see `../MAP.md`).
 - Node's own `libuv` source admits Windows `chmod`/`stat().mode` "makes
   little sense" — a normal file always reports `0o666`, and `chmod` only
   toggles the read-only attribute (`windows-permissions.md`).

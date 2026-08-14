@@ -192,9 +192,10 @@ interface and asserted. Both cross a boundary worth describing once: props
 arrive from a recipe, and attributes are persisted to Alchemy's state file as
 JSON and handed back on a later run.
 
-Closed sets — `PackageManagerId`, `SecretBackendId`, `Position` — are
-`Schema.Literals`, so membership exists at runtime rather than only in the
-compiler.
+Closed sets — `PackageManagerId`, `Position` — are `Schema.Literals`, so
+membership exists at runtime rather than only in the compiler. `SecretSource`
+is a `Schema.TaggedUnion` instead, discriminated by backend rather than by a
+bare string.
 
 Recursive shapes are the exception: `PlistValue` keeps hand-written interfaces
 and annotates `Schema.suspend` with them. That is Effect's own idiom for

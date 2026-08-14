@@ -12,7 +12,7 @@ resource package is built on top of it.
 
 | Export                                              | What it's for                                                                                                                                                       |
 | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Reconciler<Props, State, E, R>` (`Reconciler.ts`)  | The interface a resource implements: `address`, `observe`, `desired`, `matches`, `apply`, and optional `list`, `snapshotBeforeApply`, `unapply`                     |
+| `Reconciler<Props, State, E, R>` (`Reconciler.ts`)  | The interface a resource implements: `address`, `observe` (returns `Option.Option<State>`), `desired`, `matches`, `apply`, and optional `list`, `snapshotBeforeApply`, `unapply` |
 | `ObserveContext` / `ApplyContext`                   | What a reconciler is allowed to do while looking at vs. changing the machine — `ApplyContext` adds `snapshot`, `ObserveContext` only ever offers a read-only `exec` |
 | `toProvider(cls, makeReconciler)` (`toProvider.ts`) | Wraps a `Reconciler` into Alchemy's `Provider` shape (`read`/`diff`/`create`/`update`/`delete`), applying the uniform policy described below                        |
 
@@ -25,7 +25,7 @@ _is_ the worked example. The pattern every package follows:
 // inside a resource package's Foo.ts
 export const makeFooReconciler = (): Reconciler<FooProps, FooState> => ({
   address: (props) => props.path,
-  observe: (props, ctx) => /* read live state, or undefined */ ...,
+  observe: (props, ctx) => /* read live state, or Option.none() */ ...,
   desired: (props) => /* what these props ask for */ ...,
   matches: (observed, desired) => /* compare only what props constrain */ ...,
   apply: (input, ctx) => /* converge, return new State */ ...,
@@ -56,11 +56,11 @@ travels through this. In short:
 
 ## Verification status
 
-Exercised only by calling the generated provider's methods directly in tests,
-never by a real `alchemy plan`/`deploy` — `alchemy plan` cannot currently
-complete for any stack, which is an upstream blocker recorded in
-[../../docs/V2-PLAN.md](../../docs/V2-PLAN.md). Nothing in `toProvider.ts`'s
-control flow has been observed running under the real Alchemy engine.
+Exercised by calling the generated provider's methods directly in tests, and
+by a real `plan` → `deploy` → drift → `destroy` cycle in a container
+(`scripts/deploy-check.sh`), which drives `toProvider`'s `create`/`update`/
+`delete` control flow end to end for seven resource kinds — see
+[../../docs/MAP.md](../../docs/MAP.md).
 
 ## What it deliberately does not do
 
@@ -78,8 +78,5 @@ control flow has been observed running under the real Alchemy engine.
   distinction `system-packages/src/Package.ts` already makes correctly at its
   own level, with none of that package's resource-specific knowledge of what's
   actually expensive to re-observe.
-- **`observe` still returns `State | undefined`, not `Option<State>`.** A
-  tracked, not-yet-landed change — see [TASKS.md](./TASKS.md) for exactly which
-  call sites move together, since it can't land incrementally.
 
 See [TASKS.md](./TASKS.md) for the rest of the backlog.

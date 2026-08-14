@@ -65,26 +65,32 @@ yield *
 
 ## Verification status
 
-**`pass` is the only backend of the five that has read a real secret** —
-verified against `docker run --rm debian:stable`: a real `gpg --batch
---gen-key`, `pass init`, `pass insert -m` for both a single-line and a
-multi-line secret, and `pass show` reading both back — confirming the
-first-line-is-the-secret convention `Pass.ts` assumes, and that a missing
-entry's real error text classifies as `SecretReadFailed`, not
-`SecretCliMissing` (see
-[../../docs/notes/secrets-pass-notes.md](../../docs/notes/secrets-pass-notes.md)).
+Two of five backends have read a real secret: **`pass`**, verified against
+`docker run --rm debian:stable` — a real `gpg --batch --gen-key`, `pass init`,
+`pass insert -m` for both a single-line and a multi-line secret, and `pass
+show` reading both back, confirming the first-line-is-the-secret convention
+`Pass.ts` assumes (see
+[../../docs/notes/secrets-pass-notes.md](../../docs/notes/secrets-pass-notes.md)) —
+and **`env`**, verified with no CLI at all: a set variable round-tripped its
+exact value and an unset one raised a real `ConfigError` (see
+[../../docs/notes/secrets-env-notes.md](../../docs/notes/secrets-env-notes.md)).
 
-**None of the other four — `1password`, `doppler`, `keychain`, `env` — has
-ever read a real secret.** Doppler's flags were checked only against `doppler
-secrets get --help`, which confirms the CLI's contract and nothing about its
-actual output. `1password`/`keychain` need an authenticated vault or a real
-macOS login keychain, neither of which this environment can supply without
-automating authentication to a secret store — a rule this repo does not break
-even to verify itself (see [../../AGENTS.md](../../AGENTS.md) §8, and rule 5's
-container-first approach, which doesn't apply here since none of these can be
-verified inside a disposable container). This remains **the least-verified
-seam in the repo**, and it is the one writing files at `0o600` on the strength
-of being right — see [../../docs/MAP.md](../../docs/MAP.md) §4.
+`1password` and `doppler` have not read a real secret — both need an
+authenticated account this repo deliberately never creates (see
+[../../AGENTS.md](../../AGENTS.md) §8) — but each backend's
+`SecretAuthRequired` classification was checked against its CLI's real
+unauthenticated error text, which turned up a genuine gap in both (now fixed
+and pinned in `test/OnePassword.test.ts`/`test/Doppler.test.ts`; see
+[../../docs/notes/secrets-op-notes.md](../../docs/notes/secrets-op-notes.md)
+and
+[../../docs/notes/secrets-doppler-notes.md](../../docs/notes/secrets-doppler-notes.md)).
+
+`keychain` reads with `security find-generic-password -g`, not `-w`. `-w` prints
+the ASCII-hex encoding of the stored bytes rather than the bytes whenever a
+secret contains a byte outside `isprint()` — the shape of every SSH key and PEM
+certificate — and exits `0` with no signal. `-g` distinguishes the two forms
+(`password: 0x<hex>` versus `password: "quoted"`), which is why it is used here.
+See [../../docs/notes/secrets-keychain-notes.md](../../docs/notes/secrets-keychain-notes.md).
 
 ## What it deliberately does not do
 
