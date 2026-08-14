@@ -95,7 +95,80 @@ rather than assumed:
   working binary. `machine-run` does not compile it. On these distros,
   `Git.CredentialHelper({ helpers: ["libsecret"] })` sets `credential.helper`
   correctly, but it resolves to nothing on `PATH` until a human (or a future
-  `System.Package`/build-step resource) produces the binary.
+  `System.Package`/build-step resource) produces the binary — this fails at
+  the next `git push`/credential prompt, never at `apply` time, since the
+  resource has no way to check for the binary's existence as part of
+  convergence.
+
+**Extended 2026-08-14**: re-verified the Fedora binary and went further —
+does `git config` actually accept the value, and does git actually call it?
+`docker run --rm fedora:latest`, `dnf install --setopt=install_weak_deps=False
+--setopt=tsflags=nodocs git git-credential-libsecret dbus-x11 gnome-keyring`
+(git 2.55.0): `git config --global credential.helper libsecret` round-trips
+via `git config --global --get-all credential.helper`, and `GIT_TRACE=1 git
+credential fill` proves real dispatch — `run_command: 'git credential-libsecret
+get'` → `exec: git-credential-libsecret get` → `start_command:
+/usr/libexec/git-core/git-credential-libsecret get`.
+
+The actual Secret-Service store/fetch round trip (approve a fake credential,
+fill it back, reject it) could **not** be completed, for three distinct,
+escalating reasons found by actually trying, not assumed:
+
+1. Plain `docker run` (unprivileged): `could not connect to Secret Service:
+   Cannot spawn a message bus without a machine-id: Invalid machine ID in
+   /var/lib/dbus/machine-id or /etc/machine-id` — the base image has no
+   machine-id.
+2. After `dbus-uuidgen > /etc/machine-id`: dbus itself now starts, but
+   `gnome-keyring-daemon --unlock --components=secrets --daemonize` fails —
+   `error dropping process capabilities - -5, aborting` — blocked by the
+   unprivileged container's own capability restrictions.
+3. Re-running with `--privileged` clears both of the above — the Secret
+   Service genuinely starts — but `git credential approve` now fails
+   differently: `store failed: Object does not exist at path
+   "/org/freedesktop/secrets/collection/login"`. `gnome-keyring-daemon` only
+   materialises the default "login" collection through a fuller session/PAM
+   unlock flow than `--unlock` with an empty stdin password provides
+   headlessly.
+
+Net effect: the config value and git's resolution/dispatch of it are real and
+confirmed; the credential-storage half needs a genuine desktop-session-like
+environment this session's containers could not cheaply provide. Distinct
+from, and a level deeper than, the Fedora/Debian binary-presence finding
+above.
+
+## `Git.CredentialHelper`'s `gh` backend: verified, without authenticating
+
+`docker run --rm ubuntu:24.04`, `gh` installed from its own apt repo
+(`cli.github.com/packages`) onto a clean container: git 2.43.0, `gh version
+2.97.0`. `git config --global credential.helper "!gh auth git-credential"`
+round-trips via `git config --global --get-all credential.helper`.
+`GIT_TRACE=1` on `git credential fill` shows git actually dispatching to it —
+`run_command: 'gh auth git-credential get'` — which exits `0` with empty
+output (this container's own `gh auth status` confirms "You are not logged
+into any GitHub hosts"); git then falls through to its own interactive
+prompt, which fails on `could not read Username ...: No such device or
+address` only because the container has no controlling tty. Nothing here
+required signing in to GitHub, per `AGENTS.md` rule 8.
+
+## `Git.CredentialHelper`'s `osxkeychain` backend: verified, without touching the real keychain or config
+
+`git-credential-osxkeychain` is a real, executable 123280-byte binary at
+`$(git --exec-path)` on this machine (Apple's Command Line Tools git
+2.50.1). Since writing this Mac's real `~/.gitconfig` or reading its real
+login keychain is off-limits, dispatch was verified with `git -c
+credential.helper=osxkeychain` — a transient, in-process config override
+that touches no file on disk — against a host guaranteed absent from the
+real keychain (`verify.machine-run-nonexistent.invalid`). `GIT_TRACE=1`
+shows git resolving and genuinely executing the real binary:
+`run_command: 'git credential-osxkeychain get'` → `exec:
+git-credential-osxkeychain get` → `start_command:
+/Library/Developer/CommandLineTools/usr/libexec/git-core/
+git-credential-osxkeychain get`. The lookup correctly finds nothing (no such
+host is enrolled) and git falls through to its own interactive prompt, which
+fails only for lack of a controlling tty — the same non-authentication
+signal `gh`'s check relies on. `git config --global --get-all
+credential.helper` was confirmed to still be unset on this machine
+afterwards.
 
 ## `Git.Maintenance`: `start`/`stop` are not a matched pair — verified, not assumed
 
@@ -172,12 +245,42 @@ UNVERIFIED; `Maintenance.ts`'s only OS-specific assumption is the two exact
 strings in `GitMaintenanceSchedulerUnavailable`'s detection regex, which is
 Linux-cron-verified only.
 
-## `Git.Signing`: unverified end-to-end
+## `Git.Signing`: verified end to end, plus a load-bearing finding about what `verify-commit` actually checks
 
-`packages/git/src/Signing.ts` composes real, individually-verified config
-keys (`gpg.format`, `user.signingKey`, `commit.gpgsign`,
-`gpg.ssh.allowedSignersFile`) and a real, documented `allowed_signers` file
-format, but **nothing in this repository signs anything today** — nobody has
-run `git commit -S` against a machine this composition configured and
-checked `git log --show-signature`. Said plainly rather than implied
-otherwise.
+**Updated 2026-08-14 — this section previously said "unverified end-to-end";
+that has now been run for real.** `docker run --rm debian:stable`, git
+2.47.3: a throwaway `ssh-keygen -t ed25519` key (no passphrase,
+container-only), this composition's exact four config keys (`gpg.format
+ssh`, `user.signingKey`, `commit.gpgsign true`, `gpg.ssh.allowedSignersFile`),
+an `allowed_signers` file in the exact format `gitSigning` generates, `git
+commit -S`, then `git verify-commit HEAD` — a real `Good "git" signature for
+verify@machine-run.invalid with ED25519 key SHA256:...` and exit `0`. The
+composed path genuinely produces a commit that verifies, not just one that
+looks signed.
+
+**Three follow-up negative controls, in a second container run, found
+something worth knowing before trusting this**: `git verify-commit`'s SSH
+check is a key lookup against `allowed_signers`, not an identity check —
+
+| Control | `allowed_signers` contents | Result |
+|---|---|---|
+| baseline | right key, right principal (`verify@machine-run.invalid`) | `Good signature for verify@machine-run.invalid ...`, exit `0` |
+| wrong principal | **right key**, principal set to `someone-else@example.com` (unrelated to the real committer) | `Good signature for someone-else@example.com ...`, exit `0` — **passes** |
+| wrong key | a *different* key, under the *right* principal | `Good "git" signature with <fingerprint>` then `No principal matched.`, exit `1` |
+| missing file | `allowedSignersFile` points at a path that doesn't exist | `Unable to open allowed keys file ...`, `No principal matched.`, exit `1` |
+
+Read together: the actual public key that produced the signature must appear
+*somewhere* in the file, full stop — that part is real and correctly
+enforced (rows 3 and 4 fail). But once a key is present, `git verify-commit`
+accepts it under *any* principal string attached to it in the file (row 2
+passes) — it never cross-checks that string against the commit's real
+`author`/`committer` email. `GitAllowedSigner.principals`
+(`packages/git/src/Signing.ts`) is therefore legible audit metadata — which
+name a human chose to write next to a key — never a cryptographically
+enforced identity binding. Anyone whose key is added to a machine's
+`allowed_signers` file can have a signature attributed to any principal
+already present for a different entry; this is exactly what `ssh-keygen(1)`'s
+ALLOWED SIGNERS format and `git verify-commit` implement, not a bug in this
+composition, and not fixable from `gitSigning`'s side. Worth knowing before
+treating a passing `verify-commit` as proof of *who* signed something, rather
+than just proof that *some* trusted key did.

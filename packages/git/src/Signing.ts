@@ -26,19 +26,54 @@ export interface GitSigningProps {
  * signers` file `gpg.ssh.allowedSignersFile` points at.
  *
  * A composition, not a `Reconciler`: four {@link Config} keys and one
- * generated file, none of which need a new state shape. **Nothing in this
- * repository signs anything today** — this composition exists but is not
- * called from any recipe yet, so it is unverified in the one way that
- * matters most: nobody has run `git commit -S` against a machine reconciled
- * by it and checked `git log --show-signature`.
+ * generated file, none of which need a new state shape.
+ *
+ * **Verified end to end** (`docker run --rm debian:stable`, git 2.47.3): a
+ * throwaway `ssh-keygen -t ed25519` key, this composition's exact four
+ * config keys, an `allowed_signers` file in the exact format generated
+ * above, `git commit -S`, and `git verify-commit` — a real `Good "git"
+ * signature for verify@machine-run.invalid ...` and exit `0`. The whole
+ * chain this composition wires together does produce a commit that actually
+ * verifies, not just one that looks signed.
+ *
+ * **A load-bearing, non-obvious finding from the same session, using three
+ * negative controls**: `git verify-commit`'s SSH-format check is a
+ * *key* lookup against `allowed_signers`, not an *identity* one —
+ * the `principals` field is not cross-checked against the commit's actual
+ * author/committer email at all.
+ *
+ * - Right key, listed under a **wrong** principal (`someone-else@example.com`,
+ *   nothing to do with the real committer `verify@machine-run.invalid`):
+ *   `git verify-commit` still prints `Good "git" signature for
+ *   someone-else@example.com ...` and **exits `0`**.
+ * - A **different** key listed under the *right* principal: prints `Good
+ *   "git" signature with <fingerprint>` (the cryptographic check on the
+ *   signature blob itself always succeeds or fails independently of the
+ *   file) followed by `No principal matched.` and **exits `1`**.
+ * - `allowedSignersFile` pointed at a path that doesn't exist: `Unable to
+ *   open allowed keys file ...`, `No principal matched.`, **exits `1`**.
+ *
+ * Read together: the exact public key must appear somewhere in the file, or
+ * verification fails outright — that part is real security. But once a key
+ * is in the file, `git verify-commit` accepts a signature from it under
+ * *any* principal string, including one that has nothing to do with who
+ * actually holds that key. `GitAllowedSigner.principals` is therefore
+ * legible audit metadata (which name a human attached to a key), never an
+ * enforced identity binding — anyone whose key ends up in this file can
+ * "look like" any principal already listed for a different key's sake, and
+ * this composition cannot change that: it is exactly what `ssh-keygen(1)`'s
+ * ALLOWED SIGNERS format and `git verify-commit` implement. Callers relying
+ * on `gitSigning` for anything beyond "is this key trusted at all" should
+ * know this before treating a passing `verify-commit` as proof of *who*
+ * signed, not just *that* a trusted key did.
  *
  * The `allowed_signers` file format (verified against `man git-config`'s
  * "gpg.ssh.allowedSignersFile" entry, which cites `ssh-keygen(1)`'s "ALLOWED
- * SIGNERS" section) is one line per signer: comma-separated principals, a
- * space, then the public key exactly as it appears in `authorized_keys` —
- * no support here for the optional `valid-after`/`valid-before`/
- * `cert-authority` qualifiers that section also documents, since nothing in
- * this package needs them yet.
+ * SIGNERS" section, and now against the real behaviour above) is one line
+ * per signer: comma-separated principals, a space, then the public key
+ * exactly as it appears in `authorized_keys` — no support here for the
+ * optional `valid-after`/`valid-before`/`cert-authority` qualifiers that
+ * section also documents, since nothing in this package needs them yet.
  */
 export const gitSigning = (id: string, props: GitSigningProps) =>
   Effect.gen(function* () {
