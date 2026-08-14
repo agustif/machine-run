@@ -110,50 +110,52 @@ it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
     }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect("posixMode masks off the file-type bits stat also reports", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "file");
-    yield* fs.writeFileString(target, "x");
-    yield* fs.chmod(target, 0o644);
+(it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "posixMode masks off the file-type bits stat also reports",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "file");
+      yield* fs.writeFileString(target, "x");
+      yield* fs.chmod(target, 0o644);
 
-    const info = yield* fs.stat(target);
-    // A raw `info.mode` carries `S_IFREG` (or the directory/symlink
-    // equivalent) alongside the permission bits — this is the same
-    // `Number(info.mode) & 0o777` seven files each wrote out by hand, and
-    // removing the `& 0o777` mask here would fail this assertion against the
-    // unmasked value instead of 0o644.
-    expect(posixMode(info)).toBe(0o644);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
+      const info = yield* fs.stat(target);
+      // A raw `info.mode` carries `S_IFREG` (or the directory/symlink
+      // equivalent) alongside the permission bits — this is the same
+      // `Number(info.mode) & 0o777` seven files each wrote out by hand, and
+      // removing the `& 0o777` mask here would fail this assertion against the
+      // unmasked value instead of 0o644.
+      expect(posixMode(info)).toBe(0o644);
+    }).pipe(Effect.provide(NodeServices.layer)),
+),
+  it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+    "ensureParentDir creates a missing nested parent, recursively, with the given mode",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const dir = yield* fs.makeTempDirectoryScoped();
+        const target = path.join(dir, "a", "b", "c", "file");
 
-it.effect("ensureParentDir creates a missing nested parent, recursively, with the given mode", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "a", "b", "c", "file");
+        yield* ensureParentDir(fs, path, target, 0o700);
 
-    yield* ensureParentDir(fs, path, target, 0o700);
+        const info = yield* fs.stat(path.dirname(target));
+        expect(info.type).toBe("Directory");
+        expect(posixMode(info)).toBe(0o700);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  ),
+  it.effect("ensureParentDir succeeds without a mode, taking the platform default", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "nested", "file");
 
-    const info = yield* fs.stat(path.dirname(target));
-    expect(info.type).toBe("Directory");
-    expect(posixMode(info)).toBe(0o700);
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
+      yield* ensureParentDir(fs, path, target);
 
-it.effect("ensureParentDir succeeds without a mode, taking the platform default", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "nested", "file");
-
-    yield* ensureParentDir(fs, path, target);
-
-    const info = yield* fs.stat(path.dirname(target));
-    expect(info.type).toBe("Directory");
-  }).pipe(Effect.provide(NodeServices.layer)),
-);
+      const info = yield* fs.stat(path.dirname(target));
+      expect(info.type).toBe("Directory");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  ));

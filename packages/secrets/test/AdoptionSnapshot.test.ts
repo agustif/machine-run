@@ -1,4 +1,10 @@
-import { Backups, FileLockLive, MachinePathsLive, silentSession, PlatformLive } from "@machine-run/core";
+import {
+  Backups,
+  FileLockLive,
+  MachinePathsLive,
+  PlatformFor,
+  silentSession,
+} from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { toProvider } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
@@ -35,7 +41,7 @@ const fakeBackups = (calls: { count: number }) =>
 
 const supportLayers = (calls: { count: number }) =>
   Layer.mergeAll(CommandExecutorStub, FileLockLive(), fakeBackups(calls)).pipe(
-    Layer.provideMerge(Layer.mergeAll(MachinePathsLive(), PlatformLive())),
+    Layer.provideMerge(Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"))),
     Layer.provideMerge(NodeServices.layer),
   );
 

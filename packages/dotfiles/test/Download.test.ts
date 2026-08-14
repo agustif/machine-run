@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -38,11 +38,9 @@ const fixtureClient = HttpClient.make((request) =>
 
 const layer = Layer.mergeAll(
   MachinePathsLive(),
-  PlatformLive(),
+  PlatformFor("linux"),
   Layer.succeed(HttpClient.HttpClient, fixtureClient),
-).pipe(
-  Layer.provideMerge(NodeServices.layer),
-);
+).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.effect("observe reports nothing for a file that has not been fetched yet", () =>
   Effect.gen(function* () {

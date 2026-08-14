@@ -26,7 +26,9 @@ import { jsonRecordOr } from "../src/backends/jsonConfigFile.ts";
 const envConfig = (vars: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnvRecord(vars));
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 /**
  * Decodes a written config file's raw text as JSON — `Schema.Json` rather
@@ -61,11 +63,18 @@ const applyCtx = {
  * `<home>/.claude.json`, so tests need a real, disposable home rather than
  * touching the operator's own `~/.claude.json`.
  */
-const withHome = (home: string) =>
-  Layer.succeed(MachinePaths, {
+const withHome = (home: string) => {
+  const separator = home.includes("\\") ? "\\" : "/";
+  return Layer.succeed(MachinePaths, {
     home,
-    expand: (target: string) => (target === "~" ? home : target.replace(/^~\//, `${home}/`)),
+    expand: (target: string) => {
+      if (target === "~") return home;
+      if (!target.startsWith("~/") && !target.startsWith("~\\")) return target;
+      const relative = target.slice(2).replaceAll(/[\\/]/g, separator);
+      return `${home}${home.endsWith(separator) ? "" : separator}${relative}`;
+    },
   });
+};
 
 /** `stdioTransport` got a transport other than the `Stdio` variant it required. */
 class UnexpectedTransport extends Data.TaggedError("UnexpectedTransport")<{
@@ -440,7 +449,7 @@ it.effect("drift: empty exactly when matches is true", () =>
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("drift: a transport tag mismatch (Stdio vs Remote) is reported as \"transport\"", () =>
+it.effect('drift: a transport tag mismatch (Stdio vs Remote) is reported as "transport"', () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const home = yield* fs.makeTempDirectoryScoped();
@@ -592,6 +601,5 @@ it.effect("two tools do not share an address", () =>
     };
 
     expect(reconciler.address(claude)).not.toBe(reconciler.address(opencode));
-
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );

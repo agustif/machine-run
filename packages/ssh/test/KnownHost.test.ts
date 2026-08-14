@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -16,6 +17,8 @@ import {
   removeKnownHostLine,
   type KnownHostProps,
 } from "../src/KnownHost.ts";
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 // ---------------------------------------------------------------------------
 // Pure parsing — real captured shapes, not invented ones. `github.com`'s
@@ -163,7 +166,7 @@ it.effect("CRLF known_hosts: a second entry is appended using the file's own CRL
 // The reconciler, against a real temp file.
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -252,41 +255,45 @@ it.effect("fails loudly on a malformed hashed known_hosts entry", () =>
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("apply creates the file and writes exactly one line for a brand-new entry", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeKnownHostReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "known_hosts");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply creates the file and writes exactly one line for a brand-new entry",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKnownHostReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "known_hosts");
 
-    const props = propsFor(target);
-    const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+      const props = propsFor(target);
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
-    const written = yield* fs.readFileString(target);
-    expect(written).toBe(`github.com ssh-ed25519 ${props.publicKey}\n`);
+      const written = yield* fs.readFileString(target);
+      expect(written).toBe(`github.com ssh-ed25519 ${props.publicKey}\n`);
 
-    const info = yield* fs.stat(target);
-    expect(Number(info.mode) & 0o777).toBe(0o644);
-  }).pipe(Effect.scoped, Effect.provide(layer)),
+      const info = yield* fs.stat(target);
+      expect(Number(info.mode) & 0o777).toBe(0o644);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("apply creates ~/.ssh (the file's parent) at 0o700", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeKnownHostReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, ".ssh", "known_hosts");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply creates ~/.ssh (the file's parent) at 0o700",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKnownHostReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, ".ssh", "known_hosts");
 
-    const props = propsFor(target);
-    const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+      const props = propsFor(target);
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
 
-    const info = yield* fs.stat(path.dirname(target));
-    expect(Number(info.mode) & 0o777).toBe(0o700);
-  }).pipe(Effect.scoped, Effect.provide(layer)),
+      const info = yield* fs.stat(path.dirname(target));
+      expect(Number(info.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect("a second, unrelated entry appends alongside the first without disturbing it", () =>

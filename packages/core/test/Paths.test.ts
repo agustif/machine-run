@@ -8,8 +8,9 @@ import { expandHome } from "../src/Paths.ts";
 it.effect("expandHome resolves a bare home marker and normalises a home-relative path", () =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
-    expect(expandHome(path, "~", "/Users/alice")).toBe("/Users/alice");
-    expect(expandHome(path, "~/projects/../.config", "/Users/alice")).toBe("/Users/alice/.config");
+    const home = path.resolve("/Users/alice");
+    expect(expandHome(path, "~", home)).toBe(home);
+    expect(expandHome(path, "~/projects/../.config", home)).toBe(path.join(home, ".config"));
     expect(expandHome(path, "relative/../config", "/Users/alice")).toBe(path.resolve("config"));
   }).pipe(Effect.provide(NodeServices.layer)),
 );

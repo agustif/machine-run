@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { platform as nodePlatform } from "node:os";
@@ -13,7 +13,7 @@ import {
   SymlinkSourceMissing,
 } from "../src/Symlink.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

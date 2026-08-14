@@ -1,4 +1,4 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { platform as nodePlatform } from "node:os";
@@ -15,7 +15,7 @@ import {
   type FileState,
 } from "../src/File.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -153,35 +153,40 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("mode participates in matching once the recipe pins one, and apply converges it", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "secret-ish");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "mode participates in matching once the recipe pins one, and apply converges it",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "secret-ish");
 
-    const props: FileProps = { path: target, content: "x", mode: 0o600 };
-    const desired = yield* reconciler.desired(props);
-    const applied = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
-    expect(applied.mode).toBe(0o600);
+      const props: FileProps = { path: target, content: "x", mode: 0o600 };
+      const desired = yield* reconciler.desired(props);
+      const applied = yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        applyCtx,
+      );
+      expect(applied.mode).toBe(0o600);
 
-    const info = yield* fs.stat(target);
-    expect(Number(info.mode) & 0o777).toBe(0o600);
+      const info = yield* fs.stat(target);
+      expect(Number(info.mode) & 0o777).toBe(0o600);
 
-    // A later recipe pinning a different mode is real drift, not noise.
-    const props2: FileProps = { ...props, mode: 0o644 };
-    const desired2 = yield* reconciler.desired(props2);
-    expect(reconciler.matches(applied, desired2)).toBe(false);
+      // A later recipe pinning a different mode is real drift, not noise.
+      const props2: FileProps = { ...props, mode: 0o644 };
+      const desired2 = yield* reconciler.desired(props2);
+      expect(reconciler.matches(applied, desired2)).toBe(false);
 
-    const applied2 = yield* reconciler.apply(
-      { props: props2, observed: Option.some(applied), desired: desired2 },
-      applyCtx,
-    );
-    expect(applied2.mode).toBe(0o644);
-    const info2 = yield* fs.stat(target);
-    expect(Number(info2.mode) & 0o777).toBe(0o644);
-  }).pipe(Effect.provide(layer)),
+      const applied2 = yield* reconciler.apply(
+        { props: props2, observed: Option.some(applied), desired: desired2 },
+        applyCtx,
+      );
+      expect(applied2.mode).toBe(0o644);
+      const info2 = yield* fs.stat(target);
+      expect(Number(info2.mode) & 0o777).toBe(0o644);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("an unset mode is unconstrained: any observed mode satisfies it", () =>

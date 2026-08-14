@@ -1,4 +1,4 @@
-import { MachinePathsLive, PlatformLive, Sh } from "@machine-run/core";
+import { MachinePaths, PlatformFor, Sh } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { platform as nodePlatform } from "node:os";
@@ -15,12 +15,16 @@ import {
   makeGitRepoReconciler,
 } from "../src/Repo.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+const testPaths = Layer.succeed(MachinePaths, {
+  home: "/home/test",
+  expand: (target: string) => target,
+});
+
+const layer = Layer.mergeAll(testPaths, PlatformFor("linux")).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
-const expectedGit = (...argv: readonly string[]): string =>
-  process.platform === "win32" ? Sh.pwsh("git", ...argv) : Sh.sh("git", ...argv);
+const expectedGit = (...argv: readonly string[]): string => Sh.sh("git", ...argv);
 
 // Windows chmod cannot make a parent directory unsearchable; the real
 // permission-error invariant is exercised by the POSIX test and the Windows

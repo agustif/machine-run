@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { expect, it } from "@effect/vitest";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
 import type { ApplyContext, Exec as RunExec } from "@machine-run/engine";
@@ -10,7 +10,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { ExecGuardRequired, makeExecReconciler, type ExecProps } from "../src/Exec.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

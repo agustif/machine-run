@@ -1,7 +1,8 @@
-import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformFor } from "@machine-run/core";
 import * as Dotfiles from "@machine-run/dotfiles";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -87,9 +88,11 @@ it("carries `after` through verbatim when given", () => {
 // also sets.
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 const observeCtx = { exec: () => Effect.die("Dotfiles.ManagedBlock never runs a command") };
 const applyCtx = { ...observeCtx, snapshot: () => Effect.succeed(undefined) };
@@ -139,24 +142,26 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("creates ~/.ssh (here, the config's parent directory) at exactly 0o700", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* Dotfiles.makeManagedBlockReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    // Nested and not yet created, so `ManagedBlock`'s `makeDirectory` is what
-    // creates it — proving the mode came from `directoryMode`, not from
-    // whatever `makeTempDirectoryScoped` happened to use.
-    const configPath = path.join(dir, ".ssh", "config");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "creates ~/.ssh (here, the config's parent directory) at exactly 0o700",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* Dotfiles.makeManagedBlockReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      // Nested and not yet created, so `ManagedBlock`'s `makeDirectory` is what
+      // creates it — proving the mode came from `directoryMode`, not from
+      // whatever `makeTempDirectoryScoped` happened to use.
+      const configPath = path.join(dir, ".ssh", "config");
 
-    const rendered = sshHostBlockProps({ configPath, name: "exe", hostnames: ["exe.dev"] });
-    const desired = yield* reconciler.desired(rendered);
-    yield* reconciler.apply({ props: rendered, observed: Option.none(), desired }, applyCtx);
+      const rendered = sshHostBlockProps({ configPath, name: "exe", hostnames: ["exe.dev"] });
+      const desired = yield* reconciler.desired(rendered);
+      yield* reconciler.apply({ props: rendered, observed: Option.none(), desired }, applyCtx);
 
-    const info = yield* fs.stat(path.dirname(configPath));
-    expect(Number(info.mode) & 0o777).toBe(0o700);
-  }).pipe(Effect.scoped, Effect.provide(layer)),
+      const info = yield* fs.stat(path.dirname(configPath));
+      expect(Number(info.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 /**
