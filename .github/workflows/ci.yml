@@ -229,9 +229,11 @@ jobs:
   deploy-check:
     name: deploy (plan / idempotence / drift / destroy)
     runs-on: ubuntu-latest
-    # The gap this repo has never closed: the engine has never executed. This
-    # job is the only thing here that runs `alchemy plan` at all, so its
-    # failure output is a deliverable in its own right.
+    # The only job that runs the engine end to end: plan, deploy, an empty second
+    # plan, drift on every kind it covers, and a destroy that must leave the
+    # machine alone. It has caught things no unit test could — a `privilege`
+    # default that broke `apt-get` for a non-root user, and an assertion of its own
+    # that grepped a path where `plan` prints ids.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -240,3 +242,18 @@ jobs:
       - run: npm ci
       - name: scripts/deploy-check.sh
         run: bash scripts/deploy-check.sh
+
+  deploy-check-systemd:
+    name: deploy (System.Service, real systemd)
+    runs-on: ubuntu-latest
+    # Separate from `deploy-check` because `systemctl --user` needs the *system*
+    # instance too, so this one boots systemd as PID 1 in a privileged container.
+    # Keeping it apart is what lets the main check stay unprivileged.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: scripts/deploy-check-systemd.sh
+        run: bash scripts/deploy-check-systemd.sh

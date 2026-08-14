@@ -25,6 +25,12 @@ FROM node:22-bookworm
 # deployed. `entrypoint.sh` runs each alchemy invocation under
 # `dbus-run-session`, and the schemas package supplies a real key to write.
 #
+# `zsh` is for `Shell.Login` (it must be in /etc/shells, which the package does)
+# and `flatpak` for `System.Repo` — `flatpak remote-add` registers a URL without
+# downloading anything, so it is a real repo add at negligible cost. Debian has no
+# PPAs (those are Ubuntu-only), so Flatpak is the arm of `RepoSpec` this image can
+# genuinely exercise.
+#
 # `cron` is here for `Git.Maintenance`: `git maintenance start` schedules through
 # systemd timers or crontab, and a plain container has neither, so the resource
 # correctly refuses with `GitMaintenanceSchedulerUnavailable`. Installing cron is
@@ -33,6 +39,7 @@ FROM node:22-bookworm
 RUN apt-get update \
     && apt-get install -y --no-install-recommends sudo ca-certificates cron \
        dbus-x11 dconf-gsettings-backend gsettings-desktop-schemas \
+       zsh flatpak \
     && apt-get clean
 
 # A throwaway user with its own real $HOME. Every `~`-expanded path any
@@ -42,6 +49,17 @@ RUN apt-get update \
 # this image is never bind-mounted over a host path (see
 # scripts/deploy-check.sh), so /home/runner is the only home directory that
 # exists anywhere this process can see.
+# `mise` for `Runtime.Tool`, pinned and checksummed rather than piped from a
+# install script — the same standard `Machine.Download` holds recipes to.
+ARG MISE_VERSION=v2024.12.14
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64) m=x64 ;; arm64) m=arm64 ;; *) echo "unsupported: $arch" >&2; exit 1 ;; esac; \
+    curl -fsSL -o /usr/local/bin/mise \
+      "https://github.com/jdx/mise/releases/download/${MISE_VERSION}/mise-${MISE_VERSION}-linux-${m}"; \
+    chmod 0755 /usr/local/bin/mise; \
+    mise --version
+
 RUN useradd --create-home --shell /bin/bash runner \
     && echo "runner ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/runner \
     && chmod 0440 /etc/sudoers.d/runner

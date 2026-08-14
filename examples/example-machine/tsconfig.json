@@ -11,9 +11,14 @@
     { "path": "../../packages/machine" },
     { "path": "../../packages/macos-defaults" },
     { "path": "../../packages/secrets" },
+    { "path": "../../packages/ai" },
+    { "path": "../../packages/runtimes" },
+    { "path": "../../packages/shell" },
     { "path": "../../packages/ssh" },
     { "path": "../../packages/system-packages" },
+    { "path": "../../packages/system-services" },
+    { "path": "../../packages/system-settings" },
     { "path": "../../packages/tailscale" }
   ],
-  "include": ["alchemy.run.ts", "alchemy.container.ts"]
+  "include": ["alchemy.run.ts", "alchemy.container.ts", "alchemy.systemd.ts"]
 }

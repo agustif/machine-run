@@ -108,6 +108,10 @@ if ! sudo apt-get update -qq; then
        "likely fail too. Recorded as a harness/network finding, not faked."
 fi
 
+note "Start a system D-Bus (system-scope flatpak talks to it)"
+sudo mkdir -p /run/dbus
+sudo dbus-daemon --system --fork || true
+
 note "alchemy plan (first run — expect a full create plan)"
 run_plan initial
 plan1="$(plan_log initial)"
@@ -122,6 +126,9 @@ assert_contains "initial plan proposes to create the Ssh.Key" "$plan1" "demo-ssh
 assert_contains "initial plan proposes to create the Ssh.KnownHost" "$plan1" "demo-known-host"
 assert_contains "initial plan proposes to create the Ai.McpServer" "$plan1" "demo-mcp-server"
 assert_contains "initial plan proposes to create the System.Setting" "$plan1" "demo-clock-format"
+assert_contains "initial plan proposes to create the Shell.Login" "$plan1" "demo-login-shell"
+assert_contains "initial plan proposes to create the System.Repo" "$plan1" "demo-flatpak-remote"
+assert_contains "initial plan proposes to create the Runtime.Tool" "$plan1" "demo-mise-jq"
 
 note "alchemy deploy --yes"
 run_deploy initial
@@ -191,6 +198,18 @@ printf '{"firstStartTime":"2026-01-01T00:00:00.000Z","mcpServers":{}}\n' > "$HOM
 note "Drift: change System.Setting's value out from under it (demo-clock-format)"
 dbus-run-session -- gsettings set org.gnome.desktop.interface clock-format "'12h'"
 
+note "Drift: put the login shell back to bash (demo-login-shell)"
+sudo chsh -s /bin/bash runner
+
+note "Drift: remove the Flatpak remote (demo-flatpak-remote)"
+# System scope, matching how the backend adds it — `--user` here looked like
+# a working drift step while actually failing with "not found in the user
+# installation", so the resource was never re-converged.
+sudo flatpak remote-delete flathub || true
+
+note "Drift: uninstall the mise-managed tool (demo-mise-jq)"
+mise uninstall jq@1.7.1 || true
+
 note "alchemy plan (post-drift — every drifted resource must be reported)"
 run_plan post-drift
 plan3="$(plan_log post-drift)"
@@ -216,6 +235,9 @@ assert_contains "drifted Git.Maintenance is detected" "$plan3" "demo-repo-mainte
 assert_contains "drifted Ssh.KnownHost is detected" "$plan3" "demo-known-host"
 assert_contains "drifted Ai.McpServer is detected" "$plan3" "demo-mcp-server"
 assert_contains "drifted System.Setting is detected" "$plan3" "demo-clock-format"
+assert_contains "drifted Shell.Login is detected" "$plan3" "demo-login-shell"
+assert_contains "drifted System.Repo is detected" "$plan3" "demo-flatpak-remote"
+assert_contains "drifted Runtime.Tool is detected" "$plan3" "demo-mise-jq"
 
 note "Re-deploy to converge before destroy"
 run_deploy reconverge >/dev/null
@@ -236,6 +258,9 @@ before_known_hosts="$(cat "$HOME/.ssh/known_hosts")"
 before_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))')"
 before_maintenance="$(git config --global --get-all maintenance.repo | grep -c demo-repo-clone || true)"
 before_clock="$(dbus-run-session -- gsettings get org.gnome.desktop.interface clock-format)"
+before_shell="$(getent passwd runner | cut -d: -f7)"
+before_remote="$(flatpak remotes --columns=name | grep -c flathub || true)"
+before_mise="$(mise ls --installed 2>/dev/null | grep -c jq || true)"
 
 note "alchemy destroy --yes"
 dbus-run-session -- "$ALCHEMY" destroy "$RECIPE" --yes 2>&1 | tee "$LOG_DIR/destroy.log"
@@ -256,6 +281,9 @@ after_known_hosts="$(cat "$HOME/.ssh/known_hosts" 2>/dev/null || echo MISSING)"
 after_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))' 2>/dev/null || echo MISSING)"
 after_maintenance="$(git config --global --get-all maintenance.repo 2>/dev/null | grep -c demo-repo-clone || true)"
 after_clock="$(dbus-run-session -- gsettings get org.gnome.desktop.interface clock-format 2>/dev/null || echo MISSING)"
+after_shell="$(getent passwd runner | cut -d: -f7)"
+after_remote="$(flatpak remotes --columns=name 2>/dev/null | grep -c flathub || true)"
+after_mise="$(mise ls --installed 2>/dev/null | grep -c jq || true)"
 
 assert_true "Machine.File content unchanged after destroy" \
   test "$before_gitconfig" = "$after_gitconfig"
@@ -294,6 +322,13 @@ assert_true "Git.Maintenance registration survives destroy under the default ret
 # proves retain still wins by default.
 assert_true "System.Setting value survives destroy under the default retain policy" \
   test "$before_clock" = "$after_clock"
+# Shell.Login has an `unapply`; the other two do not. Either way retain wins.
+assert_true "Shell.Login shell survives destroy under the default retain policy" \
+  test "$before_shell" = "$after_shell"
+assert_true "System.Repo remote still registered after destroy" \
+  test "$before_remote" = "$after_remote"
+assert_true "Runtime.Tool still installed after destroy" \
+  test "$before_mise" = "$after_mise"
 
 kill "$HTTP_SERVER_PID" 2>/dev/null || true
 

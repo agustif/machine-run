@@ -57,6 +57,8 @@ import * as Git from "@machine-run/git";
 import * as Secrets from "@machine-run/secrets";
 import * as Ssh from "@machine-run/ssh";
 import * as SystemSettings from "@machine-run/system-settings";
+import * as Runtimes from "@machine-run/runtimes";
+import * as Shell from "@machine-run/shell";
 import * as SystemPackages from "@machine-run/system-packages";
 import * as Alchemy from "alchemy";
 import { CommandExecutorLive } from "alchemy/Command";
@@ -81,6 +83,8 @@ const providers = Layer.mergeAll(
   Git.providers(),
   Secrets.providers(),
   Ssh.providers(),
+  Runtimes.providers(),
+  Shell.providers(),
   SystemPackages.providers(),
   SystemSettings.providers(),
 ).pipe(Layer.provideMerge(Core.services()), Layer.provide(CommandExecutorLive()));
@@ -214,6 +218,26 @@ export default Alchemy.Stack(
       schema: "org.gnome.desktop.interface",
       key: "clock-format",
       value: "'24h'",
+    });
+
+    // `zsh` is installed by the image, so it is in `/etc/shells` — which
+    // `Shell.Login` checks before calling `chsh`. It runs elevated: `chsh` for a
+    // non-root user authenticates through PAM, which has nowhere to prompt here.
+    yield* Shell.Login("demo-login-shell", { shell: "/bin/zsh" });
+
+    // `flatpak remote-add` registers a URL and downloads nothing, so this is a
+    // real repository add at negligible cost. Debian has no PPAs, so Flatpak is
+    // the `RepoSpec` arm this image can genuinely exercise.
+    yield* SystemPackages.Repo("demo-flatpak-remote", {
+      repo: { _tag: "Flatpak", name: "flathub", location: "https://dl.flathub.org/repo/flathub.flatpakrepo" },
+    });
+
+    // `jq` rather than a language runtime: mise installs a single small binary,
+    // so this exercises the whole `Runtime.Tool` path without a toolchain build.
+    yield* Runtimes.RuntimeTool("demo-mise-jq", {
+      _tag: "Mise",
+      tool: "jq",
+      version: "1.7.1",
     });
 
     yield* Ai.McpServer("demo-mcp-server", {

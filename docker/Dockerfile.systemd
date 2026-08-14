@@ -1,0 +1,53 @@
+# A container that has actually *booted* systemd, for `System.Service`.
+#
+# `systemctl --user` refuses to work without the system instance as well —
+# "Failed to connect to bus: No such file or directory" or "Trying to run as user
+# instance, but the system has not been booted with systemd", because
+# `sd_booted()` checks for it. So this cannot be a package installed into the main
+# image: PID 1 has to be systemd, the container has to be privileged, and
+# `/sys/fs/cgroup` has to be mounted. `scripts/deploy-check-systemd.sh` supplies
+# those flags.
+#
+# `backends/linux/SystemdUser.ts`'s doc comment records this exact setup and the
+# command outputs it was verified against; this file is that setup as code.
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# `systemd-sysv` provides /sbin/init. `dbus-user-session` is what gives a
+# lingering user a real `user@<uid>.service` manager, without which
+# `systemctl --user` has no bus to talk to.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       systemd systemd-sysv dbus-user-session \
+       ca-certificates curl git sudo \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node from NodeSource: ubuntu:24.04's own `nodejs` is too old for this workspace.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --shell /bin/bash runner \
+    && echo "runner ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/runner \
+    && chmod 0440 /etc/sudoers.d/runner
+
+# `enable-linger` is what makes the user manager start without an interactive
+# login — it cannot be done at build time (no systemd running yet), so the
+# entrypoint does it. This just records the intent next to the rest of the setup.
+WORKDIR /workspace
+COPY --chown=runner:runner . /workspace
+RUN chown -R runner:runner /workspace
+USER runner
+RUN npm install
+USER root
+
+COPY scripts/container/systemd-entrypoint.sh /usr/local/bin/systemd-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/systemd-entrypoint.sh
+
+# PID 1 is systemd. The check itself runs from a systemd unit that the entrypoint
+# script installs, because there is no other way to be running *after* the system
+# instance is up.
+CMD ["/sbin/init"]

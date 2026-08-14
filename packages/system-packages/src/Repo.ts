@@ -85,7 +85,20 @@ const repoEquals = (a: RepoSpec, b: RepoSpec): boolean =>
       Brew: (x) => b._tag === "Brew" && b.tap === x.tap,
       Apt: (x) => b._tag === "Apt" && b.ppa === x.ppa,
       Dnf: (x) => b._tag === "Dnf" && b.project === x.project,
-      Flatpak: (x) => b._tag === "Flatpak" && b.name === x.name && b.location === x.location,
+      // Name only, deliberately. `remote-add` is given a `.flatpakrepo`
+      // *descriptor* URL, and `flatpak remotes` reports the *resolved* repo URL
+      // it points at — measured: adding
+      // `https://dl.flathub.org/repo/flathub.flatpakrepo` makes `remotes` print
+      // `https://dl.flathub.org/repo/`. Comparing those two is comparing
+      // different things, and it never matched, so this resource could never
+      // converge for a remote added the normal documented way. `remote-add
+      // --if-not-exists` is itself keyed on the name, so matching on name is
+      // also what `apply` actually does.
+      //
+      // The honest cost: a remote whose URL was repointed under the same name is
+      // not detected as drift. Detecting it would mean resolving the descriptor
+      // ourselves — a network fetch inside `observe`, which planning must not do.
+      Flatpak: (x) => b._tag === "Flatpak" && b.name === x.name,
     }),
   );
 
@@ -207,13 +220,11 @@ export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, 
                   desired: spec.name,
                 });
               }
-              if (!(o._tag === "Flatpak" && o.location === spec.location)) {
-                fields.push({
-                  field: "location",
-                  observed: o._tag === "Flatpak" ? (o.location ?? "") : "",
-                  desired: spec.location ?? "",
-                });
-              }
+              // No `location` field, deliberately: `matches` above compares
+              // Flatpak remotes on `name` alone (see `repoEquals`), and `drift`
+              // must be empty exactly when `matches` is true. Reporting a
+              // location difference here would claim drift the plan then says
+              // nothing about, and that `apply` could not fix in any case.
               return fields;
             },
           }),

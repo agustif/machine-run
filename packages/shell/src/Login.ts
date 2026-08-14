@@ -1,11 +1,13 @@
 import { Sh } from "@machine-run/core";
-import type { Drift, Exec, Reconciler } from "@machine-run/engine";
-import { toProvider } from "@machine-run/engine";
+import type { Drift, Exec, ExecutionContext, Reconciler } from "@machine-run/engine";
+import { executionOf, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as UndefinedOr from "effect/UndefinedOr";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -82,6 +84,25 @@ export const parseEtcShells = (content: string): string[] =>
     .split("\n")
     .map((line) => line.trim())
     .filter((line) => line.length > 0 && !line.startsWith("#"));
+
+/**
+ * `chsh`, elevated when this run can escalate.
+ *
+ * `chsh -s <shell>` with no username changes the *current* user's shell, and for
+ * a non-root user `chsh` authenticates through PAM — which has nowhere to prompt
+ * under a non-interactive deploy, so the resource only ever worked where the
+ * process was already root or the system's `chsh` happened to be permissive.
+ *
+ * The elevated form must name the user: `sudo chsh -s <shell>` on its own would
+ * change *root's* login shell, which is emphatically not what the recipe asked
+ * for. That is why this takes the username the reconciler already resolved rather
+ * than relying on `sudo` inheriting one.
+ */
+const chshCommand = (execution: ExecutionContext, shell: string, username: string) =>
+  Boolean.match(execution.privilege === "sudo", {
+    onFalse: () => Sh.sh("chsh", "-s", shell),
+    onTrue: () => Sh.sh("sudo", "chsh", "-s", shell, username),
+  });
 
 const currentUsername = (exec: Exec) =>
   exec({ command: Sh.sh("id", "-un"), shell: true }).pipe(
@@ -186,7 +207,11 @@ export const makeLoginReconcilerAt = (
 
       apply: ({ observed, desired }, ctx) =>
         Effect.gen(function* () {
-          yield* ctx.exec({ command: Sh.sh("chsh", "-s", desired.shell), shell: true });
+          const username = yield* currentUsername(ctx.exec);
+          yield* ctx.exec({
+            command: chshCommand(executionOf(ctx), desired.shell, username),
+            shell: true,
+          });
           return {
             shell: desired.shell,
             ...Option.match(observed, {
@@ -207,11 +232,19 @@ export const makeLoginReconcilerAt = (
        * unset when it has nothing genuine to reverse.
        */
       unapply: ({ recorded }, ctx) =>
-        recorded.previousShell !== undefined
-          ? ctx
-              .exec({ command: Sh.sh("chsh", "-s", recorded.previousShell), shell: true })
-              .pipe(Effect.asVoid)
-          : Effect.void,
+        UndefinedOr.match(recorded.previousShell, {
+          onUndefined: () => Effect.void,
+          onDefined: (previousShell) =>
+            Effect.gen(function* () {
+              // Elevated the same way `apply` is: an undo that cannot run is not
+              // an undo, and the shell was changed with the same privilege.
+              const username = yield* currentUsername(ctx.exec);
+              yield* ctx.exec({
+                command: chshCommand(executionOf(ctx), previousShell, username),
+                shell: true,
+              });
+            }).pipe(Effect.asVoid),
+        }),
     };
   });
 

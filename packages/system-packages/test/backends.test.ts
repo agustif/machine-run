@@ -1758,12 +1758,16 @@ it.effect("Repo reconciler drift: empty exactly when matches is true, no directi
       repo: { _tag: "Flatpak", name: "flathub", location: "https://a" },
     };
     expect(drift(flatpakSameLocation, flatpakDesired)).toEqual([]);
+    // A differing `location` is NOT drift for Flatpak, and that is the point:
+    // `matches` compares remotes on `name` alone because `remote-add
+    // --if-not-exists` cannot repoint an existing name, so a location difference
+    // is something `apply` provably cannot fix. `drift` has to agree with
+    // `matches` or the plan reports a change it then never makes.
     const flatpakDifferentLocation: RepoProps = {
       repo: { _tag: "Flatpak", name: "flathub", location: "https://b" },
     };
-    expect(drift(flatpakDifferentLocation, flatpakDesired)).toEqual([
-      { field: "location", observed: "https://b", desired: "https://a" },
-    ]);
+    expect(reconciler.matches(flatpakDifferentLocation, flatpakDesired)).toBe(true);
+    expect(drift(flatpakDifferentLocation, flatpakDesired)).toEqual([]);
     // Every field this reconciler tracks names a value, never an order — no
     // case above ever carries a `direction`.
   }),
@@ -1870,8 +1874,8 @@ it.effect(
 );
 
 it.effect(
-  "Repo reconciler observe: flatpak, a real bootstrap-URL repo never matches a live listing " +
-    "— the documented, unavoidable Flatpak.ts limitation, not a bug",
+  "Repo reconciler observe: flatpak matches a bootstrap-URL repo against a live listing, " +
+    "because `apply` provably cannot remediate a URL difference",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
@@ -1886,10 +1890,14 @@ it.effect(
         planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
       );
       // `flatpak remotes` reports the *resolved* location
-      // (https://dl.flathub.org/repo/), never the bootstrap URL that was
-      // actually passed to `remote-add` — so this never matches, even
-      // though `flathub` really is registered.
-      expect(observed).toEqual(Option.none());
+      // (https://dl.flathub.org/repo/), never the bootstrap URL passed to
+      // `remote-add`. This used to assert `Option.none()` and call it an
+      // unavoidable limitation. It is avoidable, and the reason is one step
+      // further on: `remote-add --if-not-exists` against an existing name does
+      // not repoint it — measured — so comparing on URL reported drift that
+      // `apply` can never fix, and the plan never went quiet. Matching on `name`,
+      // which is the key `remote-add` itself uses, is what converges.
+      expect(Option.isSome(observed)).toBe(true);
     }),
 );
 

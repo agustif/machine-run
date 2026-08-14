@@ -11,6 +11,7 @@ import {
   rejectUnsupportedVersionSpec,
   type RepoBackend,
   type PackageTimeouts,
+  elevated,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -105,11 +106,22 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
         }),
       ),
     ),
-  install: (name, version, exec) =>
+  // System-scope flatpak writes to `/var/lib/flatpak` and talks to the *system*
+  // bus, so `install`/`remote-add` need root — this was the one Linux backend not
+  // routing through `execution.privilege`, which the privilege audit flagged as an
+  // anomaly and which showed up as `error: Unable to connect to system bus` the
+  // first time the container check tried to add a remote unprivileged.
+  //
+  // Scope is deliberately left system-wide rather than switched to `--user`: the
+  // `remotes`/`list` parsers are pinned against fixtures captured from system
+  // scope, and a `--user` remote would be invisible to a system-scope install.
+  // Whether a personal-machine tool should prefer `--user` throughout is a real
+  // question, recorded in TASKS.md rather than answered by a silent flag change.
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("flatpak", "install", "-y", "--noninteractive", name),
+          command: Sh.sh(...elevated(execution, "flatpak", "install", "-y", "--noninteractive", name)),
           shell: true,
           timeout: flatpakTimeouts.install,
         }).pipe(Effect.asVoid),
@@ -161,21 +173,33 @@ export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
    * different string). Flatpak does not remember the original bootstrap URL
    * anywhere, so there is no way for `listRepos` to reconstruct it.
    *
-   * **The honest consequence**: a `System.Repo` whose `FlatpakRepo` is
-   * `{ name: "flathub", location: "https://dl.flathub.org/repo/flathub.flatpakrepo" }`
-   * (the standard onboarding command every Flathub tutorial gives) will
-   * `apply` correctly every time, but will never `matches` — every `plan`
-   * reports this resource as needing an update, forever. That is safe
-   * (`addRepo` uses `--if-not-exists`, so the repeated apply is a real
-   * no-op), just not clean. Verified separately: adding the *resolved* URL
-   * directly instead (skipping the `.flatpakrepo` bootstrap) fails GPG
-   * signature verification (`Can't check signature: public key not found`,
-   * exit 1) unless `--no-gpg-verify` is also passed — a real security
-   * downgrade this backend does not add a flag for, so that path is not a
-   * fix, only a worse trade. Use the bootstrap URL and accept the
-   * always-dirty plan; this mirrors `SettingProps.value`'s own "copy the
-   * canonical form, don't expect convergence otherwise" lesson, except here
-   * no spelling of `location` both converges *and* stays secure.
+   * **What follows, and why `Repo.ts` compares on `name` alone.** A
+   * `System.Repo` of `{ name: "flathub", location: ".../flathub.flatpakrepo" }`
+   * — the standard onboarding command every Flathub tutorial gives — applies
+   * correctly, and its bootstrap `location` can never equal what `remotes`
+   * reports. Comparing them made every `plan` report the resource as needing an
+   * update, forever.
+   *
+   * That was originally accepted as safe-but-unclean, since `addRepo` uses
+   * `--if-not-exists` and the repeated apply is a real no-op. The decisive fact
+   * is one step further on, and measured: `remote-add --if-not-exists` against an
+   * *existing* name does not repoint it. Given a different URL it fetches the new
+   * descriptor and then leaves the remote exactly as it was
+   * (`flatpak remote-add --if-not-exists flathub <other-url>` → the listing still
+   * shows the original). So `apply` cannot remediate a URL difference at all.
+   *
+   * Reporting drift that `apply` provably cannot fix is not untidiness, it is a
+   * permanent unfixable-drift loop — the plan never goes quiet, and a plan that
+   * never goes quiet stops being read. `Repo.ts` therefore matches on `name`,
+   * which is also the key `remote-add` itself uses. The cost is that a remote
+   * repointed under the same name is not reported; detecting it would mean
+   * resolving the descriptor ourselves, a network fetch inside `observe`, which
+   * planning must not do.
+   *
+   * Adding the *resolved* URL instead is not an escape: verified separately, it
+   * fails GPG verification (`Can't check signature: public key not found`, exit
+   * 1) unless `--no-gpg-verify` is also passed — a security downgrade this
+   * backend does not offer.
    */
   listRepos: (exec) =>
     exec({ command: Sh.sh("flatpak", "remotes", "--columns=name,url"), shell: true }).pipe(
@@ -209,7 +233,7 @@ export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
    * cannot run without it — rather than a string that failed to parse the
    * way it was before `FlatpakRepo` gave the two arguments their own fields.
    */
-  addRepo: (repo, exec) =>
+  addRepo: (repo, exec, execution) =>
     UndefinedOr.match(repo.location, {
       onUndefined: () =>
         Effect.fail(
@@ -220,7 +244,7 @@ export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
         ),
       onDefined: (location) =>
         exec({
-          command: Sh.sh("flatpak", "remote-add", "--if-not-exists", repo.name, location),
+          command: Sh.sh(...elevated(execution, "flatpak", "remote-add", "--if-not-exists", repo.name, location)),
           shell: true,
         }).pipe(Effect.asVoid),
     }),

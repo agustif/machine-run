@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
+import type { ApplyContext, Exec, ObserveContext, ExecutionContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -91,8 +91,12 @@ const capturing =
 
 const planCtx = (exec: Exec): ObserveContext => ({ exec });
 
-const applyCtx = (exec: Exec): ApplyContext => ({
+const applyCtx = (
+  exec: Exec,
+  privilege: ExecutionContext["privilege"] = "none",
+): ApplyContext => ({
   exec,
+  execution: { privilege, locale: "C", defaultTimeout: "1 minute" },
   snapshot: () => Effect.die("Shell.Login never snapshots — snapshotBeforeApply is unset"),
 });
 
@@ -224,7 +228,7 @@ it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior sh
     );
 
     expect(result).toEqual({ shell: "/bin/bash", previousShell: "/bin/zsh" });
-    expect(calls).toEqual(["chsh -s /bin/bash"]);
+    expect(calls).toEqual(["id -un", "chsh -s /bin/bash"]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -242,7 +246,7 @@ it.effect("Login reconciler unapply restores the captured previous shell", () =>
       applyCtx(capturing("me", LOGIN_SHELL_OUTPUT, calls)),
     );
 
-    expect(calls).toEqual(["chsh -s /bin/zsh"]);
+    expect(calls).toEqual(["id -un", "chsh -s /bin/zsh"]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
@@ -260,5 +264,42 @@ it.effect("Login reconciler unapply is a no-op when nothing was ever captured", 
     );
 
     expect(calls).toEqual([]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+/**
+ * The elevated form names the user, and that is the whole point.
+ *
+ * `chsh -s <shell>` with no username changes the *current* user's shell and
+ * authenticates through PAM, which has nowhere to prompt in a non-interactive
+ * deploy — so this resource only ever worked where the process was already root
+ * or the system's `chsh` happened to be permissive. But `sudo chsh -s <shell>` on
+ * its own would change *root's* login shell, which is emphatically not what the
+ * recipe asked for. Asserting the username is present is asserting the difference
+ * between changing the right account and the wrong one.
+ */
+it.effect("under sudo, chsh names the user rather than changing root's shell", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const shellsPath = path.join(dir, "shells");
+    yield* fs.writeFileString(shellsPath, UBUNTU_ETC_SHELLS);
+
+    const reconciler = yield* makeLoginReconcilerAt(shellsPath);
+    const calls: string[] = [];
+    const props = { shell: "/bin/bash" };
+    const observed = yield* reconciler.observe(
+      props,
+      planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)),
+    );
+    const desired = yield* reconciler.desired(props);
+
+    yield* reconciler.apply(
+      { props, observed, desired },
+      applyCtx(capturing("me", LOGIN_SHELL_OUTPUT, calls), "sudo"),
+    );
+
+    expect(calls).toEqual(["id -un", "sudo chsh -s /bin/bash me"]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
