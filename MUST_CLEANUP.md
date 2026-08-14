@@ -178,6 +178,21 @@ it", which is exactly the distinction this repo claims to care about.
 **Fix:** a one-line decision per resource, in its own doc comment. Not
 necessarily an implementation.
 
+### 1.3 `ExampleCoverage` checks resources, not compositions
+
+`packages/machine/test/ExampleCoverage.test.ts` enumerates every
+`Resource<T>("Type.Name")` and fails if one is unexercised. It does not look at
+the composition functions — `gitIdentity`, `aiSkill`, `sshHost`, `envVar`,
+`func`, and about a dozen more — so those can rot undetected.
+
+Found the way such things are found: `shell`'s `func` composition exists, is
+backed by `ShellBackend.renderFunction`, has its own tests, and appears in
+neither `MAP.md`'s table nor the reference example. The resource guard could not
+have caught it.
+
+**Fix:** extend the same source-reading check to exported composition functions,
+or accept the gap explicitly and say why.
+
 ---
 
 ## Tier 1b — wrong results (from the audit, not independently re-verified)

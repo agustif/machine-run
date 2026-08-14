@@ -54,7 +54,6 @@ export default Alchemy.Stack<{}>()(
       name: "Your Name",
       email: "you@example.com",
       pathGlob: "~/**",
-      gitconfigPath: "~/.gitconfig",
       personaConfigPath: "~/.gitconfig-personal",
     });
 

@@ -15,15 +15,6 @@ export interface GitPersonaProps {
   /** Absolute path to this persona's own generated config file, e.g. `~/.gitconfig-personal`. */
   personaConfigPath: string;
   /**
-   * @deprecated Unused. {@link Config} always writes the one global scope,
-   * so there is no longer a file path for this composition to choose — see
-   * this module's doc comment. Kept only so `@machine-run/git-identity`'s
-   * re-export doesn't break existing callers that still pass it (currently
-   * `examples/example-machine`); drop it once those are updated, tracked
-   * alongside removing `git-identity` itself before 1.0 (`docs/git-notes.md`).
-   */
-  gitconfigPath?: string;
-  /**
    * If set (with `shellRcPath`), switches the active `gh` CLI account to this
    * login via a directory-change hook (rendered by `@machine-run/shell` for
    * whichever `shell` is configured) whenever you `cd` under `pathGlob`.
@@ -112,13 +103,12 @@ export const renderGhAccountSwitchCommand = (ghAccount: string): string =>
  * settable `git config` key — `git config --global
  * "includeIf.gitdir:/x/**.path" /y"` produces byte-for-byte the same
  * `[includeIf "gitdir:/x/**"]\n\tpath = /y` stanza a hand-written one would.
- * There is no longer a `gitconfigPath` prop, because {@link Config} always
- * operates on the one global scope — the caller no longer has to say which
- * file, only what the key/value is.
+ * There is no `gitconfigPath` prop, because {@link Config} always operates on
+ * the one global scope: a caller says what the key and value are, never which
+ * file holds them.
  *
  * The `gh` account hook delegates to `@machine-run/shell`'s `hook`
- * composition rather than rendering zsh/bash/fish syntax by hand, the way
- * this module used to. `Shell.hook` renders each shell's real directory-
+ * composition rather than rendering zsh/bash/fish syntax by hand. `Shell.hook` renders each shell's real directory-
  * change mechanism (container-verified per its own doc comment) and passes
  * the `command` through verbatim rather than translating between dialects —
  * so the glob still has to be converted from git's `gitdir:` syntax first,

@@ -6,10 +6,9 @@ forget a package's `providers()`, so it is only correct while it is complete.
 - [x] **Add every package that defines a resource.** All ten are merged today:
       `ai`, `dotfiles`, `git`, `macos-defaults`, `runtimes`, `secrets`, `shell`,
       `system-packages`, `system-settings`, `tailscale`, plus `coreServices()`
-      and `CommandExecutorLive()`. `@machine-run/ssh` is deliberately absent
-      because it defines no resource — it composes `dotfiles` ones — and that
-      stays correct only until `Ssh.Key` lands. See
-      `packages/ssh/TASKS.md`.
+      and `CommandExecutorLive()`. `@machine-run/ssh` and `@machine-run/system-services` are
+      included too — ssh gained `Ssh.Key` and `Ssh.KnownHost`, and
+      `AggregateCompleteness.test.ts` demanded both the moment they existed.
 - [x] **A test that fails when a package is missing from the merge.** Closed by
       `test/AggregateCompleteness.test.ts`. It reads source rather than
       resolving the layer, because a `Layer` carries no runtime list of what it

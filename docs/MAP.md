@@ -41,7 +41,6 @@ was checked against it", never "this resource has been deployed".
    │  @machine-run/machine — ONE aggregate layer, so a recipe cannot forget   │
    │  a package's providers(). Missing one is a *runtime* "service not        │
    │  found" at deploy time, not a tsc error, which is why this exists.       │
-   │  NOT YET AGGREGATED: system-services — see docs/TASKS.md.               │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │
    ┌──────────────────────────────────────┴──────────────────────────────────┐
@@ -167,7 +166,7 @@ functions.
 ```
 git    gitIdentity · gitIgnore · gitAttributes · gitAlias · gitSigning
        gitCredentialHelper · gitHooksPath · gitConfigFile
-shell  envVar · pathEntry · alias · hook · ensureLoginShellLoadsRc
+shell  envVar · pathEntry · alias · func · hook · ensureLoginShellLoadsRc
 ai     aiSkill · aiConfig
 ssh    sshHost
 system-packages  packages(manager, names) → N independent System.Package
@@ -362,9 +361,11 @@ Provider.delete({olds, output, session})
          └─ observe → already gone? skip : unapply({olds, observed}, ctx)
 ```
 
-**Exactly one resource implements `unapply`** — `Shell.Login`, which can put
-back the shell it recorded. Which of the other 17 can honestly reverse
-themselves is still open, and mostly the answer is "not obviously": uninstalling
+**Three resources implement `unapply`** — `Shell.Login` puts back the shell it
+recorded, `System.Setting` resets a key to its schema default, and
+`Git.Maintenance` unregisters one repository (deliberately never `stop`, which
+is machine-wide and would silence every other registered repo). Which of the
+other 20 can honestly reverse themselves is still open, and mostly the answer is "not obviously": uninstalling
 a package someone may now depend on, or deleting a secret file, is not clearly
 the right response to a line being removed from a recipe. This is why the
 removal policy defaults to `retain`.

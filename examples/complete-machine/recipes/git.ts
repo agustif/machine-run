@@ -35,7 +35,6 @@ export const git = Effect.gen(function* () {
     email: "you@example.com",
     pathGlob: "~/**",
     personaConfigPath: "~/.gitconfig-personal",
-    gitconfigPath: "~/.gitconfig",
   });
 
   // A clone. `branch` applies only to a fresh clone: `apply` never runs

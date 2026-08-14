@@ -26,15 +26,6 @@ tool: "node" }` — a combination that was never legal (rustup only ever
       extend `Resource<...>` at all. Verified directly with a throwaway
       `Resource<"X", Struct, TaggedUnion>` repro, not assumed from the error
       text. See `Tool.ts`'s `RuntimeToolState` doc comment.
-- [ ] **`examples/complete-machine/recipes/runtimes.ts` still uses the old
-      `{ manager, tool, version }` shape** and needs updating to the new
-      tagged cases. Out of scope for the change that introduced the new
-      shape (examples/ was explicitly off limits), and the example package
-      was already failing to build beforehand for unrelated reasons (a
-      pre-existing `@machine-run/secrets` export mismatch breaks `packages/ai`
-      and `packages/tailscale`, which `complete-machine` also depends on) —
-      so this was not independently verified against a green build, only
-      against the new `RuntimeToolProps` type directly.
 
 ## Verification
 
