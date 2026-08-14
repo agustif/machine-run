@@ -3,6 +3,7 @@ import * as Layer from "effect/Layer";
 import { BackupsLive } from "./Backups.ts";
 import { FileLockLive } from "./FileLock.ts";
 import { MachinePathsLive } from "./Paths.ts";
+import { PlatformLive } from "./Platform.ts";
 
 /**
  * The machine-wide services every file-touching package depends on: where `~`
@@ -17,6 +18,6 @@ import { MachinePathsLive } from "./Paths.ts";
  * nothing else would.
  */
 export const services = () =>
-  Layer.mergeAll(BackupsLive(), FileLockLive(), NodeCrypto.layer).pipe(
+  Layer.mergeAll(BackupsLive(), FileLockLive(), NodeCrypto.layer, PlatformLive()).pipe(
     Layer.provideMerge(MachinePathsLive()),
   );

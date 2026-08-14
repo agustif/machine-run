@@ -1,10 +1,12 @@
-import { isNotFound, MachinePaths } from "@machine-run/core";
+import { isNotFound, MachinePaths, Platform, Windows } from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import * as UndefinedOr from "effect/UndefinedOr";
 import { type PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 
@@ -74,6 +76,16 @@ export type DirectoryProps = typeof DirectoryProps.Type;
 export const DirectoryState = Schema.Struct({
   path: Schema.String,
   mode: Schema.optionalKey(Schema.Number),
+  /**
+   * `icacls <path>`'s raw listing, on Windows only.
+   *
+   * Windows has no POSIX mode to observe: Node reports `0o666` for every file
+   * and `chmod` only toggles the read-only bit, so comparing `mode` there is
+   * comparing a constant and reports drift forever. The ACL is what actually
+   * carries the intent, and it has to be captured in `observe` because `matches`
+   * is synchronous and cannot shell out.
+   */
+  acl: Schema.optionalKey(Schema.String),
 });
 
 export type DirectoryState = typeof DirectoryState.Type;
@@ -82,6 +94,34 @@ export interface Directory extends Resource<"Machine.Directory", DirectoryProps,
 
 export const Directory = Resource<Directory>("Machine.Directory");
 
+/**
+ * Whether an observed directory's permissions satisfy the desired mode.
+ *
+ * Two genuinely different questions behind one name. On POSIX the mode is the
+ * truth and equality is the test. On Windows there is no mode to compare, so the
+ * test is whether the live ACL grants no more than the mode intends — and an ACL
+ * that could not be read is *not* treated as satisfied, because "cannot confirm"
+ * must converge by re-applying rather than by assuming.
+ */
+const modeSatisfied = (
+  platform: typeof Platform.Service,
+  observed: DirectoryState,
+  desired: DirectoryState,
+): boolean => {
+  // An unset desired mode means the recipe does not constrain permissions.
+  if (desired.mode === undefined) return true;
+  if (!platform.isWindows) return observed.mode === desired.mode;
+  return Windows.aclSatisfiesMode(
+    UndefinedOr.match(observed.acl, {
+      onUndefined: () => Option.none<string>(),
+      onDefined: (acl) => Option.some(acl),
+    }),
+    observed.path,
+    desired.mode,
+    "directory",
+  );
+};
+
 export const makeDirectoryReconciler: Effect.Effect<
   Reconciler<
     DirectoryProps,
@@ -89,15 +129,16 @@ export const makeDirectoryReconciler: Effect.Effect<
     PlatformError | DirectoryPathIsFile | DirectoryPathUnreadable
   >,
   never,
-  FileSystem.FileSystem | MachinePaths
+  FileSystem.FileSystem | MachinePaths | Platform
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const paths = yield* MachinePaths;
+  const platform = yield* Platform;
 
   return {
     address: (props) => paths.expand(props.path),
 
-    observe: (props) =>
+    observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
         const info = yield* fs
@@ -113,7 +154,17 @@ export const makeDirectoryReconciler: Effect.Effect<
         if (info.type !== "Directory") {
           return yield* Effect.fail(new DirectoryPathIsFile({ path: target }));
         }
-        return Option.some({ path: target, mode: Number(info.mode) & 0o777 });
+        const mode = Number(info.mode) & 0o777;
+        if (!platform.isWindows) return Option.some({ path: target, mode });
+        // A failed listing is left absent rather than raised: the directory is
+        // there, and `matches` treats a missing ACL as "cannot confirm", which
+        // converges by re-applying rather than by claiming satisfaction.
+        const acl = yield* Windows.readAcl(ctx.exec, target);
+        return Option.some({
+          path: target,
+          mode,
+          ...Option.match(acl, { onNone: () => ({}), onSome: (value) => ({ acl: value }) }),
+        });
       }),
 
     desired: (props) =>
@@ -123,10 +174,7 @@ export const makeDirectoryReconciler: Effect.Effect<
       }),
 
     matches: (observed, desired) =>
-      observed.path === desired.path &&
-      // An unset desired mode means the recipe does not constrain
-      // permissions, so any observed mode satisfies it.
-      (desired.mode === undefined || observed.mode === desired.mode),
+      observed.path === desired.path && modeSatisfied(platform, observed, desired),
 
     drift: (observed, desired): Drift => {
       const fields: DriftField[] = [];
@@ -151,7 +199,7 @@ export const makeDirectoryReconciler: Effect.Effect<
       return fields;
     },
 
-    apply: ({ props, desired }) =>
+    apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
         const target = desired.path;
         // `mode` here only takes effect when `makeDirectory` actually creates
@@ -164,7 +212,18 @@ export const makeDirectoryReconciler: Effect.Effect<
           recursive: true,
           ...(props.mode !== undefined ? { mode: props.mode } : {}),
         });
-        if (props.mode !== undefined) yield* fs.chmod(target, props.mode);
+        // `chmod` on Windows only toggles the read-only bit, so a mode set that
+        // way is never observable and this resource would re-apply forever. The
+        // ACL is what carries the intent there.
+        if (props.mode !== undefined) {
+          yield* Boolean.match(platform.isWindows, {
+            onFalse: () => fs.chmod(target, props.mode ?? 0),
+            onTrue: () =>
+              Windows.applyMode(ctx.exec, target, props.mode ?? 0, "directory").pipe(
+                Effect.orElseSucceed(() => undefined),
+              ),
+          });
+        }
         const info = yield* fs.stat(target);
         return { path: target, mode: Number(info.mode) & 0o777 };
       }),

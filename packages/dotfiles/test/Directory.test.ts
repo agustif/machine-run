@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -12,7 +12,9 @@ import {
   type DirectoryProps,
 } from "../src/Directory.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 /** Builds a reconciler and hands it a real temp directory to work in. */
 const withTempDir = <A, E>(
@@ -184,4 +186,54 @@ it.effect(
         expect(yield* fs.exists(target)).toBe(true);
       }),
     ).pipe(Effect.provide(layer)),
+);
+
+/**
+ * The Windows branch, exercised from a Mac by providing `Platform` as `win32`.
+ *
+ * This is the whole reason `Platform` is a service rather than a
+ * `process.platform` read: without it the branch that decides whether a mode is
+ * satisfied on Windows could only be tested on Windows, which is where it was
+ * silently failing 4 of this file's tests before.
+ *
+ * The listing is the `icacls` shape `packages/core/test/windows/Icacls.test.ts`
+ * pins — owner-only rights, which is what 0o700 intends.
+ */
+const OWNER_ONLY_ACL =
+  "C:\\data OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+
+const windowsLayer = Layer.mergeAll(MachinePathsLive(), PlatformFor("win32")).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
+
+it.effect("on Windows a mode is satisfied by the ACL, not by comparing mode bits", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeDirectoryReconciler;
+    const desired = { path: "C:\\data", mode: 0o700 };
+
+    // Node reports 0o666 for every directory on Windows, so mode equality can
+    // never hold — this is exactly the comparison that reported drift forever.
+    const withAcl = { path: "C:\\data", mode: 0o666, acl: OWNER_ONLY_ACL };
+    expect(reconciler.matches(withAcl, desired)).toBe(true);
+
+    // An ACL that could not be read is "cannot confirm", which must converge by
+    // re-applying rather than by assuming satisfaction.
+    const withoutAcl = { path: "C:\\data", mode: 0o666 };
+    expect(reconciler.matches(withoutAcl, desired)).toBe(false);
+
+    // A broader ACL is real drift.
+    const broadened = {
+      path: "C:\\data",
+      mode: 0o666,
+      acl: OWNER_ONLY_ACL.replace("OWNER RIGHTS:(RD", "Everyone:(WD,AD)\nC:\\data OWNER RIGHTS:(RD"),
+    };
+    expect(reconciler.matches(broadened, desired)).toBe(false);
+  }).pipe(Effect.provide(windowsLayer)),
+);
+
+it.effect("an unconstrained mode is satisfied on Windows without consulting any ACL", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeDirectoryReconciler;
+    expect(reconciler.matches({ path: "C:\\data", mode: 0o666 }, { path: "C:\\data" })).toBe(true);
+  }).pipe(Effect.provide(windowsLayer)),
 );
