@@ -13,11 +13,14 @@ Legend, used consistently below:
 | `✗` | Planned. Does not exist. |
 | `!` | Implemented and known to be **wrong or incomplete** somewhere |
 
-The distinction between `✓` and `~` is the whole point of this file. 18 resource
-kinds exist and **none of them has ever been run by the Alchemy engine** —
-`alchemy plan` cannot complete (see [V2-PLAN](./V2-PLAN.md#the-blocker)). So
-`✓` means "this command's output was captured from a real system and our parser
-was checked against it", never "this resource has been deployed".
+The distinction between `✓` and `~` is the whole point of this file. It has
+changed meaning once: the engine **now runs**, so seven resource kinds have been
+through a real `plan` → `deploy` → empty-second-plan → drift → `destroy` cycle
+in a container (`scripts/deploy-check.sh`) — `Machine.File`, `ManagedBlock`,
+`Directory`, `Symlink`, `SecretFile`, `Exec`, `System.Package`. For the other
+sixteen, `✓` still means only "this command's output was captured from a real
+system and our parser was checked against it", not "this resource has been
+deployed".
 
 ---
 
@@ -475,10 +478,12 @@ Every item here is a tracked task: cross-cutting ones in
 reasoning and the judgement calls.
 
 ```
-✗ P0  A working `plan`. Bisect alchemy versions / drive Plan+Apply directly and
-      bypass the CLI / wait upstream. Then: deploy → EMPTY SECOND PLAN (the
-      first genuine test of every observe in the repo) → drift each kind →
-      destroy leaves the machine untouched.
+✓ P0  DONE. plan → deploy → EMPTY SECOND PLAN → drift every kind → destroy
+      leaves the machine untouched. All of it passes in a container via
+      scripts/deploy-check.sh. The blocker was ours: every recipe called
+      Alchemy.Stack<{}>()(...), whose no-arg branch returns a cross-stack
+      *reference* builder that discards the options and the effect. See
+      docs/notes/plan-blocker-repro.md.
 
 ✗ P2  Resource-type rename. NOT a state-schema break and NOT release-gating —
       Alchemy's Resource(type, { aliases }) carries pre-rename names and
@@ -568,7 +573,7 @@ CI                check (ubuntu)          build + test + lint     ✓ green
                   verify winget / choco   real Windows output      ✓ green
                   verify defaults / mas   real macOS runner        ✓ green
                   verify dnf / pacman     fedora + arch containers ✓ green
-                  deploy-check            alchemy plan             ✗ RED (P0)
+                  deploy-check            plan/deploy/destroy      ✓ GREEN
 
 containers        ubuntu:24.04 · fedora:latest · archlinux:latest — used to
                   verify apt/dnf/pacman/yay/flatpak/gsettings/dconf/shells

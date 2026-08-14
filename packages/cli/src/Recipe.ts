@@ -139,8 +139,12 @@ export const resolveRecipePath = (
  * its own `Output.isStackRefExpr` reads, so this stays true to how Alchemy
  * itself distinguishes them rather than inventing a second rule.
  */
-const isStackReference = (value: object): value is { readonly stack: string } =>
-  "kind" in value && value.kind === "StackRefExpr" && "stack" in value;
+const isStackReference = (value: unknown): value is { readonly stack: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  "kind" in value &&
+  value.kind === "StackRefExpr" &&
+  "stack" in value;
 
 export const loadRecipe = (
   absolutePath: string,

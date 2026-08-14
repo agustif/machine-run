@@ -135,7 +135,13 @@ sudo apt-get remove -y -qq cowsay || true
 note "alchemy plan (post-drift — every drifted resource must be reported)"
 run_plan post-drift
 plan3="$(plan_log post-drift)"
-assert_contains "drifted Machine.File is detected" "$plan3" "gitconfig-personal"
+# `persona-config`, not `gitconfig-personal`: `plan` prints resource *ids*, and
+# this resource's id is `persona-config` while `~/.gitconfig-personal` is only
+# its path. The other six assertions below pass because each of those resources
+# happens to be named after the thing it manages; this one is not, so the
+# original pattern could never match and reported a false failure for a drift
+# that was in fact detected every time.
+assert_contains "drifted Machine.File is detected" "$plan3" "persona-config"
 assert_contains "drifted Machine.ManagedBlock is detected" "$plan3" "shell-path"
 assert_contains "drifted Machine.Directory is detected" "$plan3" "config-dir"
 assert_contains "drifted Machine.Symlink is detected" "$plan3" "motd-link"

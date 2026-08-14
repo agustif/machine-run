@@ -35,25 +35,32 @@ as a changelog.
 
 ---
 
-## P0 — the blocker
+## P0 — closed
 
-**`alchemy plan` cannot complete for any stack, including an empty one with no
-machine-run code in it.** Bisected and independently reproduced on two effect
-versions, on host and in container. It is an upstream defect (an `undefined`
-reaching Effect's fiber loop from Alchemy's plan path) compounded by the CLI
-reporting *nothing at all* — exit 1, empty stdout and stderr, even at
-`--log-level all`. Detail in [V2-PLAN.md](./V2-PLAN.md#the-blocker).
+**`plan`, `deploy`, drift detection and `destroy` all work.** The blocker was
+ours, not upstream: every recipe called `Alchemy.Stack<{}>()(name, options, effect)`,
+and `Stack()` with no arguments returns a cross-stack *reference* builder that
+discards the options and the effect. Full causal chain and the instrumentation
+that found it: [notes/plan-blocker-repro.md](./notes/plan-blocker-repro.md).
 
-- [ ] **Decide how to proceed**: bisect Alchemy versions for one whose `plan`
-      completes; or drive `Plan`/`Apply` directly and bypass the CLI (the stack
-      effect runs fine standalone); or wait on upstream. Report the silent
-      error handling upstream regardless.
-- [ ] Once unblocked, in order: `plan` → `deploy` → **empty second plan**
-      (idempotence, and the first genuine test of every `observe`) → drift each
-      resource kind and confirm detection → `destroy` leaves the machine
-      untouched.
+`scripts/deploy-check.sh` now runs the whole sequence in a container and passes:
 
-Everything below is downstream of that.
+- [x] `plan` proposes creates
+- [x] `deploy` completes without error
+- [x] **empty second plan** — no creates, updates, deletes or replaces. This is
+      the first genuine test every `observe` in the repo has ever had.
+- [x] drift is detected for all seven kinds the check drifts (`Machine.File`,
+      `ManagedBlock`, `Directory`, `Symlink`, `SecretFile`, `Exec`,
+      `System.Package`)
+- [x] `destroy` leaves the machine untouched, retain being the default
+
+One finding from running it: the `Machine.File` drift assertion had been
+grepping for the file path (`gitconfig-personal`) while `plan` prints resource
+ids (`persona-config`), so it reported a false failure for a drift that was
+always detected. The other six passed only because each of those resources is
+named after the thing it manages.
+
+What follows is no longer blocked.
 
 ---
 
@@ -71,9 +78,8 @@ Fourteen packages arrived faster than the invariants tying them together.
       settle it after the first real `plan`/`deploy`, when there is evidence
       about which split actually reads well, and list every old name in
       `aliases`.
-- [ ] **`observe` → `Option<State>`** — written up in
-      `packages/engine/TASKS.md` as one atomic change with the full implementer
-      list. Largest single contributor to a lint backlog now at 671 warnings.
+- [x] **`observe` → `Option<State>`** — done, as one atomic change across every
+      reconciler and its tests. `noNullish` 531 → 457.
 - [ ] **Two ways to express a directory** — `directoryMode` props on `File`,
       `ManagedBlock` and `SecretFile` versus `Machine.Directory`.
 - [x] **The aggregate layer has no completeness test.** Closed by
@@ -87,22 +93,22 @@ Fourteen packages arrived faster than the invariants tying them together.
 
 ## P1 — Effect-native cleanup
 
-All 25 `oxlint-plugin-effect` rules are enabled and errors are at zero; see
-[LINTING.md](./LINTING.md) for the tier policy and the primitive each pattern
-migrates toward. The `warn` counts are the backlog, and they grew with each new
-package rather than shrinking — 671 across seven rules:
+All 25 `oxlint-plugin-effect` rules are enabled, **every override block is
+gone**, and errors are at zero with `noAs` promoted to `error` — see
+[LINTING.md](./LINTING.md) for the tier policy, the primitive each pattern
+migrates toward, and the three inline exceptions that remain. The `warn` counts
+are the backlog, currently 695 across seven rules:
 
-- [ ] **`noNullish`** — 342 of them. Split it: roughly two thirds are Alchemy's
-      contract (`diff` returns `undefined`, attributes are JSON, optional props
-      are `?`). The rest are ours, chiefly `observe` above.
-- [ ] **`noTernary`** — 151. The rule exists because Effect has better
+- [ ] **`noNullish`** — 457, down from 531 with the `observe` migration. Much of
+      the remainder is Alchemy's contract (`diff` returns `undefined`, attributes
+      are JSON, optional props are `?`) rather than ours.
+- [ ] **`noTernary`** — 160. The rule exists because Effect has better
       control-flow primitives, not because ternaries are ugly.
       `UndefinedOr.match`, `Boolean.match`, `Match`.
-- [ ] **`noConditionalEmptyObjectSpread`** — 56. Centralise the omit-a-key
+- [ ] **`noConditionalEmptyObjectSpread`** — 45. Centralise the omit-a-key
       pattern as one helper in `core`.
-- [ ] **`noAs`** — 49. Audit for genuine assertions among the `as const`s.
-- [ ] **The tail** — `noRuntimeTypeof` 11, `noNodeBuiltinImport` 6,
-      `noUnknownParameters` 4. Small enough to clear in one pass each.
+- [ ] **The tail** — `noNodeBuiltinImport` 16, `noRuntimeTypeof` 12,
+      `noUnknownParameters` 3. Small enough to clear in one pass each.
 
 ---
 
@@ -111,7 +117,11 @@ package rather than shrinking — 671 across seven rules:
 Writing [MAP.md](./MAP.md) meant checking claims instead of recalling them, and
 these came out of it. None was tracked anywhere before.
 
-- [ ] **One resource in seventeen implements `unapply`** — `Shell.Login`. The
+- [ ] **Three resource kinds in twenty-three implement `unapply`** —
+      `Shell.Login`, `Git.Maintenance`, `System.Setting`. So `destroy` is a
+      no-op for the other twenty, which the container check confirms is *safe*
+      (retain is the default and nothing was clobbered) but which also means
+      `destroy` reports success having reverted almost nothing. The
       unmanage story is therefore mostly unbuilt, not merely undecided. The
       per-package backlogs now carry the judgement for each: `system-settings`
       *should* have one (`gsettings reset` is a real revert), `tailscale`
