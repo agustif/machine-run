@@ -162,6 +162,28 @@ it.effect(
 );
 
 it.effect(
+  "launchd backend: an unverified exit code from `launchctl list` raises rather than reporting not-loaded",
+  () =>
+    Effect.gen(function* () {
+      const path = yield* Path.Path;
+      const fs = yield* FileSystem.FileSystem;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const plist = path.join(dir, "com.example.thing.plist");
+      yield* fs.writeFileString(plist, "<plist/>");
+
+      // Only exit 113 is verified as "not loaded" (see `Launchd.ts`'s doc
+      // comment); any other exit code — a permissions problem, a crashed
+      // launchctl, anything unverified — must propagate rather than being
+      // read as the same ordinary "not loaded" state.
+      const backend = makeLaunchdBackend({ home: dir, path, fs });
+      const result = yield* Effect.result(
+        backend.observe("com.example.thing", plist, failingExec(1, "some other failure\n")),
+      );
+      expect(result._tag).toBe("Failure");
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
   "launchd backend: the default plist path is <home>/Library/LaunchAgents/<name>.plist",
   () =>
     Effect.gen(function* () {
@@ -237,12 +259,17 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const backend = makeSystemdUserBackend();
-      // Real captured: `systemctl --user is-enabled mrtest.service` → stdout
-      // "disabled", exit 1. `systemctl --user is-active mrtest.service` →
-      // stdout "inactive", exit 3.
+      // Real captured (container-verified, stdout/stderr captured
+      // separately): `systemctl --user is-enabled mrtest.service` → stdout
+      // "disabled", exit 1, **empty stderr**. `systemctl --user is-active
+      // mrtest.service` → stdout "inactive", exit 3, empty stderr.
+      // `UnexpectedExit` only carries `stderr` (not `stdout`), which is why
+      // these fixtures put the empty string there rather than the printed
+      // word — see `SystemdUser.ts`'s doc comment for why that emptiness is
+      // exactly the signal `isEnabledExitCode` keys off.
       const { exec } = queuedExec([
-        { exitCode: 1, stderr: "disabled\n" },
-        { exitCode: 3, stderr: "inactive\n" },
+        { exitCode: 1, stderr: "" },
+        { exitCode: 3, stderr: "" },
       ]);
       const observed = yield* backend.observe("mrtest.service", undefined, exec);
       expect(observed).toEqual({ installed: true, enabled: false, running: false });
@@ -255,8 +282,8 @@ it.effect(
     Effect.gen(function* () {
       const backend = makeSystemdUserBackend();
       // Real captured: `systemctl --user is-enabled does-not-exist.service` →
-      // stdout "not-found", exit 4.
-      const { exec, calls } = queuedExec([{ exitCode: 4, stderr: "not-found\n" }]);
+      // stdout "not-found", exit 4, empty stderr.
+      const { exec, calls } = queuedExec([{ exitCode: 4, stderr: "" }]);
       const observed = yield* backend.observe("does-not-exist.service", undefined, exec);
       expect(observed).toEqual({ installed: false, enabled: false, running: false });
       expect(calls).toHaveLength(1);
@@ -270,12 +297,61 @@ it.effect(
     Effect.gen(function* () {
       const backend = makeSystemdUserBackend();
       // Real captured, after `systemctl --user start mrtest.service`:
-      // `is-enabled mrtest.service` → stdout "disabled", exit 1 (unchanged —
-      // starting never enables). `is-active mrtest.service` → stdout
-      // "active", exit 0.
-      const { exec } = queuedExec([{ exitCode: 1, stderr: "disabled\n" }, { stdout: "active\n" }]);
+      // `is-enabled mrtest.service` → stdout "disabled", exit 1, empty
+      // stderr (unchanged — starting never enables). `is-active
+      // mrtest.service` → stdout "active", exit 0.
+      const { exec } = queuedExec([{ exitCode: 1, stderr: "" }, { stdout: "active\n" }]);
       const observed = yield* backend.observe("mrtest.service", undefined, exec);
       expect(observed).toEqual({ installed: true, enabled: false, running: true });
+    }),
+);
+
+it.effect(
+  "systemd-user backend: is-enabled exit 1 with non-empty stderr (bus unreachable) raises rather than " +
+    "reporting disabled — the exact hazard this fix exists for",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeSystemdUserBackend();
+      // Real captured (container-verified): the *same* still-genuinely-disabled
+      // unit, run with no D-Bus user session reachable (`XDG_RUNTIME_DIR`
+      // unset, no PAM session — the cron/ssh-without-lingering shape) —
+      // `systemctl --user is-enabled mrtest2.service` → exit 1, stderr
+      // "Failed to connect to bus: No medium found\n". Indistinguishable from
+      // genuine "disabled" by exit code alone; only `stderr` tells them apart.
+      const { exec } = queuedExec([
+        { exitCode: 1, stderr: "Failed to connect to bus: No medium found\n" },
+      ]);
+      const result = yield* Effect.result(backend.observe("mrtest2.service", undefined, exec));
+      expect(result._tag).toBe("Failure");
+    }),
+);
+
+it.effect(
+  "systemd-user backend: is-active exit 1 (bus unreachable) raises rather than reporting not-running",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeSystemdUserBackend();
+      // Real captured: same bus-unreachable shape as above, this time from
+      // `is-active` — exit 1 with the bus error on stderr, a different exit
+      // code from the verified "inactive" (3), so this already propagates
+      // without needing a `stderr` check.
+      const { exec } = queuedExec([
+        { exitCode: 1, stderr: "" },
+        { exitCode: 1, stderr: "Failed to connect to bus: No medium found\n" },
+      ]);
+      const result = yield* Effect.result(backend.observe("mrtest2.service", undefined, exec));
+      expect(result._tag).toBe("Failure");
+    }),
+);
+
+it.effect(
+  "systemd-user backend: is-enabled exit 5 (unverified) raises rather than reporting disabled",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeSystemdUserBackend();
+      const { exec } = queuedExec([{ exitCode: 5, stderr: "" }]);
+      const result = yield* Effect.result(backend.observe("mrtest.service", undefined, exec));
+      expect(result._tag).toBe("Failure");
     }),
 );
 

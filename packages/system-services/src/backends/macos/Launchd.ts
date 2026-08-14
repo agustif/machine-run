@@ -84,6 +84,20 @@ import type { ServiceBackend, ServiceBackendError, ServiceObservation } from "..
  * collapse `system-settings`' backends make for a missing key, not a
  * failure to propagate.
  *
+ * Only exit `113` collapses this way. Re-verified directly on this machine
+ * (macOS Tahoe, read-only, 2026-08-14) for exactly the two real shapes
+ * above — a loaded job (`launchctl list com.apple.Finder`, running and
+ * `com.apple.progressd`, loaded-but-idle) both exit `0`; an unknown label
+ * (`launchctl list com.example.doesnotexist12345`) exits `113` — and, unlike
+ * `systemctl --user` (see `../linux/SystemdUser.ts`'s doc comment), stripping
+ * the environment entirely (`env -i launchctl list ...`) still resolved the
+ * job correctly rather than producing a bus-style connection failure:
+ * `launchctl`'s legacy subcommands reach launchd through the calling
+ * process's own bootstrap port, not a discoverable-by-env-var socket, so no
+ * analogous ambiguous exit code was found for this backend. Any exit code
+ * other than `113` is therefore unverified and propagates as a typed error
+ * rather than being read as "not loaded".
+ *
  * ## The one state launchd genuinely cannot occupy
  *
  * `enabled: false, running: true` is not reachable for launchd: nothing can
@@ -111,12 +125,20 @@ export const makeLaunchdBackend = (deps: {
   ): Effect.Effect<{ enabled: boolean; running: boolean }, ServiceBackendError> =>
     exec({ command: Sh.sh("launchctl", "list", name), shell: true }).pipe(
       Effect.map((result) => ({ enabled: true, running: isRunning(result.stdout) })),
-      // A non-zero exit means launchd has never heard of this label — real
-      // captured shape: exit 113, "Could not find service ... in domain for
-      // port" on stderr. An ordinary "not loaded" state, not a failure.
+      // Only the verified exit 113 means launchd has never heard of this
+      // label — real captured shape: "Could not find service ... in domain
+      // for port" on stderr. Every other exit code (or a non-"UnexpectedExit"
+      // failure shape, e.g. a spawn failure) is unverified and propagates,
+      // rather than being read as the same ordinary "not loaded" state — see
+      // this module's doc comment for why exit 113 is the only one checked.
       Effect.catch((error) =>
-        Match.value(error.reason._tag).pipe(
-          Match.when("UnexpectedExit", () => Effect.succeed({ enabled: false, running: false })),
+        Match.value(error.reason).pipe(
+          Match.tag("UnexpectedExit", (reason) =>
+            Match.value(reason.exitCode).pipe(
+              Match.when(113, () => Effect.succeed({ enabled: false, running: false })),
+              Match.orElse(() => Effect.fail(error)),
+            ),
+          ),
           Match.orElse(() => Effect.fail(error)),
         ),
       ),

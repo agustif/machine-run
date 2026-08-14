@@ -61,6 +61,48 @@ import type { ServiceBackend, ServiceObservation } from "../../Backend.ts";
  * further action" and non-zero otherwise, `is-active` exits 0 only for
  * `active` — is exactly what was observed above.
  *
+ * ## The bus-unreachable hazard — also live-verified, in the same container
+ *
+ * The reason `observeEnabled`/`observeActive` do not simply collapse *every*
+ * non-zero exit: `systemctl --user` needs a reachable D-Bus user session,
+ * which does not exist yet under cron, under `ssh` without `loginctl
+ * enable-linger`, or before the first GUI/SSH login of a session. Reproduced
+ * live in the same container as above, with `XDG_RUNTIME_DIR` unset and no
+ * PAM session (`env -i ... runuser -u testuser -- systemctl --user
+ * is-enabled mrtest2.service`, the same still-genuinely-disabled unit used
+ * above):
+ *
+ * ```
+ * $ systemctl --user is-enabled mrtest2.service   # no bus, unit IS disabled
+ * Failed to connect to bus: No medium found        # stderr, exit 1
+ * $ systemctl --user is-active mrtest2.service     # no bus, unit IS inactive
+ * Failed to connect to bus: No medium found        # stderr, exit 1
+ * ```
+ *
+ * For `is-active` this is harmless to tell apart: the verified "genuinely
+ * inactive" exit is `3` (captured above), not `1`, so any exit-`1` `is-active`
+ * failure is already excluded by keeping only `3` as the collapse case.
+ *
+ * For `is-enabled` it is **not** harmless: the verified "genuinely disabled"
+ * exit is also `1` — the exact code the bus failure produces. Exit code
+ * alone cannot tell them apart. What does: `UnexpectedExit` carries `stderr`
+ * (not `stdout`), and the two cases were captured with stdout/stderr
+ * separated —
+ *
+ * ```
+ * # genuinely disabled, real bus:      stdout "disabled\n",  stderr ""
+ * # no bus reachable, same unit: stdout "",             stderr "Failed to connect to bus: No medium found\n"
+ * ```
+ *
+ * — so `isEnabledExitCode` below only reads exit `1` as "disabled" when
+ * `stderr` is empty, and propagates otherwise. Per `AGENTS.md` rule 11 this
+ * is best-effort text classification, not a promise that the exact wording
+ * is a stable contract: the check is deliberately the *narrow* direction
+ * (empty stderr required to collapse) rather than the wide one (non-empty
+ * stderr required to propagate), so an unrecognised future wording fails
+ * safe — it propagates as an error rather than silently reporting
+ * "disabled".
+ *
  * ## Why `enabled` and `running` are independently toggled here, unlike `brew-services`
  *
  * Unlike Homebrew's four coupled verbs (see `backends/macos/BrewServices.ts`),
@@ -71,12 +113,29 @@ import type { ServiceBackend, ServiceObservation } from "../../Backend.ts";
  * calls independently and unconditionally, with no combination requiring a
  * multi-step recipe the way `brew-services` sometimes does.
  */
+/**
+ * Classifies one `is-enabled` `UnexpectedExit` — see this module's doc
+ * comment for the live-captured evidence behind exactly these two branches.
+ * Exit `4` is unambiguous (unit unknown to systemd, regardless of stderr).
+ * Exit `1` collapses to "genuinely disabled" only when `stderr` is empty;
+ * a populated `stderr` (the bus-unreachable case, verified to share this
+ * same exit code) falls through to `Effect.fail`, alongside every other
+ * exit code, none of which were verified.
+ */
 const isEnabledExitCode = (
   exitCode: number,
-): Effect.Effect<{ installed: boolean; enabled: boolean }> =>
+  stderr: string,
+  onUnverified: () => Effect.Effect<{ installed: boolean; enabled: boolean }, CommandError>,
+): Effect.Effect<{ installed: boolean; enabled: boolean }, CommandError> =>
   Match.value(exitCode).pipe(
     Match.when(4, () => Effect.succeed({ installed: false, enabled: false })),
-    Match.orElse(() => Effect.succeed({ installed: true, enabled: false })),
+    Match.when(1, () =>
+      Boolean.match(stderr === "", {
+        onTrue: () => Effect.succeed({ installed: true, enabled: false }),
+        onFalse: onUnverified,
+      }),
+    ),
+    Match.orElse(onUnverified),
   );
 
 const observeEnabled = (
@@ -87,18 +146,32 @@ const observeEnabled = (
     Effect.map(() => ({ installed: true, enabled: true })),
     Effect.catch((error) =>
       Match.value(error.reason).pipe(
-        Match.tag("UnexpectedExit", (reason) => isEnabledExitCode(reason.exitCode)),
+        Match.tag("UnexpectedExit", (reason) =>
+          isEnabledExitCode(reason.exitCode, reason.stderr, () => Effect.fail(error)),
+        ),
         Match.orElse(() => Effect.fail(error)),
       ),
     ),
   );
 
-const observeActive = (name: string, exec: Exec) =>
+/**
+ * Only the verified exit `3` ("inactive", captured live above) collapses to
+ * "not running". Every other exit code — including the bus-unreachable
+ * failure's `1`, a different code from the verified one here and so already
+ * excluded without needing a `stderr` check the way `is-enabled` does —
+ * propagates as a typed error rather than a guessed `false`.
+ */
+const observeActive = (name: string, exec: Exec): Effect.Effect<boolean, CommandError> =>
   exec({ command: Sh.sh("systemctl", "--user", "is-active", name), shell: true }).pipe(
     Effect.map(() => true),
     Effect.catch((error) =>
       Match.value(error.reason).pipe(
-        Match.tag("UnexpectedExit", () => Effect.succeed(false)),
+        Match.tag("UnexpectedExit", (reason) =>
+          Match.value(reason.exitCode).pipe(
+            Match.when(3, () => Effect.succeed(false)),
+            Match.orElse(() => Effect.fail(error)),
+          ),
+        ),
         Match.orElse(() => Effect.fail(error)),
       ),
     ),
