@@ -4,28 +4,34 @@ import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { makeRuntimeToolReconciler, type RuntimeToolProps } from "../src/Tool.ts";
+import * as Schema from "effect/Schema";
+import type { RuntimeScope } from "../src/Backend.ts";
+import {
+  makeRuntimeToolReconciler,
+  type RuntimeToolProps,
+  type RuntimeToolState,
+} from "../src/Tool.ts";
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Queues one fixture per call — `Runtime.Tool.observe` issues exactly one command against mise. */
 const queuedExec = (outputs: readonly string[]): Exec => {
   let i = 0;
-  return ((_props) => {
+  return () => {
     const stdout = outputs[i] ?? "[]";
     i += 1;
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
-  }) as Exec;
+  };
 };
 
 const capturingExec = (
   stdout: string,
   calls: Array<{ command: string; cwd: string | undefined }>,
 ): Exec =>
-  ((props) => {
+  (props) => {
     calls.push({ command: props.command, cwd: props.cwd });
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
-  }) as Exec;
+  };
 
 const observeCtx = (exec: Exec): ObserveContext => ({ exec });
 const applyCtx = (exec: Exec): ApplyContext => ({
@@ -35,7 +41,7 @@ const applyCtx = (exec: Exec): ApplyContext => ({
 
 /** A `mise ls <tool> --json` fixture with exactly one entry. */
 const miseEntry = (version: string, installed: boolean, active: boolean) =>
-  JSON.stringify([{ version, installed, active }]);
+  Schema.encodeSync(Schema.fromJsonString(Schema.Json))([{ version, installed, active }]);
 
 const props = (
   overrides: Partial<Extract<RuntimeToolProps, { _tag: "Mise" }>> = {},
@@ -181,8 +187,9 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeRuntimeToolReconciler;
       const desired = yield* reconciler.desired(props({ tool: "node", version: "22" }));
-      const observedBase = {
-        scope: { _tag: "Global" as const },
+      const globalScope: RuntimeScope = { _tag: "Global" };
+      const observedBase: Omit<RuntimeToolState, "manager" | "tool"> = {
+        scope: globalScope,
         version: "22.11.0",
         installed: true,
         active: true,
@@ -236,10 +243,10 @@ it.effect("apply: an already-installed version is only activated, never reinstal
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
     const p = props({ version: "22" });
     const desired = yield* reconciler.desired(p);
-    const observed = {
-      manager: "Mise" as const,
+    const observed: RuntimeToolState = {
+      manager: "Mise",
       tool: "node",
-      scope: { _tag: "Global" as const },
+      scope: { _tag: "Global" },
       version: "22.11.0",
       installed: true,
       active: false,
@@ -266,10 +273,10 @@ it.effect(
       // Same manager, satisfies the version request, but names a different
       // tool — `sameIdentity` must reject this, or `apply` would skip
       // `install` for a tool it never actually installed.
-      const observed = {
-        manager: "Mise" as const,
+      const observed: RuntimeToolState = {
+        manager: "Mise",
         tool: "python",
-        scope: { _tag: "Global" as const },
+        scope: { _tag: "Global" },
         version: "22.11.0",
         installed: true,
         active: true,

@@ -4,6 +4,7 @@ import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
 import {
   additionalData,
   decrypt,
@@ -27,11 +28,14 @@ const flipLastChar = (base64: string): string =>
 const utf8 = (value: string): Uint8Array => new TextEncoder().encode(value);
 const fromUtf8 = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 
+/** Renders a fixture as JSON text — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+
 it.effect("round-trips: decrypting an encrypted value returns the original bytes", () =>
   Effect.gen(function* () {
     const key = yield* genKey;
     const aad = additionalData("stack-a", "dev", "MyResource");
-    const plaintext = utf8(JSON.stringify({ hello: "world", n: 42 }));
+    const plaintext = utf8(toJsonText({ hello: "world", n: 42 }));
 
     const envelope = yield* encrypt(key, aad, plaintext, randomBytes);
     const decrypted = yield* decrypt(key, aad, envelope);
@@ -48,11 +52,11 @@ it.effect("the plaintext secret is absent from the encrypted envelope", () =>
   Effect.gen(function* () {
     const key = yield* genKey;
     const secret = "sk-test-0123456789-do-not-log-me";
-    const plaintext = utf8(JSON.stringify({ attr: { token: secret } }));
+    const plaintext = utf8(toJsonText({ attr: { token: secret } }));
 
     const envelope = yield* encrypt(key, additionalData("s", "d", "f"), plaintext, randomBytes);
 
-    const serialized = JSON.stringify(envelope);
+    const serialized = toJsonText(envelope);
     expect(serialized).not.toContain(secret);
     // Guards against a weaker encoding (e.g. base64 of the plaintext itself)
     // slipping the secret through unnoticed under a different text encoding.

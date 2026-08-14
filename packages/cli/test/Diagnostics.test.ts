@@ -1,7 +1,17 @@
 import { expect, it } from "@effect/vitest";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
-import { describeExit, runToExit } from "../src/Diagnostics.ts";
+import { describeExit, withDeadline } from "../src/Diagnostics.ts";
+
+/** A typed stand-in for "some command failed for a specific, known reason." */
+class SomethingWentWrong extends Data.TaggedError("SomethingWentWrong")<{
+  readonly reason: string;
+}> {
+  override get message() {
+    return this.reason;
+  }
+}
 
 /**
  * The behaviour this package exists for.
@@ -13,7 +23,7 @@ import { describeExit, runToExit } from "../src/Diagnostics.ts";
  * command from ever behaving that way.
  */
 it("a failure always produces text and a non-zero code", () => {
-  const exit = Exit.fail(new Error("something specific went wrong"));
+  const exit = Exit.fail(new SomethingWentWrong({ reason: "something specific went wrong" }));
   const described = describeExit(exit, () => "unused");
 
   expect(described.code).not.toBe(0);
@@ -36,21 +46,30 @@ it("success renders the value and exits zero", () => {
   expect(described).toEqual({ text: "one\ntwo", code: 0 });
 });
 
-it("a program that never settles is reported as a hang, not left to exit silently", async () => {
-  // This is the case ordinary error handling misses. A fiber that dies inside
-  // the run loop can leave its promise unsettled; the event loop then drains
-  // and Node exits 0 having printed nothing — a total failure that looks like
-  // success. `Effect.timeout` cannot be relied on to catch it, because the
-  // timeout lives inside the same fiber that died, so the race is run outside
-  // Effect against a plain timer.
-  const exit = await runToExit(Effect.never, 50);
+// `it.live` rather than `it.effect`: `withDeadline` waits on the real Clock
+// through `Effect.timeout`, and `it.effect`'s virtual `TestClock` never
+// advances on its own, which would make `Effect.never` indistinguishable from
+// a deadline that never arrives — the exact ambiguity this function exists to
+// resolve.
+it.live("a program that never settles is reported as a hang, not left to exit silently", () =>
+  Effect.gen(function* () {
+    // This is the case ordinary error handling misses: a program that simply
+    // never produces a value. `Effect.timeout` — not a raced external timer —
+    // is what catches it; see `withDeadline`'s doc comment for why the
+    // external-timer version this replaced was based on an untested theory
+    // about the real defect, and what running that defect for real showed
+    // instead.
+    const exit = yield* Effect.exit(withDeadline(Effect.never, 50));
 
-  expect(Exit.isFailure(exit)).toBe(true);
-  const described = describeExit(exit, () => "unused");
-  expect(described.code).not.toBe(0);
-});
+    expect(Exit.isFailure(exit)).toBe(true);
+    const described = describeExit(exit, () => "unused");
+    expect(described.code).not.toBe(0);
+  }),
+);
 
-it("a normal program is unaffected by the deadline", async () => {
-  const exit = await runToExit(Effect.succeed("done"), 60_000);
-  expect(exit).toStrictEqual(Exit.succeed("done"));
-});
+it.live("a normal program is unaffected by the deadline", () =>
+  Effect.gen(function* () {
+    const exit = yield* Effect.exit(withDeadline(Effect.succeed("done"), 60_000));
+    expect(exit).toStrictEqual(Exit.succeed("done"));
+  }),
+);

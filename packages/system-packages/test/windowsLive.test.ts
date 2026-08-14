@@ -1,7 +1,14 @@
 import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { parseWingetList } from "../src/backends/windows/Winget.ts";
 import { firstTokens, lines } from "../src/parse.ts";
+
+/** Reads an env-configured fixture path, or `Option.none()` when unset — never `process.env` directly. */
+const envPath = (name: string): Option.Option<string> =>
+  Effect.runSync(Config.option(Config.string(name)));
 
 /**
  * The same two parsers, run against output captured moments earlier on the
@@ -16,11 +23,11 @@ import { firstTokens, lines } from "../src/parse.ts";
  * Assertions here are about shape only. Which packages a runner image happens
  * to have installed is not a fact worth pinning.
  */
-const wingetListFile = process.env["MACHINE_RUN_WINGET_LIST"];
-const chocoListFile = process.env["MACHINE_RUN_CHOCO_LIST"];
+const wingetListFile = envPath("MACHINE_RUN_WINGET_LIST");
+const chocoListFile = envPath("MACHINE_RUN_CHOCO_LIST");
 
-it.skipIf(wingetListFile === undefined)("`winget list` still parses on this machine", () => {
-  const ids = parseWingetList(Fs.readFileSync(wingetListFile ?? "", "utf8"));
+it.skipIf(Option.isNone(wingetListFile))("`winget list` still parses on this machine", () => {
+  const ids = parseWingetList(Fs.readFileSync(Option.getOrElse(wingetListFile, () => ""), "utf8"));
 
   // A Windows machine always has something installed, so an empty result means
   // the table stopped being found rather than that nothing is there.
@@ -34,9 +41,11 @@ it.skipIf(wingetListFile === undefined)("`winget list` still parses on this mach
   expect(ids.every((id) => id.includes("."))).toBe(true);
 });
 
-it.skipIf(chocoListFile === undefined)("`choco list` still parses on this machine", () => {
+it.skipIf(Option.isNone(chocoListFile))("`choco list` still parses on this machine", () => {
   const names = firstTokens(
-    lines(Fs.readFileSync(chocoListFile ?? "", "utf8")).map((line) => line.split("|").join(" ")),
+    lines(Fs.readFileSync(Option.getOrElse(chocoListFile, () => ""), "utf8")).map((line) =>
+      line.split("|").join(" "),
+    ),
   );
 
   expect(names.length).toBeGreaterThan(0);

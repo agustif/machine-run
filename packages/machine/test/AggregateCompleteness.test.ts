@@ -2,6 +2,13 @@ import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import * as Path from "node:path";
 import { fileURLToPath } from "node:url";
+import * as Schema from "effect/Schema";
+
+/** A package manifest's `name` field — `Schema.Json` codecs rather than `JSON.parse`. */
+const packageNameOf = (manifestPath: string): string =>
+  Schema.decodeSync(Schema.fromJsonString(Schema.Struct({ name: Schema.String })))(
+    Fs.readFileSync(manifestPath, "utf8"),
+  ).name;
 
 /**
  * Every workspace package that defines a resource must appear in this
@@ -51,7 +58,7 @@ const resourceDefiningPackages = (): readonly string[] =>
     })
     .map((entry) => {
       const manifest = Path.join(packagesDir, entry.name, "package.json");
-      return JSON.parse(Fs.readFileSync(manifest, "utf8")).name as string;
+      return packageNameOf(manifest);
     });
 
 it("every resource-defining package is merged into the aggregate layer", () => {

@@ -23,7 +23,13 @@ import { loadRecipe, type Recipe, resolveRecipePath } from "./Recipe.ts";
  */
 const withoutEvalStackInternals = <A, E>(
   effect: Effect.Effect<A, E, State | ArtifactStore>,
-): Effect.Effect<A, E, never> => effect as Effect.Effect<A, E, never>;
+): Effect.Effect<A, E, never> =>
+  // Genuinely unavoidable: `State`/`ArtifactStore` are provided at runtime by
+  // `withStackServices`, but nothing short of a cast tells the type checker
+  // that dropping them from `R` here is sound rather than a hole — see the
+  // doc comment above for why the parameter type still names both exactly.
+  // oxlint-disable-next-line effect/noAs -- named, bounded, documented boundary cast (see AGENTS.md §0b).
+  effect as Effect.Effect<A, E, never>;
 
 export interface RunOptions {
   /** Recipe path, or `undefined` to look for a default name in the cwd. */

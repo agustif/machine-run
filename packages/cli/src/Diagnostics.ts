@@ -31,14 +31,12 @@ export class CommandTimedOut extends Data.TaggedError("CommandTimedOut")<{
 /**
  * Renders an `Exit` as text, and says which exit code the process should carry.
  *
- * The reason this exists rather than letting failures propagate: a `Die` defect
- * escaping a fiber can leave the promise driving it unsettled. The event loop
- * then drains, and **Node exits 0 having printed nothing** — a total failure
- * that looks like a clean success. That is not a hypothetical; it is exactly
- * what `alchemy plan` does today, and diagnosing it took reading Effect's fiber
- * internals because there was no output to read.
- *
- * So every path here produces text, and only a genuine success returns 0.
+ * The reason this exists rather than letting failures propagate: `alchemy
+ * plan` fails today by exiting 1 with empty stdout *and* empty stderr, even at
+ * `--log-level all` — a `Die` defect that escapes its own error reporting
+ * entirely. Diagnosing that took reading Effect's fiber internals by hand
+ * because there was nothing printed to read. So every path here produces
+ * text, and only a genuine success returns 0.
  */
 export interface CommandOutcome {
   /** What to print. Never empty, including on failure — that is the point. */
@@ -74,29 +72,40 @@ export const describeExit = <A, E>(
 };
 
 /**
- * Runs `effect` to an `Exit` that is always produced, even when the underlying
- * fiber would otherwise never settle.
+ * Bounds `effect` to `deadlineMillis`, failing with {@link CommandTimedOut}
+ * rather than running forever.
  *
- * `Effect.timeout` alone is not enough: a defect thrown inside the fiber's run
- * loop can prevent the timeout from ever being observed. So the race is done
- * outside Effect, against a plain timer, and a lost race is reported as a hang
- * with the deadline named.
+ * This used to race a plain `setTimeout` outside Effect entirely, on the
+ * theory that a defect thrown inside the fiber's own run loop could leave
+ * `Effect.timeout` unable to observe it, because the timeout would live in
+ * the same fiber that died. That theory was tested directly against the
+ * defect it was written for — `alchemy plan`'s `Fiber.runLoop: Not a valid
+ * effect: undefined` — reproduced for real via this package's own `Recipe`
+ * and `Commands` modules, both with a synthetic defect (a concurrent
+ * `Effect.forEach` mapper returning `undefined`, forced both synchronously and
+ * from a genuine async callback resumption) and with the actual failing
+ * recipe. In every case `Effect.timeout` wrapping the effect **in the same
+ * fiber** observed the defect and settled within milliseconds; there was no
+ * hang to catch.
+ *
+ * What *was* real: after that defect, the process did not exit on its own —
+ * not because the timeout was blind, but because Alchemy's own concurrent
+ * plan path leaves on the order of a thousand sibling fibers'/promises
+ * un-settled (`async_hooks` confirmed this: ~1000 pending `PROMISE` resources
+ * still alive seconds later), which keeps the Node event loop from draining
+ * even though the correct `Exit` had already been produced. `Effect.timeout`
+ * cannot fix that — nothing running inside the dying fiber's own tree can —
+ * but forcing the process to exit once an `Exit` is in hand does, which is
+ * exactly what `NodeRuntime.runMain`'s teardown does for any non-zero code.
+ * That is `bin.ts`'s job now, not this function's.
  */
-export const runToExit = <A, E>(
-  effect: Effect.Effect<A, E, never>,
+export const withDeadline = <A, E>(
+  effect: Effect.Effect<A, E>,
   deadlineMillis: number,
-): Promise<Exit.Exit<A, E | CommandTimedOut>> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<Exit.Exit<never, CommandTimedOut>>((resolve) => {
-    timer = setTimeout(
-      () => resolve(Exit.fail(new CommandTimedOut({ afterMillis: deadlineMillis }))),
-      deadlineMillis,
-    );
-  });
-  return Promise.race([
-    Effect.runPromiseExit(effect).finally(() => {
-      if (timer !== undefined) clearTimeout(timer);
-    }),
-    timeout,
-  ]);
-};
+): Effect.Effect<A, E | CommandTimedOut> =>
+  effect.pipe(
+    Effect.timeout(deadlineMillis),
+    Effect.catchTag("TimeoutError", () =>
+      Effect.fail(new CommandTimedOut({ afterMillis: deadlineMillis })),
+    ),
+  );

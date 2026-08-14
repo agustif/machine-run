@@ -4,10 +4,14 @@ import { makeMcpServerReconciler } from "@machine-run/ai";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+import { jsonRecordOr } from "../src/backends/jsonConfigFile.ts";
 
 /**
  * Effect's default `ConfigProvider` snapshots `process.env` on its first
@@ -21,6 +25,27 @@ const envConfig = (vars: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnvRecord(vars));
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+
+/**
+ * Decodes a written config file's raw text as JSON — `Schema.Json` rather
+ * than `JSON.parse`, so an actually malformed file fails the test with a
+ * `SchemaError` instead of the ambient `JSON.parse` throw the plugin bans.
+ */
+const decodeWrittenDocument = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
+);
+
+/**
+ * Reads one field out of a decoded document by successive keys, narrowing
+ * one level at a time with `jsonRecordOr`. Every call site below only ever
+ * hands the result to `expect(...).toEqual`/`toBe`, which accept any value,
+ * so there is nothing further to narrow it to.
+ */
+const field = (doc: Schema.Json, ...path: readonly string[]): Schema.Json =>
+  path.reduce((current, key) => jsonRecordOr(current, {})[key] ?? null, doc);
+
+/** Serializes a value to compare against as a string — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 const observeCtx = { exec: () => Effect.die("claude backend never calls exec") };
 const applyCtx = {
@@ -40,6 +65,15 @@ const withHome = (home: string) =>
     expand: (target: string) => (target === "~" ? home : target.replace(/^~\//, `${home}/`)),
   });
 
+/** `stdioTransport` got a transport other than the `Stdio` variant it required. */
+class UnexpectedTransport extends Data.TaggedError("UnexpectedTransport")<{
+  readonly tag: string;
+}> {
+  override get message() {
+    return `expected a Stdio transport, got ${this.tag}`;
+  }
+}
+
 /**
  * `McpServerState.transport`'s `Stdio` half, narrowed from the union — every
  * test below builds a `Stdio` server, so this is the one place that repeats
@@ -47,10 +81,14 @@ const withHome = (home: string) =>
  */
 const stdioTransport = (state: McpServerState) => {
   const transport = state.transport;
-  if (transport === undefined || transport._tag !== "Stdio") {
-    throw new Error(`expected a Stdio transport, got ${JSON.stringify(transport)}`);
-  }
-  return transport;
+  return Result.getOrThrow(
+    Result.liftPredicate(
+      transport,
+      (t): t is Extract<NonNullable<typeof t>, { _tag: "Stdio" }> =>
+        t !== undefined && t._tag === "Stdio",
+      (t) => new UnexpectedTransport({ tag: t === undefined ? "undefined" : t._tag }),
+    ),
+  );
 };
 
 // `McpServerProps.transport` models "stdio xor remote" as a tagged union —
@@ -92,8 +130,10 @@ it.effect("apply registers a stdio server, and a later observe reports it as mat
     expect(observed).toBeDefined();
     expect(reconciler.matches(observed!, desired)).toBe(true);
 
-    const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-    expect(written.mcpServers["my-server"]).toEqual({
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(path.join(home, ".claude.json")),
+    );
+    expect(field(written, "mcpServers", "my-server")).toEqual({
       command: "npx",
       args: ["-y", "my-mcp-server"],
       env: { LOG_LEVEL: "debug" },
@@ -125,8 +165,10 @@ it.effect("changing a literal env value is real drift, caught by matches and fix
     expect(reconciler.matches(observed!, changedDesired)).toBe(false);
 
     yield* reconciler.apply({ props: changedProps, observed, desired: changedDesired }, applyCtx);
-    const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-    expect(written.mcpServers["my-server"].env).toEqual({ LOG_LEVEL: "trace" });
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(path.join(home, ".claude.json")),
+    );
+    expect(field(written, "mcpServers", "my-server", "env")).toEqual({ LOG_LEVEL: "trace" });
   }).pipe(Effect.provide(layer)),
 );
 
@@ -152,7 +194,7 @@ it.effect(
 
       // The resolved secret bytes never enter `desired` — only which keys
       // are declared, never a secret-sourced one's value.
-      expect(JSON.stringify(desired)).not.toContain("sk-live-value");
+      expect(toJsonString(desired)).not.toContain("sk-live-value");
       expect(stdioTransport(desired).envKeys).toEqual(["API_KEY"]);
       expect(stdioTransport(desired).envLiteral).toBeUndefined();
 
@@ -163,11 +205,13 @@ it.effect(
       // The live file genuinely holds the resolved value — these tools store
       // credentials in plaintext regardless of machine-run, and a backend
       // that refused to write it would not register a working server.
-      const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-      expect(written.mcpServers["my-server"].env.API_KEY).toBe("sk-live-value");
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(path.join(home, ".claude.json")),
+      );
+      expect(field(written, "mcpServers", "my-server", "env", "API_KEY")).toBe("sk-live-value");
 
       const observed = yield* reconciler.observe(props, observeCtx);
-      expect(JSON.stringify(observed)).not.toContain("sk-live-value");
+      expect(toJsonString(observed ?? null)).not.toContain("sk-live-value");
       expect(stdioTransport(observed!).envKeys).toEqual(["API_KEY"]);
       expect(reconciler.matches(observed!, desired)).toBe(true);
     }).pipe(Effect.provide(layer)),
@@ -205,8 +249,10 @@ it.effect(
       // holding a secret in `matches`, which must never happen.
       expect(reconciler.matches(observed!, desired)).toBe(true);
 
-      const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-      expect(written.mcpServers["my-server"].env.API_KEY).toBe("sk-original");
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(path.join(home, ".claude.json")),
+      );
+      expect(field(written, "mcpServers", "my-server", "env", "API_KEY")).toBe("sk-original");
     }).pipe(Effect.provide(layer)),
 );
 
@@ -263,10 +309,12 @@ it.effect("apply registers a remote server, and a later observe reports it as ma
     expect(observed).toBeDefined();
     expect(reconciler.matches(observed!, desired)).toBe(true);
 
-    const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(path.join(home, ".claude.json")),
+    );
     // Claude's own config marks a remote server with `type: "http"` — see
     // `backends/Claude.ts`'s `apply`.
-    expect(written.mcpServers["my-remote-server"]).toEqual({
+    expect(field(written, "mcpServers", "my-remote-server")).toEqual({
       type: "http",
       url: "https://mcp.example.test",
       headers: { "X-Api-Key": "literal-header-value" },

@@ -1,14 +1,20 @@
 import * as Effect from "effect/Effect";
-import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 import {
   AiToolConfigMalformed,
   type AiMcpServerDesired,
   type AiMcpServerSpec,
   type AiToolBackend,
   type AiToolContext,
-  type AiToolError,
 } from "../Backend.ts";
+import {
+  type JsonConfigDocument,
+  jsonRecordOr,
+  readJsonDocument,
+  unwrapRecord,
+  writeJsonDocument,
+} from "./jsonConfigFile.ts";
 
 /**
  * One entry under `mcp` in opencode's config, re-verified this session
@@ -54,9 +60,6 @@ type McpEntry = typeof McpEntry.Type;
 const McpServers = Schema.Record(Schema.String, McpEntry);
 const decodeMcpServers = Schema.decodeUnknownEffect(McpServers);
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
 /**
  * `opencode.jsonc` is JSON-with-comments by name, but the real file on this
  * machine (`~/.config/opencode/opencode.jsonc`) contains none, and this
@@ -67,48 +70,13 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * exactly the kind of "patch around it" AGENTS.md rule 11 rules out. See
  * docs/ai-notes.md.
  */
-const readDocument = (
-  configPath: string,
-  ctx: AiToolContext,
-): Effect.Effect<Record<string, unknown>, AiToolError> =>
-  Effect.gen(function* () {
-    const present = yield* ctx.fs.exists(configPath);
-    if (!present) return { $schema: "https://opencode.ai/config.json" };
-    const text = yield* ctx.fs.readFileString(configPath);
-    const parsed = yield* Effect.try({
-      try: () => JSON.parse(text) as unknown,
-      catch: (cause) =>
-        new AiToolConfigMalformed({ tool: "config-opencode", path: configPath, cause }),
-    });
-    if (!isRecord(parsed)) {
-      return yield* Effect.fail(
-        new AiToolConfigMalformed({
-          tool: "config-opencode",
-          path: configPath,
-          cause: "top-level JSON value is not an object",
-        }),
-      );
-    }
-    return parsed;
+const readDocument = (configPath: string, ctx: AiToolContext) =>
+  readJsonDocument("config-opencode", configPath, ctx, {
+    $schema: "https://opencode.ai/config.json",
   });
 
-const writeDocument = (configPath: string, doc: Record<string, unknown>, ctx: AiToolContext) =>
-  Effect.gen(function* () {
-    yield* ctx.fs.makeDirectory(ctx.path.dirname(configPath), { recursive: true });
-    yield* ctx.fs.writeFileString(configPath, `${JSON.stringify(doc, null, 2)}\n`);
-  });
-
-const unwrap = (value: string | Redacted.Redacted<string>): string =>
-  Redacted.isRedacted(value) ? Redacted.value(value) : value;
-
-const unwrapRecord = (
-  values: Readonly<Record<string, string | Redacted.Redacted<string>>> | undefined,
-): Record<string, string> | undefined => {
-  if (values === undefined) return undefined;
-  const out: Record<string, string> = {};
-  for (const [key, value] of Object.entries(values)) out[key] = unwrap(value);
-  return out;
-};
+const writeDocument = (configPath: string, doc: JsonConfigDocument, ctx: AiToolContext) =>
+  writeJsonDocument("config-opencode", configPath, doc, ctx);
 
 const specToEntry = (spec: AiMcpServerDesired): McpEntry => {
   if (spec.url !== undefined) {
@@ -169,7 +137,7 @@ export const OpenCodeBackend: AiToolBackend = {
       Effect.gen(function* () {
         const configPath = ctx.path.join(ctx.home, ".config/opencode/opencode.jsonc");
         const doc = yield* readDocument(configPath, ctx);
-        const raw = isRecord(doc.mcp) ? doc.mcp : {};
+        const raw = jsonRecordOr(doc.mcp ?? null, {});
         const servers = yield* decodeMcpServers(raw).pipe(
           Effect.catchTag(
             "SchemaError",
@@ -177,15 +145,14 @@ export const OpenCodeBackend: AiToolBackend = {
               new AiToolConfigMalformed({ tool: "config-opencode", path: configPath, cause }),
           ),
         );
-        const entry = servers[name];
-        return entry === undefined ? undefined : entryToSpec(entry);
+        return UndefinedOr.map(servers[name], entryToSpec);
       }),
 
     apply: (name, desired, ctx) =>
       Effect.gen(function* () {
         const configPath = ctx.path.join(ctx.home, ".config/opencode/opencode.jsonc");
         const doc = yield* readDocument(configPath, ctx);
-        const raw = isRecord(doc.mcp) ? doc.mcp : {};
+        const raw = jsonRecordOr(doc.mcp ?? null, {});
         yield* writeDocument(
           configPath,
           { ...doc, mcp: { ...raw, [name]: specToEntry(desired) } },

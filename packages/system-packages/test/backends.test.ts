@@ -3,6 +3,7 @@ import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { makeYayBackend, makeParuBackend } from "../src/backends/linux/Aur.ts";
 import { makeAptBackend, makeAptRepoBackend } from "../src/backends/linux/Apt.ts";
 import { makeFlatpakBackend, makeFlatpakRepoBackend } from "../src/backends/linux/Flatpak.ts";
@@ -24,10 +25,13 @@ import { makePacmanBackend } from "../src/backends/linux/Pacman.ts";
 import { makePipxBackend, parsePipxList } from "../src/backends/language/Pipx.ts";
 import { makeUvToolBackend, parseUvToolList } from "../src/backends/language/UvTool.ts";
 import { parseWingetList } from "../src/backends/windows/Winget.ts";
-import { makePackageReconciler } from "../src/Package.ts";
+import { makePackageReconciler, type PackageProps } from "../src/Package.ts";
 import { toId } from "../src/bulk.ts";
 import { firstTokens, lines } from "../src/parse.ts";
 import { makeRepoReconciler, type RepoProps } from "../src/Repo.ts";
+
+/** Renders a fixture as JSON text — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 /**
  * A command runner returning fixed output, which is all a backend needs to be
@@ -218,7 +222,7 @@ it.effect("npm backend parses `npm ls -g --json` dependencies", () =>
   Effect.gen(function* () {
     const backend = makeNpmBackend();
     const installed = yield* backend.list(
-      fakeExec(JSON.stringify({ dependencies: { typescript: {}, pnpm: {} } })),
+      fakeExec(toJsonText({ dependencies: { typescript: {}, pnpm: {} } })),
     );
     expect(installed.sort()).toEqual(["pnpm", "typescript"]);
   }),
@@ -251,7 +255,7 @@ it.effect(
       // project with an unmet dependency — reproduces the same shape
       // `npm ls -g` takes on an unmet peer dependency: npm still emits the
       // complete listing on stdout and exits 1 (`ELSPROBLEMS`) on the side.
-      const realElsproblemsOutput = JSON.stringify({
+      const realElsproblemsOutput = toJsonText({
         version: "1.0.0",
         name: "peer-test",
         problems: ["missing: real-pkg@1.0.0, required by peer-test@1.0.0"],
@@ -835,7 +839,7 @@ it.effect("Package reconciler observe: the package's state once a live listing i
 it.effect("Package reconciler matches: true iff manager and name are both equal", () =>
   Effect.gen(function* () {
     const reconciler = yield* makePackageReconciler;
-    const desired = { manager: "brew" as const, name: "ripgrep" };
+    const desired: PackageProps = { manager: "brew", name: "ripgrep" };
     expect(reconciler.matches({ manager: "brew", name: "ripgrep" }, desired)).toBe(true);
     expect(reconciler.matches({ manager: "brew", name: "fd" }, desired)).toBe(false);
     expect(reconciler.matches({ manager: "cargo", name: "ripgrep" }, desired)).toBe(false);
@@ -846,7 +850,7 @@ it.effect("Package reconciler apply: installs the package and returns its state"
   Effect.gen(function* () {
     const reconciler = yield* makePackageReconciler;
     const calls: string[] = [];
-    const props = { manager: "brew" as const, name: "fd" };
+    const props: PackageProps = { manager: "brew", name: "fd" };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
@@ -864,7 +868,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makePackageReconciler;
-      const props = { manager: "brew" as const, name: "ripgrep" };
+      const props: PackageProps = { manager: "brew", name: "ripgrep" };
 
       // Planning sees ripgrep present, and caches that under the plan-phase index.
       const planned = yield* reconciler.observe(props, planCtx(fakeExec("ripgrep\n")));
@@ -889,7 +893,7 @@ it.effect(
 
       const reconcileOne = (name: string) =>
         Effect.gen(function* () {
-          const props = { manager: "brew" as const, name };
+          const props: PackageProps = { manager: "brew", name };
           const observed = yield* reconciler.observe(props, applyCtx(exec));
           const desired = yield* reconciler.desired(props);
           if (observed !== undefined && reconciler.matches(observed, desired)) return observed;
@@ -963,7 +967,7 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const calls: string[] = [];
-    const props = { repo: { _tag: "Brew" as const, tap: "can1357/tap" } };
+    const props: RepoProps = { repo: { _tag: "Brew", tap: "can1357/tap" } };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
@@ -981,7 +985,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
-      const props = { repo: { _tag: "Brew" as const, tap: "can1357/tap" } };
+      const props: RepoProps = { repo: { _tag: "Brew", tap: "can1357/tap" } };
 
       const planned = yield* reconciler.observe(props, planCtx(fakeExec("can1357/tap\n")));
       expect(planned).toEqual({ repo: { _tag: "Brew", tap: "can1357/tap" } });
@@ -1009,7 +1013,7 @@ it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <
   Effect.gen(function* () {
     const reconciler = yield* makeRepoReconciler;
     const calls: string[] = [];
-    const props = { repo: { _tag: "Dnf" as const, project: "atim/lazygit" } };
+    const props: RepoProps = { repo: { _tag: "Dnf", project: "atim/lazygit" } };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply(
@@ -1087,9 +1091,9 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
       const calls: string[] = [];
-      const props = {
+      const props: RepoProps = {
         repo: {
-          _tag: "Flatpak" as const,
+          _tag: "Flatpak",
           name: "flathub",
           location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
         },
@@ -1115,7 +1119,7 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeRepoReconciler;
       const calls: string[] = [];
-      const props = { repo: { _tag: "Flatpak" as const, name: "flathub" } };
+      const props: RepoProps = { repo: { _tag: "Flatpak", name: "flathub" } };
       const desired = yield* reconciler.desired(props);
 
       const error = yield* reconciler

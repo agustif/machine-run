@@ -5,6 +5,21 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
+import { jsonRecordOr } from "../../src/backends/jsonConfigFile.ts";
+
+/** Decodes a written config file's raw text as JSON — `Schema.Json` rather than `JSON.parse`. */
+const decodeWrittenDocument = Schema.decodeEffect(
+  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Json)),
+);
+
+/**
+ * Reads one field out of a decoded document by successive keys, narrowing
+ * one level at a time. Every call site below only hands the result to
+ * `expect(...).toEqual`/`toBe`, which accept any value.
+ */
+const field = (doc: Schema.Json, ...path: readonly string[]): Schema.Json =>
+  path.reduce((current, key) => jsonRecordOr(current, {})[key] ?? null, doc);
 
 /**
  * A real `~/.claude.json`, trimmed but otherwise byte-for-byte what running
@@ -14,27 +29,23 @@ import * as Path from "effect/Path";
  * a real client state file with dozens of unrelated keys and one
  * already-registered server.
  */
-const REAL_CLAUDE_JSON = JSON.stringify(
-  {
-    firstStartTime: "2026-08-13T04:29:50.485Z",
-    machineID: "39c6d1f88e9ff5de5fb5dc8888812647353dddc00943e6fc88bb1e5696f617a4",
-    opusProMigrationComplete: true,
-    sonnet1m45MigrationComplete: true,
-    seenNotifications: {},
-    hasResetAutoModeOptInForDefaultOffer: true,
-    migrationVersion: 13,
-    userID: "e430027d06a554482ab379645ff49a5878c4e162f26234e306ff38f68ed56eb9",
-    mcpServers: {
-      testserver: {
-        command: "npx",
-        args: ["-y", "my-mcp-server"],
-        env: { API_KEY: "xxx" },
-      },
+const REAL_CLAUDE_JSON = Schema.encodeSync(Schema.fromJsonString(Schema.Json, { space: 2 }))({
+  firstStartTime: "2026-08-13T04:29:50.485Z",
+  machineID: "39c6d1f88e9ff5de5fb5dc8888812647353dddc00943e6fc88bb1e5696f617a4",
+  opusProMigrationComplete: true,
+  sonnet1m45MigrationComplete: true,
+  seenNotifications: {},
+  hasResetAutoModeOptInForDefaultOffer: true,
+  migrationVersion: 13,
+  userID: "e430027d06a554482ab379645ff49a5878c4e162f26234e306ff38f68ed56eb9",
+  mcpServers: {
+    testserver: {
+      command: "npx",
+      args: ["-y", "my-mcp-server"],
+      env: { API_KEY: "xxx" },
     },
   },
-  null,
-  2,
-);
+});
 
 const layer = NodeServices.layer;
 
@@ -56,25 +67,27 @@ it.effect(
         ctx,
       );
 
-      const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(path.join(home, ".claude.json")),
+      );
 
       // Every unrelated top-level key survives untouched.
-      expect(written.machineID).toBe(
+      expect(field(written, "machineID")).toBe(
         "39c6d1f88e9ff5de5fb5dc8888812647353dddc00943e6fc88bb1e5696f617a4",
       );
-      expect(written.migrationVersion).toBe(13);
-      expect(written.seenNotifications).toEqual({});
-      expect(written.opusProMigrationComplete).toBe(true);
+      expect(field(written, "migrationVersion")).toBe(13);
+      expect(field(written, "seenNotifications")).toEqual({});
+      expect(field(written, "opusProMigrationComplete")).toBe(true);
 
       // The pre-existing server is untouched.
-      expect(written.mcpServers.testserver).toEqual({
+      expect(field(written, "mcpServers", "testserver")).toEqual({
         command: "npx",
         args: ["-y", "my-mcp-server"],
         env: { API_KEY: "xxx" },
       });
 
       // The new one was added, in Claude Code's own remote-server shape.
-      expect(written.mcpServers.newserver).toEqual({
+      expect(field(written, "mcpServers", "newserver")).toEqual({
         type: "http",
         url: "https://example.com/mcp",
         headers: { Authorization: "Bearer secret-token" },
@@ -96,9 +109,11 @@ it.effect("apply updates an existing server in place rather than duplicating it"
       ctx,
     );
 
-    const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-    expect(Object.keys(written.mcpServers)).toEqual(["testserver"]);
-    expect(written.mcpServers.testserver).toEqual({
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(path.join(home, ".claude.json")),
+    );
+    expect(Object.keys(jsonRecordOr(field(written, "mcpServers"), {}))).toEqual(["testserver"]);
+    expect(field(written, "mcpServers", "testserver")).toEqual({
       command: "npx",
       args: ["-y", "my-mcp-server-v2"],
       env: { API_KEY: "yyy" },
@@ -145,8 +160,10 @@ it.effect("apply creates ~/.claude.json from scratch when it does not exist yet"
     const ctx: AiToolContext = { exec: dieExec, fs, path, home };
     yield* ClaudeBackend.mcp!.apply("first", { command: "npx", args: ["thing"] }, ctx);
 
-    const written = JSON.parse(yield* fs.readFileString(path.join(home, ".claude.json")));
-    expect(written.mcpServers.first).toEqual({ command: "npx", args: ["thing"] });
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(path.join(home, ".claude.json")),
+    );
+    expect(field(written, "mcpServers", "first")).toEqual({ command: "npx", args: ["thing"] });
   }).pipe(Effect.provide(layer)),
 );
 

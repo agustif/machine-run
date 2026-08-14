@@ -1,7 +1,11 @@
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { makeSettingReconciler } from "../src/Setting.ts";
+import {
+  makeSettingReconciler,
+  type SettingProps,
+  type SettingState,
+} from "../src/Setting.ts";
 
 /** A command runner returning fixed output for every call it's asked to make. */
 const fakeExec =
@@ -169,8 +173,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
-      const desired = {
-        variant: "Gsettings" as const,
+      const desired: SettingState = {
+        variant: "Gsettings",
         schema: "org.gnome.desktop.interface",
         path: undefined,
         key: "clock-format",
@@ -194,8 +198,8 @@ it.effect("Setting reconciler apply: writes the value and confirms it by reading
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const { exec, calls } = statefulExec("'12h'", "'24h'");
-    const props = {
-      _tag: "Gsettings" as const,
+    const props: SettingProps = {
+      _tag: "Gsettings",
       schema: "org.gnome.desktop.interface",
       key: "clock-format",
       value: "'24h'",
@@ -224,8 +228,8 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
-      const props = {
-        _tag: "Gsettings" as const,
+      const props: SettingProps = {
+        _tag: "Gsettings",
         schema: "org.gnome.desktop.interface",
         key: "clock-format",
         value: "'24h'",
@@ -262,8 +266,8 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
-      const props = {
-        _tag: "Gsettings" as const,
+      const props: SettingProps = {
+        _tag: "Gsettings",
         schema: "org.gnome.desktop.interface",
         key: "clock-format",
         value: "'12h'",
@@ -272,8 +276,8 @@ it.effect(
       // from the run that last applied); the fake exec answers every read
       // with the schema default `'24h'`, exactly as a real
       // `dbus-run-session`-backed `gsettings reset` restoring it would.
-      const recorded = {
-        variant: "Gsettings" as const,
+      const recorded: SettingState = {
+        variant: "Gsettings",
         schema: props.schema,
         key: props.key,
         value: "'12h'",
@@ -298,14 +302,14 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
-      const props = {
-        _tag: "Gsettings" as const,
+      const props: SettingProps = {
+        _tag: "Gsettings",
         schema: "org.gnome.desktop.interface",
         key: "clock-format",
         value: "'12h'",
       };
-      const recorded = {
-        variant: "Gsettings" as const,
+      const recorded: SettingState = {
+        variant: "Gsettings",
         schema: props.schema,
         key: props.key,
         value: "'12h'",
@@ -335,8 +339,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
-      const props = { _tag: "Dconf" as const, path: "/test/mypath", value: "['a', 'b']" };
-      const recorded = { variant: "Dconf" as const, path: props.path, value: "['a', 'b']" };
+      const props: SettingProps = { _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" };
+      const recorded: SettingState = { variant: "Dconf", path: props.path, value: "['a', 'b']" };
 
       // A real `dconf reset` followed by `dconf read` on a path with no
       // remaining override prints zero bytes — modelled here via
@@ -356,7 +360,7 @@ it.effect("Setting reconciler apply: dconf backend writes and confirms an array 
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const { exec, calls } = statefulExec(undefined, "['a', 'b']");
-    const props = { _tag: "Dconf" as const, path: "/test/mypath", value: "['a', 'b']" };
+    const props: SettingProps = { _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
@@ -375,8 +379,8 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       const { exec, calls } = statefulExec("'hello'", "'hi there'");
-      const props = {
-        _tag: "GsettingsRelocatable" as const,
+      const props: SettingProps = {
+        _tag: "GsettingsRelocatable",
         schema: "org.example.relocatable",
         path: "/org/example/testpath1/",
         key: "greeting",

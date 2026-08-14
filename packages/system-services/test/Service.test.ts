@@ -1,4 +1,4 @@
-import type { CommandError } from "alchemy/Command";
+import { CommandError, UnexpectedExit } from "alchemy/Command";
 import { expandHome, MachinePaths, MachinePathsLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
@@ -7,7 +7,13 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { makeServiceReconciler, ServiceNotConverged, type ServiceProps } from "../src/Service.ts";
+import * as Schema from "effect/Schema";
+import {
+  makeServiceReconciler,
+  ServiceNotConverged,
+  type ServiceProps,
+  type ServiceState,
+} from "../src/Service.ts";
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -40,15 +46,12 @@ const queuedExec = (outputs: readonly string[]): QueuedExec => {
 const failingExec =
   (exitCode: number, stderr: string): Exec =>
   (props) =>
-    Effect.fail({
-      _tag: "CommandError" as const,
-      // Widened to plain `string`: `CommandError` (a real Alchemy class) has
-      // no `ShellCommand` field to overlap with, so keeping the brand here
-      // would make this fake object incomparable to it.
-      command: String(props.command),
-      reason: { _tag: "UnexpectedExit" as const, exitCode, stderr, message: stderr },
-      message: `Failed to execute command "${props.command}": ${stderr}`,
-    } as CommandError);
+    Effect.fail(
+      new CommandError({
+        command: String(props.command),
+        reason: new UnexpectedExit({ exitCode, stderr }),
+      }),
+    );
 
 const observeCtx = (exec: Exec): ObserveContext => ({ exec });
 const applyCtx = (exec: Exec): ApplyContext => ({
@@ -57,7 +60,7 @@ const applyCtx = (exec: Exec): ApplyContext => ({
 });
 
 const brewInfo = (registered: boolean, loaded: boolean, running: boolean): string =>
-  JSON.stringify([{ registered, loaded, running }]);
+  Schema.encodeSync(Schema.fromJsonString(Schema.Json))([{ registered, loaded, running }]);
 
 const props = (overrides: Partial<ServiceProps> = {}): ServiceProps => ({
   backend: "brew-services",
@@ -105,8 +108,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeServiceReconciler;
-      const desired = {
-        backend: "brew-services" as const,
+      const desired: ServiceState = {
+        backend: "brew-services",
         name: "thing",
         installed: true,
         enabled: true,

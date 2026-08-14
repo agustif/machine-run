@@ -3,7 +3,26 @@ import { GrokBackend } from "@machine-run/ai";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+
+/** Narrows a captured env value to `Redacted`, failing loudly if the test's own premise is wrong. */
+const redactedEnvValue = (
+  value: string | Redacted.Redacted<string> | undefined,
+): Redacted.Redacted<string> =>
+  Result.getOrThrow(
+    Result.liftPredicate(
+      value,
+      (v): v is Redacted.Redacted<string> => v !== undefined && Redacted.isRedacted(v),
+      () => "expected a captured env value to be Redacted, got a plain string or nothing",
+    ),
+  );
+
+/** Renders a fixture as JSON text — `Schema.Json` rather than `JSON.stringify`. */
+const toJsonText = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 
 const fakeExec =
   (stdout: string): AiToolContext["exec"] =>
@@ -25,12 +44,18 @@ const failingExec =
   () =>
     Effect.fail(error);
 
-const dieFs = { exists: () => Effect.die("unused") } as unknown as AiToolContext["fs"];
-const diePath = {} as AiToolContext["path"];
+/**
+ * Never touched by this backend, which shells out to `grok` directly rather
+ * than reading its config file — real service values rather than a cast
+ * through `unknown`, so a method this backend starts calling fails loudly
+ * (`Effect.die`/a `PlatformError`) instead of silently returning `undefined`.
+ */
+const dieFs = FileSystem.makeNoop({});
+const realPath = Effect.runSync(Path.Path.pipe(Effect.provide(Path.layer)));
 const ctxWith = (exec: AiToolContext["exec"]): AiToolContext => ({
   exec,
   fs: dieFs,
-  path: diePath,
+  path: realPath,
   home: "/home/irrelevant",
 });
 
@@ -41,7 +66,7 @@ const ctxWith = (exec: AiToolContext["exec"]): AiToolContext => ({
  * this is the whole registry — the fixture includes a server this backend
  * is not asking about, exercising the by-name filter.
  */
-const REAL_GROK_LIST = JSON.stringify([
+const REAL_GROK_LIST = toJsonText([
   {
     command: "npx",
     args: ["-y", "@modelcontextprotocol/server-postgres"],
@@ -60,7 +85,7 @@ const REAL_GROK_LIST = JSON.stringify([
  * earlier `GrokServer` schema had no field for it, so `observe` silently
  * dropped it; see this file's and `Grok.ts`'s doc comments.
  */
-const REAL_GROK_LIST_REMOTE_WITH_HEADERS = JSON.stringify([
+const REAL_GROK_LIST_REMOTE_WITH_HEADERS = toJsonText([
   {
     url: "https://mcp.sentry.dev/mcp",
     headers: { Authorization: "Bearer secrettoken" },
@@ -155,7 +180,7 @@ it.effect(
       expect(calls[0]!.command).toBe(
         'grok mcp add --transport http sentry https://mcp.sentry.dev/mcp -H "Authorization: $MCP_SECRET_H0"',
       );
-      expect(Redacted.value(calls[0]!.env.MCP_SECRET_H0 as Redacted.Redacted<string>)).toBe(
+      expect(Redacted.value(redactedEnvValue(calls[0]!.env.MCP_SECRET_H0))).toBe(
         "Bearer sk-super-secret-value",
       );
     }),
