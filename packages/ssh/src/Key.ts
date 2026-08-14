@@ -428,7 +428,11 @@ export const makeKeyReconciler: Effect.Effect<
 
         const algorithm = props.algorithm ?? "ed25519";
         const comment = props.comment ?? "";
-        const argv = ["ssh-keygen", "-t", algorithm, "-f", desired.path, "-C", comment, "-N", ""];
+        // `sshCommand` supplies the executable itself; keep this list as the
+        // arguments only. Passing `ssh-keygen` here too would produce
+        // `ssh-keygen ssh-keygen ...`, which OpenSSH rejects as "Too many
+        // arguments" on every supported platform.
+        const argv = ["-t", algorithm, "-f", desired.path, "-C", comment, "-N", ""];
         // `-b` is only meaningful for "rsa" (modulus length) and "ecdsa"
         // (curve size); OpenSSH silently ignores it for "ed25519" (verified
         // above), but omitting it there keeps the command honest about what

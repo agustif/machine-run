@@ -9,6 +9,13 @@ it("uses POSIX shell quoting on POSIX", () => {
   });
 });
 
+it("adds ssh-keygen exactly once when building generation commands", () => {
+  expect(sshCommand({ os: "linux", isWindows: false }, "-t", "ed25519")).toEqual({
+    command: Sh.sh("ssh-keygen", "-t", "ed25519"),
+    shell: true,
+  });
+});
+
 it("uses PowerShell quoting for Windows key paths", () => {
   expect(sshCommand({ os: "win32", isWindows: true }, "-lf", "C:\\Users\\me\\my key.pub")).toEqual({
     command: Sh.pwsh("ssh-keygen", "-lf", "C:\\Users\\me\\my key.pub"),
