@@ -231,7 +231,9 @@ const confirmCompositions = (
     for (const candidate of candidates) {
       const key = `${candidate.pkg}#${candidate.name}`;
       if (confirmed.has(key)) continue;
-      const callsResource = [...resourceNames].some((name) => callsIdentifier(candidate.region, name));
+      const callsResource = [...resourceNames].some((name) =>
+        callsIdentifier(candidate.region, name),
+      );
       const callsComposition = [...confirmed.values()].some((other) =>
         callsIdentifier(candidate.region, other.name),
       );
