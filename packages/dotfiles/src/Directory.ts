@@ -1,5 +1,5 @@
 import { isNotFound, MachinePaths } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -128,6 +128,29 @@ export const makeDirectoryReconciler: Effect.Effect<
       // permissions, so any observed mode satisfies it.
       (desired.mode === undefined || observed.mode === desired.mode),
 
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+        const desiredMode = desired.mode;
+        // `observed.mode` can genuinely be absent — not a value to order
+        // against, so `direction` is only set when both sides are real.
+        const modeField: DriftField =
+          observed.mode === undefined
+            ? { field: "mode", observed: "unset", desired: desiredMode.toString(8) }
+            : {
+                field: "mode",
+                observed: observed.mode.toString(8),
+                desired: desiredMode.toString(8),
+                direction: observed.mode < desiredMode ? "behind" : "ahead",
+              };
+        fields.push(modeField);
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
@@ -144,6 +167,19 @@ export const makeDirectoryReconciler: Effect.Effect<
         if (props.mode !== undefined) yield* fs.chmod(target, props.mode);
         const info = yield* fs.stat(target);
         return { path: target, mode: Number(info.mode) & 0o777 };
+      }),
+
+    // `apply`'s only effect is ensuring the directory exists — never its
+    // contents. Removing it is only honest when it's still empty: anything
+    // placed inside since (by another resource, or by hand) means this is no
+    // longer purely "what apply created", and the safest undo is to leave it.
+    unapply: ({ observed }) =>
+      Effect.gen(function* () {
+        const entries = yield* fs.readDirectory(observed.path);
+        // `recursive` is needed for Node's `rm` to accept a directory target
+        // at all — safe here because the emptiness check above means there
+        // is nothing for it to actually recurse into.
+        if (entries.length === 0) yield* fs.remove(observed.path, { recursive: true });
       }),
   };
 });

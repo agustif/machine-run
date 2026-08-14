@@ -1,5 +1,5 @@
 import { MachinePaths, isNotFound, makeSha256, readIfPresent } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -43,11 +43,16 @@ export type FileProps = typeof FileProps.Type;
  * `hash` is of the file's content, so a file edited by anything else stops
  * matching and is rewritten. `mode` takes part in the comparison rather than
  * being write-only, and is absent when the recipe does not constrain it.
+ *
+ * `backupPath` is never part of desired state or of the observe/matches
+ * comparison — it is bookkeeping `apply` writes for `unapply` to read back
+ * from `recorded` later.
  */
 export const FileState = Schema.Struct({
   path: Schema.String,
   hash: Schema.String,
   mode: Schema.optionalKey(Schema.Number),
+  backupPath: Schema.optionalKey(Schema.String),
 });
 
 export type FileState = typeof FileState.Type;
@@ -146,13 +151,55 @@ export const makeFileReconciler: Effect.Effect<
         onDefined: (mode) => observed.mode === mode,
       }),
 
-    apply: ({ props, desired }) =>
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.hash !== desired.hash) {
+        // A hash is unordered and unreadable in full — a short prefix is
+        // enough to show a reader "this changed" in plan output.
+        fields.push({
+          field: "content",
+          observed: observed.hash.slice(0, 12),
+          desired: desired.hash.slice(0, 12),
+        });
+      }
+      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+        const desiredMode = desired.mode;
+        // `observed.mode` can genuinely be absent (an unconstrained recipe's
+        // recorded state, or a hand-built test fixture) — that is not a value
+        // to order against, so `direction` is only set when there is a real
+        // number on both sides.
+        const modeField: DriftField =
+          observed.mode === undefined
+            ? { field: "mode", observed: "unset", desired: desiredMode.toString(8) }
+            : {
+                field: "mode",
+                observed: observed.mode.toString(8),
+                desired: desiredMode.toString(8),
+                direction: observed.mode < desiredMode ? "behind" : "ahead",
+              };
+        fields.push(modeField);
+      }
+      return fields;
+    },
+
+    apply: ({ props, desired, snapshot }) =>
       Effect.gen(function* () {
         const target = desired.path;
         yield* fs.makeDirectory(path.dirname(target), {
           recursive: true,
           ...(props.directoryMode !== undefined ? { mode: props.directoryMode } : {}),
         });
+        // The engine's snapshot, folded into this resource's own `State` so a
+        // later `unapply` can restore rather than merely remove — the backup
+        // directory is stamped fresh per run, so only persisted state carries a
+        // path that far. Taken from the input rather than by calling
+        // `ctx.snapshot` here: the engine archives only what this resource did
+        // *not* write itself, and snapshotting on every apply would just
+        // accumulate copies of our own previous output.
+        const backupPath = snapshot;
         // `mode` is passed on the write *and* chmod'd after, because each
         // covers what the other cannot: the OS applies `mode` only when the
         // file is created (so an existing file would keep its old bits and
@@ -162,7 +209,25 @@ export const makeFileReconciler: Effect.Effect<
         yield* fs.writeFileString(target, props.content, { mode: props.mode });
         if (props.mode !== undefined) yield* fs.chmod(target, props.mode);
         const info = yield* fs.stat(target);
-        return { ...desired, mode: Number(info.mode) & 0o777 };
+        return {
+          ...desired,
+          mode: Number(info.mode) & 0o777,
+          ...(backupPath !== undefined ? { backupPath } : {}),
+        };
+      }),
+
+    // Restores the content this apply overwrote, when a backup was captured;
+    // otherwise removes the file this resource itself created. Never a
+    // half-measure: whichever branch runs, the file ends up exactly where it
+    // was before this resource ever touched it, or gone entirely.
+    unapply: ({ observed, recorded }) =>
+      Effect.gen(function* () {
+        if (recorded.backupPath !== undefined) {
+          const original = yield* fs.readFileString(recorded.backupPath);
+          yield* fs.writeFileString(observed.path, original);
+          return;
+        }
+        yield* fs.remove(observed.path);
       }),
   };
 });

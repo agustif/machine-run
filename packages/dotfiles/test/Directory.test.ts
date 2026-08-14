@@ -116,3 +116,72 @@ it.effect("matches rejects a mode the recipe does constrain", () =>
     expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o700 }, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect("drift is empty exactly when matches is true, and names mode with a direction", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeDirectoryReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+
+    const desired = yield* reconciler.desired({ path: "/tmp/whatever", mode: 0o700 });
+    const satisfied = { path: "/tmp/whatever", mode: 0o700 };
+    expect(reconciler.matches(satisfied, desired)).toBe(true);
+    expect(drift(satisfied, desired)).toEqual([]);
+
+    const looser = { path: "/tmp/whatever", mode: 0o755 };
+    expect(reconciler.matches(looser, desired)).toBe(false);
+    expect(drift(looser, desired)).toEqual([
+      { field: "mode", observed: "755", desired: "700", direction: "ahead" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes the directory it created, when it's still empty", () =>
+  withTempDir((reconciler, target) =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const unapply = reconciler.unapply;
+      if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+      const desired = yield* reconciler.desired(props(target));
+      yield* reconciler.apply(
+        { props: props(target), observed: Option.none(), desired },
+        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+      );
+
+      yield* unapply(
+        { props: props(target), observed: desired, recorded: desired },
+        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+      );
+
+      expect(yield* fs.exists(target)).toBe(false);
+    }),
+  ).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply leaves a non-empty directory alone — it owns the directory, never its contents",
+  () =>
+    withTempDir((reconciler, target) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const unapply = reconciler.unapply;
+        if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+        const desired = yield* reconciler.desired(props(target));
+        yield* reconciler.apply(
+          { props: props(target), observed: Option.none(), desired },
+          { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+        );
+
+        // Something else placed a file inside it after creation.
+        yield* fs.writeFileString(path.join(target, "placed-by-something-else"), "x");
+
+        yield* unapply(
+          { props: props(target), observed: desired, recorded: desired },
+          { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+        );
+
+        expect(yield* fs.exists(target)).toBe(true);
+      }),
+    ).pipe(Effect.provide(layer)),
+);

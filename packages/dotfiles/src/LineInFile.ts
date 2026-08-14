@@ -6,7 +6,7 @@ import {
   readIfPresent,
   splitLines,
 } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -240,6 +240,35 @@ export const renderLine = (
   return Result.succeed(joinLines([...lines, line], ending));
 };
 
+/**
+ * The inverse of {@link renderLine}: removes the one line `match` finds,
+ * leaving every other line untouched. A no-op — not a failure — when no
+ * line matches.
+ *
+ * Same ambiguity guard as `renderLine`: more than one candidate means which
+ * line to remove is no more decidable here than which one to replace.
+ */
+export const removeLine = (
+  existing: string,
+  matchSource: string,
+): Result.Result<string, { detail: string }> => {
+  const regex = new RegExp(matchSource);
+  const lines = splitLines(existing);
+  const found = findMatches(lines, matchSource);
+  if (found.length > 1) {
+    return Result.fail({
+      detail: `${found.length} lines match this pattern, so which one to remove is ambiguous`,
+    });
+  }
+  if (found.length === 0) return Result.succeed(existing);
+  return Result.succeed(
+    joinLines(
+      lines.filter((candidate) => !regex.test(candidate)),
+      detectLineEnding(existing),
+    ),
+  );
+};
+
 export const makeLineInFileReconciler: Effect.Effect<
   Reconciler<
     LineInFileProps,
@@ -309,6 +338,20 @@ export const makeLineInFileReconciler: Effect.Effect<
       observed.match === desired.match &&
       observed.hash === desired.hash,
 
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.match !== desired.match) {
+        fields.push({ field: "match", observed: observed.match, desired: desired.match });
+      }
+      if (observed.hash !== desired.hash) {
+        fields.push({ field: "content", observed: observed.hash, desired: desired.hash });
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
@@ -331,6 +374,26 @@ export const makeLineInFileReconciler: Effect.Effect<
 
         yield* fs.writeFileString(target, rendered.success);
         return desired;
+      }),
+
+    // Owns only its one line, never the rest of the file — "undo" removes
+    // just that line, the same scoping `ManagedBlock.unapply` uses for its
+    // region.
+    unapply: ({ props, observed }) =>
+      Effect.gen(function* () {
+        const target = observed.path;
+        const existing = yield* readFileOrEmpty(target);
+        const removed = removeLine(existing, props.match);
+        if (Result.isFailure(removed)) {
+          return yield* Effect.fail(
+            new LineInFileMalformed({
+              path: target,
+              match: props.match,
+              detail: removed.failure.detail,
+            }),
+          );
+        }
+        yield* fs.writeFileString(target, removed.success);
       }),
   };
 });

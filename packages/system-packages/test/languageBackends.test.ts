@@ -1,4 +1,4 @@
-import type { Exec } from "@machine-run/engine";
+import type { Exec, ExecutionContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -53,6 +53,9 @@ const fakeExec =
   () =>
     Effect.succeed({ exitCode: 0, stdout, stderr: "" });
 
+/** None of these backends ever elevate — `execution` is only ever passed through. */
+const NONE: ExecutionContext = { privilege: "none", locale: "C", defaultTimeout: "10 minutes" };
+
 it.effect("cargo backend parses real `cargo install --list` output (rust:latest)", () =>
   Effect.gen(function* () {
     const installed = yield* makeCargoBackend().list(fakeExec(fixture("cargo-install-list.txt")));
@@ -72,7 +75,7 @@ it.effect(
         calls.push(props.command);
         return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
       };
-      yield* makeCargoBackend().install("just", { _tag: "Exact", version: "1.5.0" }, exec);
+      yield* makeCargoBackend().install("just", { _tag: "Exact", version: "1.5.0" }, exec, NONE);
       expect(calls).toEqual(["cargo install just --version 1.5.0"]);
     }),
 );
@@ -153,7 +156,7 @@ it.effect("go-install backend install shells out to `go install <name>@latest`",
       calls.push(props.command);
       return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
     };
-    yield* makeGoBackend().install("golang.org/x/tools/cmd/goimports", undefined, exec);
+    yield* makeGoBackend().install("golang.org/x/tools/cmd/goimports", undefined, exec, NONE);
     expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@latest"]);
   }),
 );
@@ -171,6 +174,7 @@ it.effect(
         "golang.org/x/tools/cmd/goimports",
         { _tag: "Exact", version: "v0.19.0" },
         exec,
+        NONE,
       );
       expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@v0.19.0"]);
     }),
@@ -183,7 +187,7 @@ it.effect("uv-tool backend install shells out to `uv tool install <name>`", () =
       calls.push(props.command);
       return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
     };
-    yield* makeUvToolBackend().install("cowsay", undefined, exec);
+    yield* makeUvToolBackend().install("cowsay", undefined, exec, NONE);
     expect(calls).toEqual(["uv tool install cowsay"]);
   }),
 );
@@ -195,7 +199,7 @@ it.effect("pipx backend install shells out to `pipx install <name>`", () =>
       calls.push(props.command);
       return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
     };
-    yield* makePipxBackend().install("cowsay", undefined, exec);
+    yield* makePipxBackend().install("cowsay", undefined, exec, NONE);
     expect(calls).toEqual(["pipx install cowsay"]);
   }),
 );

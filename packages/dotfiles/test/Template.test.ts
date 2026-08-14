@@ -191,3 +191,81 @@ it.effect("apply also fails with TemplateRenderFailed rather than writing a brok
     expect(yield* fs.exists(target)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * `Template` delegates `drift`/`unapply` straight to `File`'s own reconciler
+ * — a rendered template is, from the filesystem's point of view, exactly a
+ * file. This just confirms the delegation is wired up.
+ */
+it.effect("drift is empty exactly when matches is true, delegated from File", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeTemplateReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "config");
+
+    const props: TemplateProps = {
+      path: target,
+      template: "host = ${host}",
+      variables: { host: "example.com" },
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(drift(observed, desired)).toEqual([]);
+
+    const changedProps: TemplateProps = { ...props, variables: { host: "changed.example" } };
+    const newDesired = yield* reconciler.desired(changedProps);
+    expect(reconciler.matches(observed, newDesired)).toBe(false);
+    expect(drift(observed, newDesired).map((f) => f.field)).toEqual(["content"]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply restores the file it overwrote, delegated from File", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeTemplateReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "config");
+
+    yield* fs.writeFileString(target, "hand-written before machine-run");
+
+    const props: TemplateProps = {
+      path: target,
+      template: "host = ${host}",
+      variables: { host: "example.com" },
+    };
+    const desired = yield* reconciler.desired(props);
+    const observedBefore = yield* reconciler.observe(props, observeCtx);
+    const snapshottingCtx = {
+      exec: () => Effect.die("not used"),
+      snapshot: (t: string) =>
+        fs.copy(t, `${t}.bak`).pipe(
+          Effect.as(`${t}.bak`),
+          Effect.orElseSucceed(() => undefined),
+        ),
+    };
+    // The engine captures the backup and passes the path in — see
+    // `ApplyInput.snapshot`.
+    const archived = `${target}.bak`;
+    yield* fs.copy(target, archived);
+    const output = yield* reconciler.apply(
+      { props, observed: observedBefore, desired, snapshot: archived },
+      snapshottingCtx,
+    );
+    expect(yield* fs.readFileString(target)).toBe("host = example.com");
+
+    const observedNow = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    yield* unapply({ props, observed: observedNow, recorded: output }, snapshottingCtx);
+
+    expect(yield* fs.readFileString(target)).toBe("hand-written before machine-run");
+  }).pipe(Effect.provide(layer)),
+);

@@ -1,5 +1,5 @@
 import { isNotFound, MachinePaths } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -147,6 +147,18 @@ export const makeSymlinkReconciler: Effect.Effect<
     matches: (observed, desired) =>
       observed.path === desired.path && observed.source === desired.source,
 
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      // Unordered: a symlink target is a path, not a progression.
+      if (observed.source !== desired.source) {
+        fields.push({ field: "target", observed: observed.source, desired: desired.source });
+      }
+      return fields;
+    },
+
     apply: ({ desired }) =>
       Effect.gen(function* () {
         if (!(yield* fs.exists(desired.source))) {
@@ -160,6 +172,13 @@ export const makeSymlinkReconciler: Effect.Effect<
         yield* fs.symlink(desired.source, desired.path);
         return desired;
       }),
+
+    // `observed` is only ever defined here when `currentTarget` just
+    // confirmed a real symlink is at this path — removing it undoes exactly
+    // what `apply` created, nothing more (it never restores whatever, if
+    // anything, occupied the path before this resource's first apply, since
+    // that overwrite is not backed up).
+    unapply: ({ observed }) => fs.remove(observed.path),
   };
 });
 

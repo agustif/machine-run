@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
+  elevated,
   NO_VERSION_SUPPORT,
   rejectUnsupportedVersionSpec,
   type PackageEntry,
@@ -83,11 +84,11 @@ export const makeMasBackend = (): PackageManagerBackend => ({
     exec({ command: Sh.sh("mas", "list") }).pipe(
       Effect.map((result) => parseMasList(result.stdout)),
     ),
-  install: (name, version: VersionSpec | undefined, exec) =>
+  install: (name, version: VersionSpec | undefined, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "mas", "install", name),
+          command: Sh.sh(...elevated(execution, "mas", "install", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),

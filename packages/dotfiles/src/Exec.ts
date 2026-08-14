@@ -1,5 +1,10 @@
 import { MachinePaths, Sh } from "@machine-run/core";
-import { type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
+import {
+  type Drift,
+  type ObserveContext,
+  type Reconciler,
+  toProvider,
+} from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -191,6 +196,20 @@ export const makeExecReconciler: Effect.Effect<
     desired: () => Effect.succeed({ satisfied: true }),
 
     matches: (observed, desired) => observed.satisfied === desired.satisfied,
+
+    // Whether the guard is satisfied is the only thing there is to say about
+    // this resource — not ordered, so no `direction`: "not yet run" isn't a
+    // position on a line the way a version or a mode is.
+    drift: (observed, desired): Drift =>
+      observed.satisfied === desired.satisfied
+        ? []
+        : [
+            {
+              field: "satisfied",
+              observed: String(observed.satisfied),
+              desired: String(desired.satisfied),
+            },
+          ],
 
     apply: ({ props }, ctx) =>
       Effect.gen(function* () {

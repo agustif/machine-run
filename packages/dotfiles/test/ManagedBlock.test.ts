@@ -13,6 +13,7 @@ import {
   makeManagedBlockReconciler,
   ManagedBlockFileUnreadable,
   readBlock,
+  removeBlock,
   renderFile,
   type ManagedBlockProps,
 } from "../src/ManagedBlock.ts";
@@ -317,4 +318,81 @@ it.effect(
       // succeeds even though the read that should have preceded it did not.
       expect(yield* fs.readFileString(target)).toBe(original);
     }).pipe(Effect.provide(layer)),
+);
+
+it("removeBlock splices out the region, leaving surrounding content untouched", () => {
+  const withRegion = render("# hand-written above\n", "example", "export A=1");
+  const removed = Result.getOrThrow(removeBlock(withRegion, "example"));
+  expect(removed).toBe("# hand-written above\n");
+  expect(removed).not.toContain("BEGIN");
+});
+
+it("removeBlock is a no-op when the region is not present", () => {
+  const content = "# unrelated\n";
+  expect(Result.getOrThrow(removeBlock(content, "example"))).toBe(content);
+});
+
+it("removeBlock refuses a duplicated marker rather than guessing which pair to splice", () => {
+  const begin = beginMarker("shell-path");
+  const end = endMarker("shell-path");
+  const corrupted = [begin, "export A=1", end, "", begin, "export B=2", end, ""].join("\n");
+  expect(Result.isFailure(removeBlock(corrupted, "shell-path"))).toBe(true);
+});
+
+it.effect(
+  "drift is empty exactly when matches is true, and names path, marker and content",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeManagedBlockReconciler;
+      const drift = reconciler.drift;
+      if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, ".zshrc");
+
+      const props: ManagedBlockProps = { path: target, marker: "example", content: "export A=1" };
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+      const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+      expect(reconciler.matches(observed, desired)).toBe(true);
+      expect(drift(observed, desired)).toEqual([]);
+
+      const changedProps: ManagedBlockProps = { ...props, content: "export A=2" };
+      const changedDesired = yield* reconciler.desired(changedProps);
+      expect(reconciler.matches(observed, changedDesired)).toBe(false);
+      expect(drift(observed, changedDesired).map((f) => f.field)).toEqual(["content"]);
+
+      const renamedDesired = yield* reconciler.desired({ ...props, marker: "renamed" });
+      expect(reconciler.matches(observed, renamedDesired)).toBe(false);
+      expect(drift(observed, renamedDesired).map((f) => f.field)).toEqual(["marker"]);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes just this resource's own region, leaving the rest of the file", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeManagedBlockReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, ".zshrc");
+
+    yield* fs.writeFileString(target, "# hand-written above\nexport OTHER=1\n");
+
+    const props: ManagedBlockProps = { path: target, marker: "example", content: "export A=1" };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    yield* unapply({ props, observed, recorded: desired }, applyCtx);
+
+    const content = yield* fs.readFileString(target);
+    expect(content).toContain("# hand-written above");
+    expect(content).toContain("export OTHER=1");
+    expect(content).not.toContain("export A=1");
+    expect(content).not.toContain("BEGIN");
+  }).pipe(Effect.provide(layer)),
 );

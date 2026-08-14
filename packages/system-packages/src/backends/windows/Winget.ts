@@ -168,4 +168,15 @@ export const makeWingetBackend = (): PackageManagerBackend => ({
           }),
         ),
     }),
+  // `winget source update` — refreshes the local cache of each configured
+  // source (winget, msstore); documented (`winget source update --help`) as
+  // the fix for a stale source giving "No package found" against packages
+  // that do exist. UNVERIFIED here — no Windows target this session, same
+  // caveat as every other winget flag in this file.
+  refreshIndex: (exec) =>
+    exec({
+      command: Sh.pwsh("winget", "source", "update"),
+      shell: "powershell.exe",
+      timeout: "5 minutes",
+    }).pipe(Effect.asVoid),
 });

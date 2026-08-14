@@ -6,7 +6,7 @@ import {
   readIfPresent,
   splitLines,
 } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
@@ -312,6 +312,52 @@ export const renderFile = (
   );
 };
 
+/**
+ * The inverse of {@link renderFile}: removes the marked region, plus one
+ * adjacent line terminator so the gap it occupied doesn't become a blank
+ * line, leaving the rest of `existing` untouched. A no-op — not a
+ * failure — when the region isn't there to begin with.
+ *
+ * Same ambiguity guards as `renderFile`: a duplicated or unpaired marker
+ * cannot be spliced out unambiguously any more than one can be spliced in.
+ */
+export const removeBlock = (
+  existing: string,
+  marker: string,
+  options: RenderOptions = {},
+): Result.Result<string, { detail: string }> => {
+  const comment = options.commentPrefix ?? DEFAULT_COMMENT;
+  const begin = beginMarker(marker, comment);
+  const end = endMarker(marker, comment);
+
+  if (occurrences(existing, begin) > 1 || occurrences(existing, end) > 1) {
+    return Result.fail({
+      detail:
+        "the file contains more than one of this region's markers, so its boundaries are ambiguous",
+    });
+  }
+
+  const beginIndex = existing.indexOf(begin);
+  const endIndex =
+    beginIndex === -1 ? existing.indexOf(end) : existing.indexOf(end, beginIndex + begin.length);
+
+  if (beginIndex === -1 && endIndex === -1) return Result.succeed(existing);
+  if (beginIndex === -1) {
+    return Result.fail({
+      detail: "an END marker is present with no matching BEGIN before it",
+    });
+  }
+  if (endIndex === -1) {
+    return Result.fail({
+      detail: "a BEGIN marker is present with no matching END after it",
+    });
+  }
+
+  const before = existing.slice(0, beginIndex);
+  const after = existing.slice(endIndex + end.length).replace(/^\r?\n/, "");
+  return Result.succeed(`${before}${after}`);
+};
+
 export const makeManagedBlockReconciler: Effect.Effect<
   Reconciler<
     ManagedBlockProps,
@@ -366,6 +412,20 @@ export const makeManagedBlockReconciler: Effect.Effect<
       observed.marker === desired.marker &&
       observed.hash === desired.hash,
 
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.marker !== desired.marker) {
+        fields.push({ field: "marker", observed: observed.marker, desired: desired.marker });
+      }
+      if (observed.hash !== desired.hash) {
+        fields.push({ field: "content", observed: observed.hash, desired: desired.hash });
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
@@ -388,6 +448,26 @@ export const makeManagedBlockReconciler: Effect.Effect<
 
         yield* fs.writeFileString(target, rendered.success);
         return desired;
+      }),
+
+    // This resource owns only its own region, never the whole file — so
+    // "undo" is splicing that region back out, not touching anything else
+    // a person (or another `ManagedBlock`) put there.
+    unapply: ({ props, observed }) =>
+      Effect.gen(function* () {
+        const target = observed.path;
+        const existing = yield* readFileOrEmpty(target);
+        const removed = removeBlock(existing, props.marker, props);
+        if (Result.isFailure(removed)) {
+          return yield* Effect.fail(
+            new ManagedBlockMalformed({
+              path: target,
+              marker: props.marker,
+              detail: removed.failure.detail,
+            }),
+          );
+        }
+        yield* fs.writeFileString(target, removed.success);
       }),
   };
 });

@@ -15,6 +15,7 @@ import {
   DownloadTooLarge,
   makeDownloadReconciler,
   type DownloadProps,
+  type DownloadState,
 } from "../src/Download.ts";
 
 /**
@@ -273,5 +274,62 @@ it.effect("a download with no mode is left at the platform default", () =>
     );
 
     expect(result.mode).not.toBe(0o600);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect("drift is empty exactly when matches is true, and names content and mode", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeDownloadReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+
+    const desired: DownloadState = {
+      path: "/tmp/font.ttf",
+      hash: CHECKSUM,
+      mode: 0o644,
+    };
+    const satisfied = { path: "/tmp/font.ttf", hash: CHECKSUM, mode: 0o644 };
+    expect(reconciler.matches(satisfied, desired)).toBe(true);
+    expect(drift(satisfied, desired)).toEqual([]);
+
+    const wrongHash = { path: "/tmp/font.ttf", hash: "0".repeat(64), mode: 0o644 };
+    expect(reconciler.matches(wrongHash, desired)).toBe(false);
+    expect(drift(wrongHash, desired).map((f) => f.field)).toEqual(["content"]);
+
+    const wrongMode = { path: "/tmp/font.ttf", hash: CHECKSUM, mode: 0o600 };
+    expect(reconciler.matches(wrongMode, desired)).toBe(false);
+    expect(drift(wrongMode, desired)).toEqual([
+      { field: "mode", observed: "600", desired: "644", direction: "behind" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes the verified file it wrote", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeDownloadReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const { url } = yield* withServer(BODY);
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "font.ttf");
+
+    const props: DownloadProps = { url, path: target, checksum: CHECKSUM };
+    const desired = yield* reconciler.desired(props);
+    const output = yield* reconciler.apply(
+      { props, observed: Option.none(), desired },
+      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+    );
+
+    const observed = Option.getOrThrow(
+      yield* reconciler.observe(props, { exec: () => Effect.die("not used") }),
+    );
+    yield* unapply(
+      { props, observed, recorded: output },
+      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+    );
+
+    expect(yield* fs.exists(target)).toBe(false);
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );

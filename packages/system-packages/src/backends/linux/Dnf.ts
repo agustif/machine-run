@@ -4,6 +4,7 @@ import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
   type DnfRepo,
+  elevated,
   type PackageEntry,
   type PackageManagerBackend,
   type PackageVersionSupport,
@@ -84,11 +85,11 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
         }),
       ),
     ),
-  install: (name, version, exec) =>
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "dnf", "install", "-y", name),
+          command: Sh.sh(...elevated(execution, "dnf", "install", "-y", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),
@@ -97,7 +98,9 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
           Match.tagsExhaustive({
             Exact: (v) =>
               exec({
-                command: Sh.sh("sudo", "dnf", "install", "-y", `${name}-${v.version}`),
+                command: Sh.sh(
+                  ...elevated(execution, "dnf", "install", "-y", `${name}-${v.version}`),
+                ),
                 shell: true,
                 timeout: "10 minutes",
               }).pipe(Effect.asVoid),
@@ -120,9 +123,9 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
    * `-Sy` sync raises a partial-upgrade concern for (see `Pacman.ts`) — it
    * only refreshes repository metadata.
    */
-  refreshIndex: (exec) =>
+  refreshIndex: (exec, execution) =>
     exec({
-      command: Sh.sh("sudo", "dnf", "makecache"),
+      command: Sh.sh(...elevated(execution, "dnf", "makecache")),
       shell: true,
       timeout: "5 minutes",
     }).pipe(Effect.asVoid),
@@ -162,9 +165,9 @@ export const makeDnfRepoBackend = (): RepoBackend<DnfRepo> => ({
         return repos;
       }),
     ),
-  addRepo: (repo, exec) =>
+  addRepo: (repo, exec, execution) =>
     exec({
-      command: Sh.sh("sudo", "dnf", "copr", "enable", "-y", repo.project),
+      command: Sh.sh(...elevated(execution, "dnf", "copr", "enable", "-y", repo.project)),
       shell: true,
     }).pipe(Effect.asVoid),
 });

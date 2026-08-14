@@ -1,5 +1,5 @@
 import { CREDENTIAL_FILE_MODE, isNotFound, MachinePaths } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -229,6 +229,36 @@ export const makeDownloadReconciler: Effect.Effect<
       // permissions, so any observed mode satisfies it.
       (desired.mode === undefined || observed.mode === desired.mode),
 
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.hash !== desired.hash) {
+        // Unordered, and a full digest is unreadable in plan output — a
+        // short prefix is enough to show "this changed".
+        fields.push({
+          field: "content",
+          observed: observed.hash.slice(0, 12),
+          desired: desired.hash.slice(0, 12),
+        });
+      }
+      if (desired.mode !== undefined && observed.mode !== desired.mode) {
+        const desiredMode = desired.mode;
+        const modeField: DriftField =
+          observed.mode === undefined
+            ? { field: "mode", observed: "unset", desired: desiredMode.toString(8) }
+            : {
+                field: "mode",
+                observed: observed.mode.toString(8),
+                desired: desiredMode.toString(8),
+                direction: observed.mode < desiredMode ? "behind" : "ahead",
+              };
+        fields.push(modeField);
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
@@ -307,6 +337,12 @@ export const makeDownloadReconciler: Effect.Effect<
         const info = yield* fs.stat(target);
         return { path: target, hash: actual, mode: Number(info.mode) & 0o777 };
       }),
+
+    // This resource always writes the whole file — never backed up, since
+    // there is no prior version worth restoring (a verified download either
+    // matches its checksum or is rejected outright). Removing it is the
+    // honest undo of "a verified artifact is at this path".
+    unapply: ({ observed }) => fs.remove(observed.path),
   };
 });
 

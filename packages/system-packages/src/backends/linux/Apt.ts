@@ -4,6 +4,7 @@ import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
   type AptRepo,
+  elevated,
   type PackageEntry,
   type PackageManagerBackend,
   type PackageVersionSupport,
@@ -70,11 +71,11 @@ export const makeAptBackend = (): PackageManagerBackend => ({
         }),
       ),
     ),
-  install: (name, version, exec) =>
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "apt-get", "install", "-y", name),
+          command: Sh.sh(...elevated(execution, "apt-get", "install", "-y", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),
@@ -83,7 +84,9 @@ export const makeAptBackend = (): PackageManagerBackend => ({
           Match.tagsExhaustive({
             Exact: (v) =>
               exec({
-                command: Sh.sh("sudo", "apt-get", "install", "-y", `${name}=${v.version}`),
+                command: Sh.sh(
+                  ...elevated(execution, "apt-get", "install", "-y", `${name}=${v.version}`),
+                ),
                 shell: true,
                 timeout: "10 minutes",
               }).pipe(Effect.asVoid),
@@ -109,9 +112,9 @@ export const makeAptBackend = (): PackageManagerBackend => ({
    * fresh on every `install`, it does not leave some packages' metadata
    * stale relative to others the way pacman's binary-package model can.
    */
-  refreshIndex: (exec) =>
+  refreshIndex: (exec, execution) =>
     exec({
-      command: Sh.sh("sudo", "apt-get", "update"),
+      command: Sh.sh(...elevated(execution, "apt-get", "update")),
       shell: true,
       timeout: "5 minutes",
     }).pipe(Effect.asVoid),
@@ -156,9 +159,9 @@ export const makeAptRepoBackend = (): RepoBackend<AptRepo> => ({
         return parseAllSources(oneLine, deb822).map(toAptRepo);
       }),
     ),
-  addRepo: (repo, exec) =>
+  addRepo: (repo, exec, execution) =>
     exec({
-      command: Sh.sh("sudo", "add-apt-repository", "-y", repo.ppa),
+      command: Sh.sh(...elevated(execution, "add-apt-repository", "-y", repo.ppa)),
       shell: true,
     }).pipe(Effect.asVoid),
 });

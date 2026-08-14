@@ -12,6 +12,7 @@ import {
   LineInFileUnreadable,
   makeLineInFileReconciler,
   readLine,
+  removeLine,
   renderLine,
   type LineInFileProps,
 } from "../src/LineInFile.ts";
@@ -399,4 +400,79 @@ it.effect(
       // allow it to overwrite.
       expect(yield* fs.readFileString(target)).toBe(original);
     }).pipe(Effect.provide(layer)),
+);
+
+it("removeLine deletes just the one matching line, leaving the rest untouched", () => {
+  const existing = "# comment\nexport FOO=1\n# trailer\n";
+  const removed = Result.getOrThrow(removeLine(existing, "^export FOO="));
+  expect(removed).toBe("# comment\n# trailer\n");
+});
+
+it("removeLine is a no-op when no line matches", () => {
+  const existing = "unrelated content\n";
+  expect(Result.getOrThrow(removeLine(existing, "^export FOO="))).toBe(existing);
+});
+
+it("removeLine refuses when more than one line matches, rather than guessing", () => {
+  const existing = "export FOO=1\nexport FOO=2\n";
+  expect(Result.isFailure(removeLine(existing, "^export FOO="))).toBe(true);
+});
+
+it.effect("drift is empty exactly when matches is true, and names path, match and content", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeLineInFileReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "hosts");
+
+    const props: LineInFileProps = {
+      path: target,
+      match: "^127\\.0\\.0\\.1 ",
+      line: "127.0.0.1 example.local",
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(drift(observed, desired)).toEqual([]);
+
+    const changedProps: LineInFileProps = { ...props, line: "127.0.0.1 renamed.local" };
+    const changedDesired = yield* reconciler.desired(changedProps);
+    expect(reconciler.matches(observed, changedDesired)).toBe(false);
+    expect(drift(observed, changedDesired).map((f) => f.field)).toEqual(["content"]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes just this resource's own line, leaving the rest of the file", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeLineInFileReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "hosts");
+
+    yield* fs.writeFileString(target, "# comment\n# trailer\n");
+
+    const props: LineInFileProps = {
+      path: target,
+      match: "^127\\.0\\.0\\.1 ",
+      line: "127.0.0.1 example.local",
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    yield* unapply({ props, observed, recorded: desired }, applyCtx);
+
+    const content = yield* fs.readFileString(target);
+    expect(content).toContain("# comment");
+    expect(content).toContain("# trailer");
+    expect(content).not.toContain("127.0.0.1");
+  }).pipe(Effect.provide(layer)),
 );

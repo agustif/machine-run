@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
+  elevated,
   type PackageEntry,
   type PackageManagerBackend,
   type PackageVersionSupport,
@@ -151,11 +152,11 @@ export const makeSnapBackend = (): PackageManagerBackend => ({
     exec({ command: Sh.sh("snap", "list") }).pipe(
       Effect.map((result) => parseSnapList(result.stdout)),
     ),
-  install: (name, version, exec) =>
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "snap", "install", name),
+          command: Sh.sh(...elevated(execution, "snap", "install", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),
@@ -164,14 +165,18 @@ export const makeSnapBackend = (): PackageManagerBackend => ({
           Match.tagsExhaustive({
             Channel: (v) =>
               exec({
-                command: Sh.sh("sudo", "snap", "install", name, `--channel=${v.name}`),
+                command: Sh.sh(
+                  ...elevated(execution, "snap", "install", name, `--channel=${v.name}`),
+                ),
                 shell: true,
                 timeout: "10 minutes",
               }).pipe(
                 Effect.asVoid,
                 Effect.catchTag("CommandError", () =>
                   exec({
-                    command: Sh.sh("sudo", "snap", "refresh", name, `--channel=${v.name}`),
+                    command: Sh.sh(
+                      ...elevated(execution, "snap", "refresh", name, `--channel=${v.name}`),
+                    ),
                     shell: true,
                     timeout: "10 minutes",
                   }).pipe(Effect.asVoid),

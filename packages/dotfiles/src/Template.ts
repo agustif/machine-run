@@ -142,6 +142,7 @@ export const TemplateState = Schema.Struct({
   path: Schema.String,
   hash: Schema.String,
   mode: Schema.optionalKey(Schema.Number),
+  backupPath: Schema.optionalKey(Schema.String),
 });
 
 export type TemplateState = typeof TemplateState.Type;
@@ -192,6 +193,7 @@ export const makeTemplateReconciler: Effect.Effect<
 > = Effect.gen(function* () {
   const file: Reconciler<FileProps, FileState, PlatformError | FilePathUnreadable> =
     yield* makeFileReconciler;
+  const fileUnapply = file.unapply;
 
   return {
     address: (props) => file.address({ path: props.path, content: "" }),
@@ -206,12 +208,27 @@ export const makeTemplateReconciler: Effect.Effect<
       }),
 
     matches: file.matches,
+    drift: file.drift,
 
-    apply: ({ props, observed, desired }, ctx) =>
+    // Spread rather than rebuilt field by field, so anything `ApplyInput` gains
+    // later — `snapshot` was the first — reaches `File` without this needing an
+    // edit. Rebuilding it is how the backup path went missing once already.
+    apply: (input, ctx) =>
       Effect.gen(function* () {
-        const fileProps = yield* toFileProps(props);
-        return yield* file.apply({ props: fileProps, observed, desired }, ctx);
+        const fileProps = yield* toFileProps(input.props);
+        return yield* file.apply({ ...input, props: fileProps }, ctx);
       }),
+
+    // Delegates verbatim, like everything else here: a rendered template is,
+    // from the filesystem's point of view, exactly a `File`, so restoring or
+    // removing it is the same operation. `content: ""` is a stand-in `File`
+    // never reads here — its `unapply` only looks at `observed`/`recorded`,
+    // the same reason `address`/`observe` above pass one too.
+    unapply:
+      fileUnapply === undefined
+        ? undefined
+        : ({ props, observed, recorded }, ctx) =>
+            fileUnapply({ props: { path: props.path, content: "" }, observed, recorded }, ctx),
   };
 });
 

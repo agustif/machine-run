@@ -144,3 +144,21 @@ it.effect("matches compares only the guard's satisfaction", () =>
     expect(reconciler.matches({ satisfied: false }, desired)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
+
+it.effect("drift is empty exactly when matches is true, and names satisfied with no direction", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeExecReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const desired = yield* reconciler.desired({ command: "true", unless: "true" });
+
+    expect(reconciler.matches({ satisfied: true }, desired)).toBe(true);
+    expect(drift({ satisfied: true }, desired)).toEqual([]);
+
+    expect(reconciler.matches({ satisfied: false }, desired)).toBe(false);
+    const fields = drift({ satisfied: false }, desired);
+    expect(fields).toEqual([{ field: "satisfied", observed: "false", desired: "true" }]);
+    // "Not yet run" isn't a position on an ordered line, unlike a mode.
+    expect(fields[0]?.direction).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);

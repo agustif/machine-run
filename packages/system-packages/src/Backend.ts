@@ -1,6 +1,6 @@
 import { type VersionSpec } from "@machine-run/core";
 import type { CommandError } from "alchemy/Command";
-import type { Exec } from "@machine-run/engine";
+import type { Exec, ExecutionContext } from "@machine-run/engine";
 import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -80,6 +80,17 @@ export class CannotDowngrade extends Data.TaggedError("CannotDowngrade")<{
 }
 
 export type BackendError = CommandError | BackendParseError;
+
+/**
+ * Prefixes `sudo` onto `argv` when `execution.privilege` asks for it, argv
+ * unchanged otherwise — the one place `sudo` gets spelled into a command, so
+ * `privilege: "none"` (already root, or a minimal container with no `sudo`
+ * binary at all — see `ExecutionContext`'s own doc comment) never sees it.
+ */
+export const elevated = (
+  execution: ExecutionContext,
+  ...argv: readonly string[]
+): readonly string[] => (execution.privilege === "sudo" ? ["sudo", ...argv] : argv);
 
 /**
  * One installed package as a manager's own listing reports it — a name, and
@@ -203,6 +214,8 @@ export interface PackageManagerBackend {
     name: string,
     version: VersionSpec | undefined,
     exec: Exec,
+    /** How to run a command that needs root — see {@link elevated}. */
+    execution: ExecutionContext,
   ) => Effect.Effect<void, BackendError | UnsupportedVersionSpec>;
   /**
    * Refreshes this manager's local package index/metadata cache before an
@@ -214,7 +227,7 @@ export interface PackageManagerBackend {
    * `gem`, `go install`), or where refreshing is a real, separate,
    * unaddressed gap — see each backend's own doc comment.
    */
-  readonly refreshIndex?: (exec: Exec) => Effect.Effect<void, BackendError>;
+  readonly refreshIndex?: (exec: Exec, execution: ExecutionContext) => Effect.Effect<void, BackendError>;
 }
 
 /**
@@ -275,5 +288,9 @@ export type FlatpakRepo = Extract<RepoSpec, { _tag: "Flatpak" }>;
  */
 export interface RepoBackend<Spec> {
   readonly listRepos: (exec: Exec) => Effect.Effect<Spec[], BackendError>;
-  readonly addRepo: (repo: Spec, exec: Exec) => Effect.Effect<void, BackendError>;
+  readonly addRepo: (
+    repo: Spec,
+    exec: Exec,
+    execution: ExecutionContext,
+  ) => Effect.Effect<void, BackendError>;
 }

@@ -1,5 +1,8 @@
 import {
   type ApplyContext,
+  type Drift,
+  type DriftField,
+  executionOf,
   type ObserveContext,
   type Reconciler,
   toProvider,
@@ -149,14 +152,55 @@ export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, 
 
       matches: (observed, desired) => repoEquals(observed.repo, desired.repo),
 
+      // Must agree with `matches`: empty exactly when it returns true. Every
+      // `RepoSpec` tag names a different field (`tap`/`ppa`/`project`/
+      // `name`+`location`), none ordered, so `direction` never applies here.
+      drift: (observed, desired): Drift => {
+        const o = observed.repo;
+        const d = desired.repo;
+        if (repoEquals(o, d)) return [];
+        return Match.value(d).pipe(
+          Match.tagsExhaustive({
+            Brew: (spec) => [
+              { field: "tap", observed: o._tag === "Brew" ? o.tap : "", desired: spec.tap },
+            ],
+            Apt: (spec) => [
+              { field: "ppa", observed: o._tag === "Apt" ? o.ppa : "", desired: spec.ppa },
+            ],
+            Dnf: (spec) => [
+              { field: "project", observed: o._tag === "Dnf" ? o.project : "", desired: spec.project },
+            ],
+            Flatpak: (spec) => {
+              const fields: DriftField[] = [];
+              if (!(o._tag === "Flatpak" && o.name === spec.name)) {
+                fields.push({
+                  field: "name",
+                  observed: o._tag === "Flatpak" ? o.name : "",
+                  desired: spec.name,
+                });
+              }
+              if (!(o._tag === "Flatpak" && o.location === spec.location)) {
+                fields.push({
+                  field: "location",
+                  observed: o._tag === "Flatpak" ? (o.location ?? "") : "",
+                  desired: spec.location ?? "",
+                });
+              }
+              return fields;
+            },
+          }),
+        );
+      },
+
       apply: ({ props, desired }, ctx) =>
         Effect.gen(function* () {
+          const execution = executionOf(ctx);
           yield* Match.value(props.repo).pipe(
             Match.tagsExhaustive({
-              Brew: (p) => brew.addRepo(p, ctx.exec),
-              Apt: (p) => apt.addRepo(p, ctx.exec),
-              Dnf: (p) => dnf.addRepo(p, ctx.exec),
-              Flatpak: (p) => flatpak.addRepo(p, ctx.exec),
+              Brew: (p) => brew.addRepo(p, ctx.exec, execution),
+              Apt: (p) => apt.addRepo(p, ctx.exec, execution),
+              Dnf: (p) => dnf.addRepo(p, ctx.exec, execution),
+              Flatpak: (p) => flatpak.addRepo(p, ctx.exec, execution),
             }),
           );
           // Same reasoning as `Package.ts`: the cached repo listing for this

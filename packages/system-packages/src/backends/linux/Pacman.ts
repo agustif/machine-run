@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
+  elevated,
   type PackageEntry,
   type PackageManagerBackend,
   type PackageVersionSupport,
@@ -81,11 +82,11 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
         }),
       ),
     ),
-  install: (name, version, exec) =>
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "pacman", "-S", "--noconfirm", name),
+          command: Sh.sh(...elevated(execution, "pacman", "-S", "--noconfirm", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),
@@ -94,7 +95,9 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
           Match.tagsExhaustive({
             Exact: (v) =>
               exec({
-                command: Sh.sh("sudo", "pacman", "-S", "--noconfirm", `${name}=${v.version}`),
+                command: Sh.sh(
+                  ...elevated(execution, "pacman", "-S", "--noconfirm", `${name}=${v.version}`),
+                ),
                 shell: true,
                 timeout: "10 minutes",
               }).pipe(Effect.asVoid),
@@ -129,9 +132,9 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
    * enough from its installed packages can still hit real dependency
    * conflicts `refreshIndex` does not protect against. See `docs/TASKS.md`.
    */
-  refreshIndex: (exec) =>
+  refreshIndex: (exec, execution) =>
     exec({
-      command: Sh.sh("sudo", "pacman", "-Sy", "--noconfirm"),
+      command: Sh.sh(...elevated(execution, "pacman", "-Sy", "--noconfirm")),
       shell: true,
       timeout: "5 minutes",
     }).pipe(Effect.asVoid),

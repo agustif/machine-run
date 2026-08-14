@@ -178,3 +178,57 @@ it.effect(
       expect(yield* fs.exists(props.path)).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
+
+it.effect("drift is empty exactly when matches is true, and names path and target", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSymlinkReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const source = path.join(dir, "source");
+    yield* fs.writeFileString(source, "reviewed content");
+
+    const props = { path: path.join(dir, "link"), source };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(drift(observed, desired)).toEqual([]);
+
+    const otherSource = path.join(dir, "other-source");
+    yield* fs.writeFileString(otherSource, "different reviewed content");
+    const newDesired = yield* reconciler.desired({ ...props, source: otherSource });
+    expect(reconciler.matches(observed, newDesired)).toBe(false);
+    const fields = drift(observed, newDesired);
+    expect(fields.map((f) => f.field)).toEqual(["target"]);
+    // A symlink target is a path, not ordered.
+    expect(fields[0]?.direction).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes the symlink it created", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSymlinkReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const source = path.join(dir, "source");
+    yield* fs.writeFileString(source, "reviewed content");
+
+    const props = { path: path.join(dir, "link"), source };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    yield* unapply({ props, observed, recorded: desired }, applyCtx);
+
+    expect(yield* fs.exists(props.path)).toBe(false);
+    // The real source this resource merely pointed at is never touched.
+    expect(yield* fs.exists(source)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);

@@ -2,6 +2,7 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
+  elevated,
   NO_VERSION_SUPPORT,
   type PackageEntry,
   type PackageManagerBackend,
@@ -51,14 +52,24 @@ export const makePortBackend = (): PackageManagerBackend => ({
           }),
       ),
     ),
-  install: (name, version, exec) =>
+  install: (name, version, exec, execution) =>
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh("sudo", "port", "install", name),
+          command: Sh.sh(...elevated(execution, "port", "install", name)),
           shell: true,
           timeout: "10 minutes",
         }).pipe(Effect.asVoid),
       onDefined: rejectSpec,
     }),
+  // `port selfupdate` syncs the local ports tree (and the `port` tool
+  // itself) — MacPorts never does this on its own before `install`, unlike
+  // apt/dnf. Documented (`man port`), not independently run here — no `port`
+  // binary on this Mac (see this module's own doc comment).
+  refreshIndex: (exec, execution) =>
+    exec({
+      command: Sh.sh(...elevated(execution, "port", "selfupdate")),
+      shell: true,
+      timeout: "5 minutes",
+    }).pipe(Effect.asVoid),
 });

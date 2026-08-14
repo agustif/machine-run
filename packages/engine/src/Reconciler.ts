@@ -137,6 +137,19 @@ export interface ApplyInput<Props, State> {
   readonly observed: Option.Option<State>;
   /** What {@link Reconciler.desired} computed for these props. */
   readonly desired: State;
+  /**
+   * Where the engine archived what was at this address before this apply, when
+   * {@link Reconciler.snapshotBeforeApply} is set and the contents were not this
+   * resource's own previous output.
+   *
+   * Handed over so a reconciler whose {@link Reconciler.unapply} restores rather
+   * than removes can fold the path into its own `State` — the backup directory
+   * is stamped fresh per run, so nothing but persisted state carries a path to a
+   * much later `destroy`. Taking it from here rather than calling
+   * `ctx.snapshot` again is what keeps one apply to one snapshot, and keeps the
+   * "only archive what a person may have written" condition in one place.
+   */
+  readonly snapshot?: string;
 }
 
 /**

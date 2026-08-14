@@ -1,6 +1,9 @@
 import { compareVersions, UpdatePolicy, VersionSpec } from "@machine-run/core";
 import {
   type ApplyContext,
+  type Drift,
+  type DriftField,
+  executionOf,
   type ObserveContext,
   type Reconciler,
   toProvider,
@@ -313,6 +316,32 @@ export const makePackageReconciler: Effect.Effect<
       observed.name === desired.name &&
       (desired.version === undefined || observed.version === desired.version),
 
+    // Must agree with `matches` above: empty exactly when it returns true.
+    // `direction` only for `version` — `manager`/`name` are names, not points
+    // on a line.
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.manager !== desired.manager) {
+        fields.push({ field: "manager", observed: observed.manager, desired: desired.manager });
+      }
+      if (observed.name !== desired.name) {
+        fields.push({ field: "name", observed: observed.name, desired: desired.name });
+      }
+      if (desired.version !== undefined && observed.version !== desired.version) {
+        const comparison =
+          observed.version === undefined ? "Unknown" : compareVersions(observed.version, desired.version);
+        fields.push({
+          field: "version",
+          observed: observed.version ?? "",
+          desired: desired.version,
+          ...(comparison === "Behind" || comparison === "Ahead"
+            ? { direction: comparison === "Behind" ? "behind" : "ahead" }
+            : {}),
+        });
+      }
+      return fields;
+    },
+
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
         const backend = backends[props.manager];
@@ -391,10 +420,10 @@ export const makePackageReconciler: Effect.Effect<
         // any package whose requested version — or, for some managers, any
         // package at all — isn't in the last-synced snapshot.
         if (backend.refreshIndex !== undefined) {
-          yield* backend.refreshIndex(ctx.exec);
+          yield* backend.refreshIndex(ctx.exec, executionOf(ctx));
         }
 
-        yield* backend.install(props.name, props.version, ctx.exec);
+        yield* backend.install(props.name, props.version, ctx.exec, executionOf(ctx));
         // The cached listing for this manager no longer reflects reality —
         // it was taken (by this call's own re-observe, or an earlier apply
         // for a sibling `System.Package` on the same manager) *before* this

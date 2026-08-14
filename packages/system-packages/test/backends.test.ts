@@ -1,4 +1,4 @@
-import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
+import type { ApplyContext, Exec, ExecutionContext, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ import { makeNpmBackend } from "../src/backends/language/Npm.ts";
 import { makePacmanBackend } from "../src/backends/linux/Pacman.ts";
 import { makePipxBackend, parsePipxList } from "../src/backends/language/Pipx.ts";
 import { makeUvToolBackend, parseUvToolList } from "../src/backends/language/UvTool.ts";
-import { parseWingetList } from "../src/backends/windows/Winget.ts";
+import { makeWingetBackend, parseWingetList } from "../src/backends/windows/Winget.ts";
 import {
   makePackageReconciler,
   type PackageProps,
@@ -67,12 +67,20 @@ const planCtx = (exec: Exec): ObserveContext => ({ exec });
  * An `ApplyContext` — the shape `reconcile` passes both to its pre-apply
  * re-observe and to `apply` itself. `snapshot` is never called by
  * `Package`/`Repo` (neither sets `snapshotBeforeApply`), so a stub that dies
- * if invoked keeps that invariant honest.
+ * if invoked keeps that invariant honest. `execution` defaults to unset, so
+ * `executionOf` falls back to `DEFAULT_EXECUTION` — `privilege: "none"` —
+ * the same as a caller that never mentions it at all.
  */
-const applyCtx = (exec: Exec): ApplyContext => ({
+const applyCtx = (exec: Exec, execution?: ExecutionContext): ApplyContext => ({
   exec,
+  execution,
   snapshot: () => Effect.die("Package/Repo never snapshot — snapshotBeforeApply is unset"),
 });
+
+/** No escalation — the common case (already root, or nothing to elevate with). */
+const NONE: ExecutionContext = { privilege: "none", locale: "C", defaultTimeout: "10 minutes" };
+/** `sudo`-prefixed commands. */
+const SUDO: ExecutionContext = { privilege: "sudo", locale: "C", defaultTimeout: "10 minutes" };
 
 it.effect("brew backend parses `brew list --formula` output into names", () =>
   Effect.gen(function* () {
@@ -86,7 +94,7 @@ it.effect("brew backend install shells out to `brew install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeBrewBackend();
-    yield* backend.install("ripgrep", undefined, capturingExec("", calls));
+    yield* backend.install("ripgrep", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["brew install ripgrep"]);
   }),
 );
@@ -95,7 +103,7 @@ it.effect("brew backend refuses a version pin it cannot honour", () =>
   Effect.gen(function* () {
     const backend = makeBrewBackend();
     const result = yield* backend
-      .install("ripgrep", { _tag: "Exact", version: "14.0.0" }, fakeExec(""))
+      .install("ripgrep", { _tag: "Exact", version: "14.0.0" }, fakeExec(""), NONE)
       .pipe(Effect.flip);
     expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
@@ -183,7 +191,7 @@ it.effect("brew-cask backend uses `brew install --cask`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeBrewCaskBackend();
-    yield* backend.install("orbstack", undefined, capturingExec("", calls));
+    yield* backend.install("orbstack", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["brew install --cask orbstack"]);
   }),
 );
@@ -203,7 +211,7 @@ it.effect("brew repo backend addRepo shells out to `brew tap <tap>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeBrewRepoBackend();
-    yield* backend.addRepo({ _tag: "Brew", tap: "can1357/tap" }, capturingExec("", calls));
+    yield* backend.addRepo({ _tag: "Brew", tap: "can1357/tap" }, capturingExec("", calls), NONE);
     expect(calls).toEqual(["brew tap can1357/tap"]);
   }),
 );
@@ -219,7 +227,7 @@ it.effect("apt backend parses dpkg-query output into package names and versions"
   }),
 );
 
-it.effect("apt backend install pins an exact version with `pkg=version`", () =>
+it.effect("apt backend install pins an exact version with `pkg=version`, sudo-prefixed under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeAptBackend();
@@ -227,17 +235,41 @@ it.effect("apt backend install pins an exact version with `pkg=version`", () =>
       "tree",
       { _tag: "Exact", version: "2.1.1-2ubuntu3" },
       capturingExec("", calls),
+      SUDO,
     );
     expect(calls).toEqual(["sudo apt-get install -y tree=2.1.1-2ubuntu3"]);
   }),
 );
 
-it.effect("apt backend refreshIndex shells out to `apt-get update`", () =>
+it.effect("apt backend install under privilege none runs unprefixed — no sudo binary assumed", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeAptBackend();
-    yield* backend.refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    yield* backend.install(
+      "tree",
+      { _tag: "Exact", version: "2.1.1-2ubuntu3" },
+      capturingExec("", calls),
+      NONE,
+    );
+    expect(calls).toEqual(["apt-get install -y tree=2.1.1-2ubuntu3"]);
+  }),
+);
+
+it.effect("apt backend refreshIndex shells out to `apt-get update`, sudo-prefixed under privilege sudo", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), SUDO) ?? Effect.void;
     expect(calls).toEqual(["sudo apt-get update"]);
+  }),
+);
+
+it.effect("apt backend refreshIndex under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
+    expect(calls).toEqual(["apt-get update"]);
   }),
 );
 
@@ -258,12 +290,21 @@ it.effect("apt repo backend listRepos parses one-line sources into AptRepo specs
   }),
 );
 
-it.effect("apt repo backend addRepo shells out to `sudo add-apt-repository -y <ppa>`", () =>
+it.effect("apt repo backend addRepo shells out to `sudo add-apt-repository -y <ppa>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeAptRepoBackend();
-    yield* backend.addRepo({ _tag: "Apt", ppa: "ppa:git-core/ppa" }, capturingExec("", calls));
+    yield* backend.addRepo({ _tag: "Apt", ppa: "ppa:git-core/ppa" }, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo add-apt-repository -y ppa:git-core/ppa"]);
+  }),
+);
+
+it.effect("apt repo backend addRepo under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeAptRepoBackend();
+    yield* backend.addRepo({ _tag: "Apt", ppa: "ppa:git-core/ppa" }, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["add-apt-repository -y ppa:git-core/ppa"]);
   }),
 );
 
@@ -286,9 +327,45 @@ it.effect("port backend refuses a version pin — never independently verified a
   Effect.gen(function* () {
     const backend = makePortBackend();
     const result = yield* backend
-      .install("git", { _tag: "Exact", version: "2.43.0_0" }, fakeExec(""))
+      .install("git", { _tag: "Exact", version: "2.43.0_0" }, fakeExec(""), NONE)
       .pipe(Effect.flip);
     expect(result._tag).toBe("UnsupportedVersionSpec");
+  }),
+);
+
+it.effect("port backend install shells out to `sudo port install <name>` under privilege sudo", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePortBackend();
+    yield* backend.install("git", undefined, capturingExec("", calls), SUDO);
+    expect(calls).toEqual(["sudo port install git"]);
+  }),
+);
+
+it.effect("port backend install under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePortBackend();
+    yield* backend.install("git", undefined, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["port install git"]);
+  }),
+);
+
+it.effect("port backend refreshIndex shells out to `sudo port selfupdate` under privilege sudo", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePortBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), SUDO) ?? Effect.void;
+    expect(calls).toEqual(["sudo port selfupdate"]);
+  }),
+);
+
+it.effect("port backend refreshIndex under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePortBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
+    expect(calls).toEqual(["port selfupdate"]);
   }),
 );
 
@@ -309,7 +386,7 @@ it.effect("cargo backend install pins an exact version with `--version`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeCargoBackend();
-    yield* backend.install("just", { _tag: "Exact", version: "1.5.0" }, capturingExec("", calls));
+    yield* backend.install("just", { _tag: "Exact", version: "1.5.0" }, capturingExec("", calls), NONE);
     expect(calls).toEqual(["cargo install just --version 1.5.0"]);
   }),
 );
@@ -339,6 +416,7 @@ it.effect("npm backend install pins an exact version with `pkg@version`", () =>
       "cowsay",
       { _tag: "Exact", version: "1.5.0" },
       capturingExec("", calls),
+      NONE,
     );
     expect(calls).toEqual(["npm install -g cowsay@1.5.0"]);
   }),
@@ -399,7 +477,7 @@ it.effect("npm backend install shells out to `npm install -g <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeNpmBackend();
-    yield* backend.install("typescript", undefined, capturingExec("", calls));
+    yield* backend.install("typescript", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["npm install -g typescript"]);
   }),
 );
@@ -450,16 +528,25 @@ it.effect("dnf backend parses `dnf repoquery --userinstalled` output into names"
   }),
 );
 
-it.effect("dnf backend install shells out to `sudo dnf install -y <name>`", () =>
+it.effect("dnf backend install shells out to `sudo dnf install -y <name>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeDnfBackend();
-    yield* backend.install("tree", undefined, capturingExec("", calls));
+    yield* backend.install("tree", undefined, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo dnf install -y tree"]);
   }),
 );
 
-it.effect("dnf backend install pins an exact NEVRA with `name-evr`", () =>
+it.effect("dnf backend install under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeDnfBackend();
+    yield* backend.install("tree", undefined, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["dnf install -y tree"]);
+  }),
+);
+
+it.effect("dnf backend install pins an exact NEVRA with `name-evr`, sudo-prefixed under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeDnfBackend();
@@ -467,8 +554,27 @@ it.effect("dnf backend install pins an exact NEVRA with `name-evr`", () =>
       "tree",
       { _tag: "Exact", version: "2.2.1-4.fc44" },
       capturingExec("", calls),
+      SUDO,
     );
     expect(calls).toEqual(["sudo dnf install -y tree-2.2.1-4.fc44"]);
+  }),
+);
+
+it.effect("dnf backend refreshIndex shells out to `dnf makecache`, sudo-prefixed under privilege sudo", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeDnfBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), SUDO) ?? Effect.void;
+    expect(calls).toEqual(["sudo dnf makecache"]);
+  }),
+);
+
+it.effect("dnf backend refreshIndex under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeDnfBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
+    expect(calls).toEqual(["dnf makecache"]);
   }),
 );
 
@@ -487,12 +593,21 @@ it.effect(
     }),
 );
 
-it.effect("dnf repo backend addRepo shells out to `sudo dnf copr enable -y <project>`", () =>
+it.effect("dnf repo backend addRepo shells out to `sudo dnf copr enable -y <project>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeDnfRepoBackend();
-    yield* backend.addRepo({ _tag: "Dnf", project: "atim/lazygit" }, capturingExec("", calls));
+    yield* backend.addRepo({ _tag: "Dnf", project: "atim/lazygit" }, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
+  }),
+);
+
+it.effect("dnf repo backend addRepo under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeDnfRepoBackend();
+    yield* backend.addRepo({ _tag: "Dnf", project: "atim/lazygit" }, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["dnf copr enable -y atim/lazygit"]);
   }),
 );
 
@@ -557,12 +672,21 @@ it.effect("pacman backend list parses `pacman -Q` name+version pairs", () =>
   }),
 );
 
-it.effect("pacman backend install shells out to `sudo pacman -S --noconfirm <name>`", () =>
+it.effect("pacman backend install shells out to `sudo pacman -S --noconfirm <name>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makePacmanBackend();
-    yield* backend.install("tree", undefined, capturingExec("", calls));
+    yield* backend.install("tree", undefined, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo pacman -S --noconfirm tree"]);
+  }),
+);
+
+it.effect("pacman backend install under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePacmanBackend();
+    yield* backend.install("tree", undefined, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["pacman -S --noconfirm tree"]);
   }),
 );
 
@@ -582,17 +706,27 @@ it.effect(
         "tree",
         { _tag: "Exact", version: "2.3.2-1" },
         capturingExec("", calls),
+        NONE,
       );
-      expect(calls).toEqual(["sudo pacman -S --noconfirm tree=2.3.2-1"]);
+      expect(calls).toEqual(["pacman -S --noconfirm tree=2.3.2-1"]);
     }),
 );
 
-it.effect("pacman backend refreshIndex shells out to `pacman -Sy`, deliberately not `-Syu`", () =>
+it.effect("pacman backend refreshIndex shells out to `pacman -Sy`, deliberately not `-Syu`, sudo-prefixed under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makePacmanBackend();
-    yield* backend.refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    yield* backend.refreshIndex?.(capturingExec("", calls), SUDO) ?? Effect.void;
     expect(calls).toEqual(["sudo pacman -Sy --noconfirm"]);
+  }),
+);
+
+it.effect("pacman backend refreshIndex under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makePacmanBackend();
+    yield* backend.refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
+    expect(calls).toEqual(["pacman -Sy --noconfirm"]);
   }),
 );
 
@@ -633,7 +767,7 @@ it.effect(
 it.effect("yay backend install shells out to `yay -S --noconfirm <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeYayBackend().install("downgrade", undefined, capturingExec("", calls));
+    yield* makeYayBackend().install("downgrade", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["yay -S --noconfirm downgrade"]);
   }),
 );
@@ -641,7 +775,7 @@ it.effect("yay backend install shells out to `yay -S --noconfirm <name>`", () =>
 it.effect("paru backend install shells out to `paru -S --noconfirm <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeParuBackend().install("downgrade", undefined, capturingExec("", calls));
+    yield* makeParuBackend().install("downgrade", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["paru -S --noconfirm downgrade"]);
   }),
 );
@@ -649,7 +783,7 @@ it.effect("paru backend install shells out to `paru -S --noconfirm <name>`", () 
 it.effect("yay backend refreshIndex shells out to `yay -Sy --noconfirm`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeYayBackend().refreshIndex?.(capturingExec("", calls)) ?? Effect.void;
+    yield* makeYayBackend().refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
     expect(calls).toEqual(["yay -Sy --noconfirm"]);
   }),
 );
@@ -670,7 +804,7 @@ it("parsePipxList extracts the name and version from real `pipx list --short` ou
 it.effect("pipx backend install shells out to `pipx install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makePipxBackend().install("cowsay", undefined, capturingExec("", calls));
+    yield* makePipxBackend().install("cowsay", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["pipx install cowsay"]);
   }),
 );
@@ -684,6 +818,7 @@ it.effect(
         "cowsay",
         { _tag: "Exact", version: "5.0" },
         capturingExec("", calls),
+        NONE,
       );
       expect(calls).toEqual(["pipx install --force cowsay==5.0"]);
     }),
@@ -701,7 +836,7 @@ it("parseUvToolList extracts the name and version from real `uv tool list` outpu
 it.effect("uv-tool backend install shells out to `uv tool install <name>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* makeUvToolBackend().install("cowsay", undefined, capturingExec("", calls));
+    yield* makeUvToolBackend().install("cowsay", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["uv tool install cowsay"]);
   }),
 );
@@ -713,6 +848,7 @@ it.effect("uv-tool backend install pins an exact version with `pkg==version --fo
       "cowsay",
       { _tag: "Exact", version: "5.0" },
       capturingExec("", calls),
+      NONE,
     );
     expect(calls).toEqual(["uv tool install --force cowsay==5.0"]);
   }),
@@ -740,7 +876,7 @@ it.effect("gem backend install shells out to `gem install --user-install <name>`
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeGemBackend();
-    yield* backend.install("rake", undefined, capturingExec("", calls));
+    yield* backend.install("rake", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["gem install --user-install rake"]);
   }),
 );
@@ -753,6 +889,7 @@ it.effect("gem backend install pins an exact version with `-v`", () =>
       "rake",
       { _tag: "Exact", version: "13.0.6" },
       capturingExec("", calls),
+      NONE,
     );
     expect(calls).toEqual(["gem install --user-install rake -v 13.0.6"]);
   }),
@@ -793,6 +930,7 @@ it.effect("go-install backend install shells out to `go install <name>@latest`",
       "golang.org/x/tools/cmd/goimports",
       undefined,
       capturingExec("", calls),
+      NONE,
     );
     expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@latest"]);
   }),
@@ -806,6 +944,7 @@ it.effect("go-install backend install pins an exact version with `path@version`"
       "golang.org/x/tools/cmd/goimports",
       { _tag: "Exact", version: "v0.20.0" },
       capturingExec("", calls),
+      NONE,
     );
     expect(calls).toEqual(["go install golang.org/x/tools/cmd/goimports@v0.20.0"]);
   }),
@@ -834,12 +973,21 @@ it.effect("mas backend parses real `mas list` output, taking the numeric App Sto
   }),
 );
 
-it.effect("mas backend install shells out to `sudo mas install <id>`", () =>
+it.effect("mas backend install shells out to `sudo mas install <id>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeMasBackend();
-    yield* backend.install("937984704", undefined, capturingExec("", calls));
+    yield* backend.install("937984704", undefined, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo mas install 937984704"]);
+  }),
+);
+
+it.effect("mas backend install under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeMasBackend();
+    yield* backend.install("937984704", undefined, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["mas install 937984704"]);
   }),
 );
 
@@ -847,7 +995,7 @@ it.effect("mas backend refuses a version pin — mas has no version concept at a
   Effect.gen(function* () {
     const backend = makeMasBackend();
     const result = yield* backend
-      .install("937984704", { _tag: "Exact", version: "5.3.2" }, fakeExec(""))
+      .install("937984704", { _tag: "Exact", version: "5.3.2" }, fakeExec(""), NONE)
       .pipe(Effect.flip);
     expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
@@ -868,7 +1016,7 @@ it.effect("flatpak backend install shells out to `flatpak install -y --nonintera
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeFlatpakBackend();
-    yield* backend.install("org.gnome.Calculator", undefined, capturingExec("", calls));
+    yield* backend.install("org.gnome.Calculator", undefined, capturingExec("", calls), NONE);
     expect(calls).toEqual(["flatpak install -y --noninteractive org.gnome.Calculator"]);
   }),
 );
@@ -883,6 +1031,7 @@ it.effect(
         "org.gnome.Platform",
         { _tag: "Channel", name: "45" },
         capturingExec("", calls),
+        NONE,
       );
       expect(calls).toEqual(["flatpak install -y --noninteractive org.gnome.Platform//45"]);
     }),
@@ -894,7 +1043,7 @@ it.effect(
     Effect.gen(function* () {
       const backend = makeFlatpakBackend();
       const result = yield* backend
-        .install("org.gnome.Calculator", { _tag: "Exact", version: "45.0" }, fakeExec(""))
+        .install("org.gnome.Calculator", { _tag: "Exact", version: "45.0" }, fakeExec(""), NONE)
         .pipe(Effect.flip);
       expect(result._tag).toBe("UnsupportedVersionSpec");
     }),
@@ -951,6 +1100,7 @@ it.effect(
           location: "https://dl.flathub.org/repo/flathub.flatpakrepo",
         },
         capturingExec("", calls),
+        NONE,
       );
       expect(calls).toEqual([
         "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
@@ -966,7 +1116,7 @@ it.effect(
       const backend = makeFlatpakRepoBackend();
       const calls: string[] = [];
       const error = yield* backend
-        .addRepo({ _tag: "Flatpak", name: "flathub" }, capturingExec("", calls))
+        .addRepo({ _tag: "Flatpak", name: "flathub" }, capturingExec("", calls), NONE)
         .pipe(Effect.flip);
       expect(error._tag).toBe("BackendParseError");
       expect(calls).toEqual([]);
@@ -1006,16 +1156,25 @@ it.effect("snap backend list parses real `snap list` output (systemd-booted cont
   }),
 );
 
-it.effect("snap backend install shells out to `sudo snap install <name>`", () =>
+it.effect("snap backend install shells out to `sudo snap install <name>` under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeSnapBackend();
-    yield* backend.install("hello-world", undefined, capturingExec("", calls));
+    yield* backend.install("hello-world", undefined, capturingExec("", calls), SUDO);
     expect(calls).toEqual(["sudo snap install hello-world"]);
   }),
 );
 
-it.effect("snap backend install pins a channel with `--channel=`", () =>
+it.effect("snap backend install under privilege none runs unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeSnapBackend();
+    yield* backend.install("hello-world", undefined, capturingExec("", calls), NONE);
+    expect(calls).toEqual(["snap install hello-world"]);
+  }),
+);
+
+it.effect("snap backend install pins a channel with `--channel=`, sudo-prefixed under privilege sudo", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const backend = makeSnapBackend();
@@ -1023,8 +1182,23 @@ it.effect("snap backend install pins a channel with `--channel=`", () =>
       "hello-world",
       { _tag: "Channel", name: "latest/edge" },
       capturingExec("", calls),
+      SUDO,
     );
     expect(calls).toEqual(["sudo snap install hello-world --channel=latest/edge"]);
+  }),
+);
+
+it.effect("snap backend install pins a channel under privilege none, unprefixed", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const backend = makeSnapBackend();
+    yield* backend.install(
+      "hello-world",
+      { _tag: "Channel", name: "latest/edge" },
+      capturingExec("", calls),
+      NONE,
+    );
+    expect(calls).toEqual(["snap install hello-world --channel=latest/edge"]);
   }),
 );
 
@@ -1032,7 +1206,7 @@ it.effect("snap backend refuses an Exact pin — a snap has no version history t
   Effect.gen(function* () {
     const backend = makeSnapBackend();
     const result = yield* backend
-      .install("hello-world", { _tag: "Exact", version: "6.4" }, fakeExec(""))
+      .install("hello-world", { _tag: "Exact", version: "6.4" }, fakeExec(""), NONE)
       .pipe(Effect.flip);
     expect(result._tag).toBe("UnsupportedVersionSpec");
   }),
@@ -1109,6 +1283,17 @@ it("parseWingetList returns [] when no separator row is found", () => {
   expect(parseWingetList("No installed package found matching input criteria.")).toEqual([]);
 });
 
+it.effect(
+  "winget backend refreshIndex shells out to `winget source update` (UNVERIFIED, no Windows target)",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const backend = makeWingetBackend();
+      yield* backend.refreshIndex?.(capturingExec("", calls), NONE) ?? Effect.void;
+      expect(calls).toEqual(["'winget' 'source' 'update'"]);
+    }),
+);
+
 it.effect("choco backend parses `name|version` limit-output lines into names and versions", () =>
   Effect.gen(function* () {
     const backend = makeChocoBackend();
@@ -1130,6 +1315,7 @@ it.effect(
         "git",
         { _tag: "Exact", version: "2.40.0" },
         capturingExec("", calls),
+        NONE,
       );
       expect(calls).toEqual([
         "'choco' 'install' 'git' '--version' '2.40.0' '--allow-downgrade' '-y'",
@@ -1258,6 +1444,77 @@ it.effect(
       expect(
         reconciler.matches({ manager: "pacman", name: "tree", version: "2.0.0-1" }, neverDesired),
       ).toBe(true);
+    }),
+);
+
+it.effect("Package reconciler drift: empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makePackageReconciler;
+    const props: PackageProps = {
+      manager: "pacman",
+      name: "tree",
+      version: { _tag: "Exact", version: "2.3.2-1" },
+      updatePolicy: { _tag: "ToSpec" },
+    };
+    const desired = yield* reconciler.desired(props);
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("Package reconciler must define drift");
+
+    const matching: PackageState = { manager: "pacman", name: "tree", version: "2.3.2-1" };
+    expect(reconciler.matches(matching, desired)).toBe(true);
+    expect(drift(matching, desired)).toEqual([]);
+
+    const mismatching: PackageState = { manager: "pacman", name: "tree", version: "2.0.0-1" };
+    expect(reconciler.matches(mismatching, desired)).toBe(false);
+    expect(drift(mismatching, desired).length).toBeGreaterThan(0);
+  }),
+);
+
+it.effect(
+  "Package reconciler drift: version direction is `behind`/`ahead` when compareVersions can order the pair, absent otherwise",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makePackageReconciler;
+      const drift = reconciler.drift;
+      if (drift === undefined) return yield* Effect.die("Package reconciler must define drift");
+
+      const props: PackageProps = {
+        manager: "pacman",
+        name: "tree",
+        version: { _tag: "Exact", version: "2.3.2-1" },
+        updatePolicy: { _tag: "ToSpec" },
+      };
+      const desired = yield* reconciler.desired(props);
+
+      // Both dotted-numeric (pacman's own `pkgver-pkgrel` shape) — ordered.
+      expect(
+        drift({ manager: "pacman", name: "tree", version: "2.0.0-1" }, desired),
+      ).toEqual([
+        { field: "version", observed: "2.0.0-1", desired: "2.3.2-1", direction: "behind" },
+      ]);
+      expect(
+        drift({ manager: "pacman", name: "tree", version: "2.5.0-1" }, desired),
+      ).toEqual([
+        { field: "version", observed: "2.5.0-1", desired: "2.3.2-1", direction: "ahead" },
+      ]);
+
+      // An AUR VCS version (`r1235.cafebabe`) has no numeric grammar
+      // `compareVersions` will order — `direction` must be absent, not guessed.
+      const yayProps: PackageProps = {
+        manager: "yay",
+        name: "some-vcs-pkg",
+        version: { _tag: "Exact", version: "r1234.deadbeef" },
+        updatePolicy: { _tag: "ToSpec" },
+      };
+      const yayDesired = yield* reconciler.desired(yayProps);
+      expect(
+        drift(
+          { manager: "yay", name: "some-vcs-pkg", version: "r1235.cafebabe" },
+          yayDesired,
+        ),
+      ).toEqual([
+        { field: "version", observed: "r1235.cafebabe", desired: "r1234.deadbeef" },
+      ]);
     }),
 );
 
@@ -1475,6 +1732,43 @@ it.effect("Repo reconciler apply: adds the repo and returns its state", () =>
   }),
 );
 
+it.effect("Repo reconciler drift: empty exactly when matches is true, no direction — no RepoSpec field is ordered", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRepoReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("Repo reconciler must define drift");
+
+    const desired: RepoProps = { repo: { _tag: "Brew", tap: "can1357/tap" } };
+
+    const matching: RepoProps = { repo: { _tag: "Brew", tap: "can1357/tap" } };
+    expect(reconciler.matches(matching, desired)).toBe(true);
+    expect(drift(matching, desired)).toEqual([]);
+
+    const mismatching: RepoProps = { repo: { _tag: "Brew", tap: "other/tap" } };
+    expect(reconciler.matches(mismatching, desired)).toBe(false);
+    expect(drift(mismatching, desired)).toEqual([
+      { field: "tap", observed: "other/tap", desired: "can1357/tap" },
+    ]);
+
+    // Flatpak's two-field spec: only the field that actually differs is reported.
+    const flatpakDesired: RepoProps = {
+      repo: { _tag: "Flatpak", name: "flathub", location: "https://a" },
+    };
+    const flatpakSameLocation: RepoProps = {
+      repo: { _tag: "Flatpak", name: "flathub", location: "https://a" },
+    };
+    expect(drift(flatpakSameLocation, flatpakDesired)).toEqual([]);
+    const flatpakDifferentLocation: RepoProps = {
+      repo: { _tag: "Flatpak", name: "flathub", location: "https://b" },
+    };
+    expect(drift(flatpakDifferentLocation, flatpakDesired)).toEqual([
+      { field: "location", observed: "https://b", desired: "https://a" },
+    ]);
+    // Every field this reconciler tracks names a value, never an order — no
+    // case above ever carries a `direction`.
+  }),
+);
+
 it.effect(
   "Repo reconciler: a plan-phase observe cannot make a later apply-phase observe miss a real removal",
   () =>
@@ -1504,21 +1798,41 @@ it.effect(
     }),
 );
 
-it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <project>`", () =>
-  Effect.gen(function* () {
-    const reconciler = yield* makeRepoReconciler;
-    const calls: string[] = [];
-    const props: RepoProps = { repo: { _tag: "Dnf", project: "atim/lazygit" } };
-    const desired = yield* reconciler.desired(props);
+it.effect(
+  "Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <project>` when the caller's execution context asks for sudo",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const calls: string[] = [];
+      const props: RepoProps = { repo: { _tag: "Dnf", project: "atim/lazygit" } };
+      const desired = yield* reconciler.desired(props);
 
-    const result = yield* reconciler.apply(
-      { props, observed: Option.none(), desired },
-      applyCtx(capturingExec("", calls)),
-    );
+      const result = yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        applyCtx(capturingExec("", calls), SUDO),
+      );
 
-    expect(result).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
-    expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
-  }),
+      expect(result).toEqual({ repo: { _tag: "Dnf", project: "atim/lazygit" } });
+      expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
+    }),
+);
+
+it.effect(
+  "Repo reconciler apply: dnf's addRepo runs unprefixed when no execution context is given at all — privilege none is the default",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const calls: string[] = [];
+      const props: RepoProps = { repo: { _tag: "Dnf", project: "atim/lazygit" } };
+      const desired = yield* reconciler.desired(props);
+
+      yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        applyCtx(capturingExec("", calls)),
+      );
+
+      expect(calls).toEqual(["dnf copr enable -y atim/lazygit"]);
+    }),
 );
 
 it.effect(

@@ -224,11 +224,15 @@ export const toProvider = <Res extends ResourceLike, E, R>(
                 return observed.value;
               }
 
-              if (reconciler.snapshotBeforeApply && preexisting) {
-                yield* ctx.snapshot(address);
-              }
+              const snapshot =
+                reconciler.snapshotBeforeApply && preexisting
+                  ? yield* ctx.snapshot(address)
+                  : undefined;
 
-              return yield* reconciler.apply({ props: news, observed, desired }, ctx);
+              return yield* reconciler.apply(
+                { props: news, observed, desired, ...(snapshot === undefined ? {} : { snapshot }) },
+                ctx,
+              );
             }),
           );
         }),

@@ -6,7 +6,12 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { FilePathUnreadable, makeFileReconciler, type FileProps } from "../src/File.ts";
+import {
+  FilePathUnreadable,
+  makeFileReconciler,
+  type FileProps,
+  type FileState,
+} from "../src/File.ts";
 
 const layer = Layer.mergeAll(MachinePathsLive(), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -17,6 +22,19 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+/** A real `ctx.snapshot`, so `apply`'s own backup capture has something to
+ * actually copy — the stub above always reports "nothing to preserve".
+ * `fs` is resolved by the caller, since `ApplyContext.snapshot` itself may
+ * not require any service (`R = never`). */
+const snapshottingCtx = (fs: FileSystem.FileSystem) => ({
+  exec: () => Effect.die("not used"),
+  snapshot: (target: string) =>
+    fs.copy(target, `${target}.bak`).pipe(
+      Effect.as(`${target}.bak`),
+      Effect.orElseSucceed(() => undefined),
+    ),
+});
 
 /**
  * A path that cannot be inspected is not a path with nothing at it.
@@ -206,5 +224,122 @@ it.effect("a moved `path` is an independent address: the old file is left untouc
     // file survives a "move" made purely by editing the recipe.
     expect(yield* fs.exists(oldPath)).toBe(true);
     expect(yield* fs.exists(newPath)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift is empty exactly when matches is true, and names content and mode", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeFileReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+
+    const desired: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
+
+    const same: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
+    expect(reconciler.matches(same, desired)).toBe(true);
+    expect(drift(same, desired)).toEqual([]);
+
+    const contentDrifted: FileState = { path: "/tmp/x", hash: "bbb", mode: 0o600 };
+    expect(reconciler.matches(contentDrifted, desired)).toBe(false);
+    const contentFields = drift(contentDrifted, desired);
+    expect(contentFields.map((f) => f.field)).toEqual(["content"]);
+    // A hash is not ordered — "behind"/"ahead" would be an invented claim.
+    expect(contentFields[0]?.direction).toBeUndefined();
+
+    // Observed behind desired: 0o600 < 0o644.
+    const modeBehind: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
+    const desiredHigherMode: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o644 };
+    expect(reconciler.matches(modeBehind, desiredHigherMode)).toBe(false);
+    const behindFields = drift(modeBehind, desiredHigherMode);
+    expect(behindFields).toEqual([
+      { field: "mode", observed: "600", desired: "644", direction: "behind" },
+    ]);
+
+    // Observed ahead of desired: 0o644 > 0o600.
+    const modeAhead: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o644 };
+    expect(reconciler.matches(modeAhead, desired)).toBe(false);
+    const aheadFields = drift(modeAhead, desired);
+    expect(aheadFields).toEqual([
+      { field: "mode", observed: "644", desired: "600", direction: "ahead" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "drift reports a constrained mode with no observed value, but never invents a direction",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeFileReconciler;
+      const drift = reconciler.drift;
+      if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+
+      // `observed.mode` is optional in the schema; this can only arise from a
+      // hand-built state (a live `observe` always populates it), but `drift`
+      // must still not invent a number to order against.
+      const observed: FileState = { path: "/tmp/x", hash: "aaa" };
+      const desired: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
+      expect(reconciler.matches(observed, desired)).toBe(false);
+      expect(drift(observed, desired)).toEqual([{ field: "mode", observed: "unset", desired: "600" }]);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply restores the file to what it was before the last apply, when a backup was captured",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const unapply = reconciler.unapply;
+      if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "config");
+
+      yield* fs.writeFileString(target, "hand-written before machine-run");
+
+      const props: FileProps = { path: target, content: "generated" };
+      const desired = yield* reconciler.desired(props);
+      const observedBefore = yield* reconciler.observe(props, observeCtx);
+      // The engine captures the backup and hands the path to `apply` — see
+      // `ApplyInput.snapshot`. Passing it explicitly is what this test is for:
+      // `File` must fold it into its own state, not take its own snapshot.
+      const archived = `${target}.bak`;
+      yield* fs.copy(target, archived);
+      const output = yield* reconciler.apply(
+        { props, observed: observedBefore, desired, snapshot: archived },
+        snapshottingCtx(fs),
+      );
+      expect(output.backupPath).toBe(archived);
+      expect(yield* fs.readFileString(target)).toBe("generated");
+
+      const observedNow = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+      yield* unapply({ props, observed: observedNow, recorded: output }, snapshottingCtx(fs));
+
+      expect(yield* fs.readFileString(target)).toBe("hand-written before machine-run");
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply removes the file it created when nothing was there before", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeFileReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "config");
+
+    const props: FileProps = { path: target, content: "generated" };
+    const desired = yield* reconciler.desired(props);
+    const output = yield* reconciler.apply(
+      { props, observed: Option.none(), desired },
+      snapshottingCtx(fs),
+    );
+    expect(output.backupPath).toBeUndefined();
+
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    yield* unapply({ props, observed, recorded: output }, snapshottingCtx(fs));
+
+    expect(yield* fs.exists(target)).toBe(false);
   }).pipe(Effect.provide(layer)),
 );
