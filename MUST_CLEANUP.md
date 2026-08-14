@@ -354,6 +354,106 @@ three times; the next failure is already being written.
 
 ---
 
+## Tier 1d — the framework models *what*, never *how the run behaves*
+
+Every entry below is the same shape: a property of the **execution context**
+that no type carries, so each backend improvises it, hardcodes it, or forgets
+it. This is the largest structural finding in the document, and the individual
+items are symptoms.
+
+### 1d.1 Privilege is a string prefix in 4 of 19 backends
+
+`apt`, `dnf`, `pacman` and `snap` shell out to `Sh.sh("sudo", ...)`
+unconditionally. `flatpak` does not, and nothing says whether that is a
+deliberate user-scoped choice or an oversight.
+
+Consequences, none of which a type would allow:
+
+- **It runs `sudo` when already root.** Minimal containers frequently do not
+  install `sudo`, so this fails with command-not-found in precisely the
+  environments this repo verifies in. Our runs pass because they are root *and*
+  happen to have it.
+- **A password prompt has nowhere to go.** A non-interactive `deploy` hangs on
+  the tty or fails. A reconciler that can hang mid-apply is worse than one that
+  refuses to start.
+- **A recipe cannot say** "already root", "use `doas`", or "no escalation
+  available on this machine".
+
+### 1d.2 Locale is never pinned — *every* parser is exposed
+
+Zero occurrences of `LC_ALL` or `LANG` anywhere in `src`. This repo parses
+human-readable output from `apt`, `dnf`, `pacman`, `brew`, `launchctl` and
+more, all of which localise. **On a French or Japanese machine every parser in
+the repo misreads**, and no test catches it because CI runs in English.
+
+Same class as the winget ellipsis, except repo-wide and invisible.
+
+### 1d.3 File ownership is not modelled at all
+
+`mode` is handled meticulously — POSIX bits, a Windows ACL translation, a
+`FilePermissions` type. `uid`/`gid` appear nowhere.
+
+A file written under `sudo` is owned by root. `matches` compares mode only, so
+it reports converged permanently while the user cannot read their own config.
+The gap is invisible precisely because the neighbouring concept is so carefully
+modelled.
+
+### 1d.4 Timeouts are 38 hardcoded literals
+
+Six distinct values (`"10 minutes"` ×17, `"15 minutes"` ×7, `"2 minutes"` ×6,
+`"5 minutes"` ×4, `"1 minute"` ×2, `"30 seconds"` ×2), none configurable.
+
+A slow link makes `brew install` exceed ten minutes and the deploy fails with no
+recourse — the operator cannot raise it, and the number was chosen by whoever
+wrote that backend. Timeout is a property of the run and the machine, not of the
+package manager.
+
+### 1d.5 Paths are bare strings, held correct by hand
+
+28 props typed `path: Schema.String`, and 40 manual `paths.expand(...)` calls.
+
+Every one is currently correct — verified: no path prop reaches the filesystem
+or a command unexpanded. But nothing makes the 41st correct. A branded
+`MachinePath` separating *authored* (may contain `~`) from *resolved* would make
+the mistake unrepresentable instead of merely absent so far.
+
+This is the same pattern as `readIfPresent` and `ShellCommand`: a discipline that
+holds until it doesn't.
+
+### 1d.6 Defaults are scattered literals
+
+`0o700` ×12, `0o600` ×6, `0o755` ×3, `0o644` ×3, `0o777` ×8, each redeclared at
+its use site. There is no policy object saying what this tool's defaults *are*,
+so changing one means finding all of them.
+
+### 1d.7 Absent entirely
+
+- **No "requires reboot / re-login" signal.** `chsh` takes effect next login;
+  `defaults` needs an app restart, handled ad-hoc via `restartApp`. A resource
+  cannot say the machine is not really converged yet.
+- **No OS-level lock handling.** `FileLock` serialises *our* writes; nothing
+  handles `dpkg` holding `/var/lib/dpkg/lock` because unattended-upgrades is
+  running.
+- **No architecture concept** — arm64 vs x86_64, Rosetta.
+- **No TOCTOU protection** on paths this tool does not own: it writes
+  `~/.ssh/id_ed25519` without checking `~/.ssh` is not a symlink elsewhere.
+- **No partial-failure story.** Apply dies at resource 20 of 40 and nothing
+  describes the resulting state.
+
+### 1d.8 The fix is one concept
+
+An **`ExecutionContext`** threaded through the `exec` seam, carrying privilege,
+locale, architecture, platform, and timeout policy — with each backend declaring
+in its *type* what it requires, the way `VersionSpec` will declare what each
+manager can honour.
+
+`sudo` stops being a string. Locale stops being forgotten. Timeout stops being a
+literal chosen by whoever wrote the file. And the recipe gains a way to say
+things it currently cannot say at all: *this machine has no escalation*, *I am
+already root*, *this link is slow*.
+
+---
+
 ## Tier 2 — design drift
 
 ### 2.1 `ProviderOverrides` is dead code

@@ -61,8 +61,8 @@ accounts configured for use with 1Password CLI.`, which matched none
       exactly the shape of an SSH key, a PEM cert, or any multi-line secret,
       with exit code `0` and no signal anything went wrong. `read` now shells
       out with `-g` instead and parses both forms it can produce: `password:
-    0x<hex>` (decoded directly — the ground truth) and a bare `password:
-    "quoted string"` for the printable case. Verified against a disposable
+  0x<hex>` (decoded directly — the ground truth) and a bare `password:
+  "quoted string"` for the printable case. Verified against a disposable
       test keychain on real macOS (never the login keychain): a plain
       value, an embedded newline, an embedded tab, a realistic multi-line
       PEM-shaped blob (with and without its own trailing newline), and
@@ -75,7 +75,7 @@ accounts configured for use with 1Password CLI.`, which matched none
       missing-entry exit `44`/stderr signal `SecretNotFound` depends on was
       re-verified unchanged under `-g`. See
       `test/fixtures/keychain-g-flag-transcript.txt`, `src/backends/
-    Keychain.ts`'s doc comment, and `test/Keychain.test.ts`. `keychain`'s
+  Keychain.ts`'s doc comment, and `test/Keychain.test.ts`. `keychain`'s
       successful-read path can move from `!` to `✓` in
       [docs/MAP.md](../../docs/MAP.md) as a follow-up (out of this fix's
       scope, which was limited to `packages/secrets/`).
