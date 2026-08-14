@@ -1,4 +1,4 @@
-import type { CredentialHelperBackend } from "./Backend.ts";
+import type { CredentialHelperBackend } from "../Backend.ts";
 
 /**
  * The Linux Secret Service (GNOME Keyring, KWallet via a compatible provider,

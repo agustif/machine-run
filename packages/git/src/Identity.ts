@@ -1,3 +1,4 @@
+import { Sh } from "@machine-run/core";
 import * as Dotfiles from "@machine-run/dotfiles";
 import * as Shell from "@machine-run/shell";
 import * as Effect from "effect/Effect";
@@ -83,6 +84,23 @@ const renderPersonaConfig = (props: GitPersonaProps) =>
 const toShellGlob = (pathGlob: string) => `${pathGlob.replace(/\/\*\*$/, "/*")}`;
 
 /**
+ * The `gh auth switch` command rendered into the directory-change hook,
+ * with `ghAccount` quoted via {@link Sh.sh}.
+ *
+ * This is written into a shell rc file and re-executed on every directory
+ * change, so an unquoted `ghAccount` containing `;` or a space would be a
+ * permanent hazard in the operator's own rc file rather than a one-shot
+ * failure — exactly the bug `Sh.sh` exists to rule out (see its doc
+ * comment). The `>/dev/null 2>&1` redirection is appended as a literal
+ * rather than passed through `Sh.sh`: it is plain POSIX syntax, not data,
+ * and is valid verbatim in zsh/bash/fish alike — this module only ever asks
+ * `Shell.hook` for one of those three, never `nu`/`pwsh`, whose redirection
+ * syntax differs.
+ */
+export const renderGhAccountSwitchCommand = (ghAccount: string): string =>
+  `${Sh.sh("gh", "auth", "switch", "--user", ghAccount)} >/dev/null 2>&1`;
+
+/**
  * Composes `Dotfiles.File` (the persona's own config), {@link Config} (the
  * `includeIf.gitdir:<glob>.path` key in the global gitconfig), and
  * optionally `@machine-run/shell`'s `hook` (the `gh` account directory-
@@ -142,11 +160,7 @@ export const gitIdentity = (props: GitPersonaProps) =>
         rcPath: props.shellRcPath,
         name: `gh_${props.persona}`,
         pathGlob: toShellGlob(props.pathGlob),
-        // Suppressing output is plain POSIX redirection, valid verbatim in
-        // zsh/bash/fish alike — this module only ever asks `Shell.hook` for
-        // one of those three, never `nu`/`pwsh`, whose redirection syntax
-        // differs.
-        command: `gh auth switch --user ${ghAccount} >/dev/null 2>&1`,
+        command: renderGhAccountSwitchCommand(ghAccount),
       });
     }
 

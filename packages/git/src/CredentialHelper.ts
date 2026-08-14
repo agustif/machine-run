@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect";
-import { type CredentialHelperBackendId } from "./backends/Backend.ts";
-import { credentialHelperBackend } from "./backends/Store.ts";
+import { type CredentialHelperBackendId } from "./Backend.ts";
+import { credentialHelperBackend } from "./Store.ts";
 import { Config } from "./Config.ts";
 
 export interface GitCredentialHelperProps {
@@ -16,8 +16,8 @@ export interface GitCredentialHelperProps {
  * Sets `credential.helper` from one or more backends, via {@link Config}.
  *
  * A composition, not a `Reconciler`: the backend seam
- * (`backends/Backend.ts` + `backends/*.ts`, dispatched from
- * `backends/Store.ts`) supplies the literal value(s); this just hands them
+ * (`Backend.ts` + `backends/*.ts`, dispatched from
+ * `Store.ts`) supplies the literal value(s); this just hands them
  * to the one resource that already knows how to converge a config key. This
  * is the pattern the whole system already uses for pluggable
  * implementations — see `system-packages`' `PackageManagerBackend` and
