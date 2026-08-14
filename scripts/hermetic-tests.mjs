@@ -19,11 +19,13 @@ const config = join(home, ".config");
 const cache = join(home, ".cache");
 const data = join(home, ".local", "share");
 const state = join(home, ".local", "state");
+const vitestCache = join(temp, "vitest-cache");
 mkdirSync(config, { recursive: true });
 mkdirSync(cache, { recursive: true });
 mkdirSync(data, { recursive: true });
 mkdirSync(state, { recursive: true });
 mkdirSync(temp);
+mkdirSync(vitestCache);
 
 const networkGuard = resolve(project, "scripts/forbid-network.mjs");
 const nodeDirectory = dirname(process.execPath);
@@ -52,6 +54,7 @@ const env = {
   XDG_CACHE_HOME: cache,
   XDG_DATA_HOME: data,
   XDG_STATE_HOME: state,
+  MACHINE_RUN_VITEST_CACHE_DIR: vitestCache,
   PATH: nodeDirectory,
   NODE_OPTIONS: `--import=${networkGuard}`,
   CI: "1",
@@ -65,7 +68,7 @@ const vitest = resolve(project, "node_modules/vitest/vitest.mjs");
 let status = 1;
 // oxlint-disable-next-line effect/noTryCatch -- the child process must always release its temporary root, including spawn failures.
 try {
-  const result = spawnSync(process.execPath, [vitest, "run"], {
+  const result = spawnSync(process.execPath, [vitest, "run", "--configLoader", "runner"], {
     cwd: project,
     env,
     stdio: "inherit",
