@@ -6,7 +6,12 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
-import { GitRepoCommandFailed, GitRepoPathOccupied, makeGitRepoReconciler } from "../src/Repo.ts";
+import {
+  GitRepoCommandFailed,
+  GitRepoPathOccupied,
+  GitRepoPathUnreadable,
+  makeGitRepoReconciler,
+} from "../src/Repo.ts";
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -162,6 +167,34 @@ it.effect("observe reports no `remote` field when the repository has no `origin`
     );
     expect(observed).toEqual({ path: target });
   }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "observe fails with GitRepoPathUnreadable rather than reporting absent when the path cannot be stat'd",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeGitRepoReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const locked = path.join(dir, "locked");
+      const target = path.join(locked, "repo");
+      yield* fs.makeDirectory(locked);
+      // A real permission-denied `stat` — not a fabricated `PlatformError` —
+      // the same discipline `MUST_CLEANUP.md` demands for every backend:
+      // stripping every permission bit off the parent makes even looking up
+      // `target`'s name fail with `EACCES`, distinct from `target` simply
+      // not existing.
+      yield* fs.chmod(locked, 0o000);
+
+      const error = yield* reconciler
+        .observe({ path: target, remote: "irrelevant" }, notARepoExec)
+        .pipe(
+          Effect.ensuring(Effect.orDie(fs.chmod(locked, 0o700))),
+          Effect.flip,
+        );
+      expect(error).toBeInstanceOf(GitRepoPathUnreadable);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("observe surfaces a real command failure rather than treating it as absent", () =>

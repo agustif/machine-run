@@ -1,4 +1,4 @@
-import { MachinePaths, Sh } from "@machine-run/core";
+import { isNotFound, MachinePaths, Sh, statIfPresent } from "@machine-run/core";
 import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -6,6 +6,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
+import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { isExitCode } from "./exitCode.ts";
 import { showToplevel } from "./toplevel.ts";
@@ -132,7 +133,23 @@ export class GitRepoCommandFailed extends Data.TaggedError("GitRepoCommandFailed
   }
 }
 
-export type GitRepoError = GitRepoPathOccupied | GitRepoCommandFailed;
+/**
+ * `path` could not be inspected at all — not "nothing there", but a
+ * permissions or I/O problem underneath it. The `Ssh.Key`/`Ssh.KnownHost`
+ * gold standard this mirrors: collapsing this into "absent" would let
+ * `apply` go on to run `git clone` against a path whose real problem is
+ * invisibility, not emptiness (MUST_CLEANUP.md 1b.3).
+ */
+export class GitRepoPathUnreadable extends Data.TaggedError("GitRepoPathUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
+  override get message() {
+    return `Could not inspect "${this.path}": ${this.cause.reason._tag}. Git.Repo never treats an unreadable path as "nothing here" — resolve the underlying permissions or I/O problem, then re-run.`;
+  }
+}
+
+export type GitRepoError = GitRepoPathOccupied | GitRepoCommandFailed | GitRepoPathUnreadable;
 
 /**
  * The first configured fetch URL of `origin`, or `undefined` when no such
@@ -172,18 +189,33 @@ export const makeGitRepoReconciler: Effect.Effect<
       Effect.gen(function* () {
         const target = paths.expand(props.path);
 
-        const info = yield* fs.stat(target).pipe(Effect.orElseSucceed(() => undefined));
-        if (info === undefined) return undefined;
+        const info = yield* statIfPresent(
+          fs,
+          target,
+          (cause) => new GitRepoPathUnreadable({ path: target, cause }),
+        );
+        if (Option.isNone(info)) return undefined;
 
-        if (info.type !== "Directory") {
+        if (info.value.type !== "Directory") {
           return yield* Effect.fail(
             new GitRepoPathOccupied({ path: target, detail: "a file occupies this path" }),
           );
         }
 
-        const entries = yield* fs
-          .readDirectory(target)
-          .pipe(Effect.orElseSucceed((): readonly string[] => []));
+        // `readDirectory` has no shared `*IfPresent` helper in `@machine-run/core`
+        // — `stat` above already confirmed `target` exists, so a `NotFound`
+        // here would mean it vanished between the two calls, not that it was
+        // never there; folded into "empty" either way since an empty
+        // directory is exactly what a fresh `git clone` accepts. Anything
+        // else (a permissions or I/O problem) propagates rather than reading
+        // as "nothing here" — the same discipline `statIfPresent` just
+        // applied above.
+        const entries = yield* fs.readDirectory(target).pipe(
+          Effect.catchTag("PlatformError", (cause) => {
+            if (isNotFound(cause)) return Effect.succeed<readonly string[]>([]);
+            return Effect.fail(new GitRepoPathUnreadable({ path: target, cause }));
+          }),
+        );
 
         const toplevel = yield* showToplevel(target, ctx.exec).pipe(
           Effect.mapError((cause) => new GitRepoCommandFailed({ path: target, cause })),

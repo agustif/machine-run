@@ -1,4 +1,5 @@
 import { Sh } from "@machine-run/core";
+import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
@@ -9,7 +10,17 @@ import {
   type AiMcpServerSpec,
   type AiToolBackend,
 } from "../Backend.ts";
-import { classifyCliError, isCommandNotFound, metaToken } from "./cliMcp.ts";
+import { classifyCliError, isCommandNotFound, metaToken, stderrOf } from "./cliMcp.ts";
+
+/**
+ * `codex mcp get <missing> --json` exits non-zero with this text on stderr
+ * — verified against the real, installed `codex` CLI run with a name it has
+ * never heard of. Matched case-insensitively and as a substring (real output
+ * carries an `Error: ` prefix) so this narrows only the documented shape,
+ * the same discipline `git/src/toplevel.ts`'s `showToplevel` uses for `git`'s
+ * "not a git repository" text.
+ */
+const NO_SUCH_SERVER = /No MCP server named/i;
 
 /**
  * `codex mcp get <name> --json`'s own shape, verified by running the real,
@@ -42,6 +53,36 @@ const CodexMcpGet = Schema.fromJsonString(
 const decodeCodexMcpGet = Schema.decodeUnknownEffect(CodexMcpGet);
 
 const CONFIG_PATH = "~/.codex/config.toml";
+
+/**
+ * Classifies a failed `codex mcp get <name> --json`. Command-not-found
+ * promotes to {@link AiToolCliMissing}; the documented "no such server" text
+ * on stderr is genuine absence, reported as `undefined` rather than a
+ * failure; everything else propagates unchanged. Unlike `classifyCliError`,
+ * this has three outcomes rather than two — the absent-server case exists
+ * only for this one read path, never for `apply`, so it lives here rather
+ * than in `cliMcp.ts`.
+ *
+ * Written as an if/else chain, not nested ternaries, so each branch's return
+ * type is checked against the declared signature independently, and so a
+ * fourth outcome added later has an obvious place to go rather than another
+ * level of nesting.
+ */
+const classifyCodexMcpGetError = (
+  error: CommandError,
+): Effect.Effect<AiMcpServerSpec | undefined, AiToolCliMissing | CommandError> => {
+  if (isCommandNotFound(error)) {
+    return Effect.fail(new AiToolCliMissing({ tool: "codex", cli: "codex", cause: error }));
+  }
+  if (NO_SUCH_SERVER.test(stderrOf(error))) {
+    return Effect.succeed(undefined);
+  }
+  // A corrupted `$CODEX_HOME`, a permissions problem, a crash — anything
+  // that isn't the two shapes above must not be read as "the server was
+  // never added" (MUST_CLEANUP.md 1b.2), so it propagates and `apply` never
+  // gets a chance to paper over it with `codex mcp add`.
+  return Effect.fail(error);
+};
 
 /**
  * Codex, verified directly: `codex mcp add <name> --env K=V -- cmd args...`
@@ -86,14 +127,7 @@ export const CodexBackend: AiToolBackend = {
                 }
               : { url: parsed.transport.url },
         ),
-        Effect.catchTag("CommandError", (error) =>
-          isCommandNotFound(error)
-            ? Effect.fail(new AiToolCliMissing({ tool: "codex", cli: "codex", cause: error }))
-            : // `codex mcp get <missing> --json` exits non-zero with "No MCP
-              // server named '<name>' found." on stderr — ordinary absence,
-              // not a malformed config.
-              Effect.succeed(undefined),
-        ),
+        Effect.catchTag("CommandError", classifyCodexMcpGetError),
       ),
 
     apply: (name, desired, ctx) =>

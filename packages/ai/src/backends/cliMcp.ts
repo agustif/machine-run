@@ -17,6 +17,17 @@ export const isCommandNotFound = (error: CommandError): boolean => {
 };
 
 /**
+ * `stderr` from a failed command's `UnexpectedExit` reason, or `""` for any
+ * other failure shape (a spawn failure, a timeout — neither ran a process
+ * that could have written to `stderr`). The same derivation as
+ * `git/src/exitCode.ts`'s `stderrOf`, kept local rather than imported across
+ * packages: it's a two-line read off `CommandError["reason"]`, not a seam
+ * worth a cross-package dependency for.
+ */
+export const stderrOf = (error: CommandError): string =>
+  error.reason._tag === "UnexpectedExit" ? error.reason.stderr : "";
+
+/**
  * Promotes a `CommandError` to {@link AiToolCliMissing} when it looks like
  * the binary itself is absent, and passes every other `CommandError` through
  * unchanged. A named function with an explicit return type, rather than an
