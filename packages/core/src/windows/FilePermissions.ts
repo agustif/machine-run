@@ -194,6 +194,28 @@ export const WELL_KNOWN_PRINCIPALS = {
   other: "*S-1-1-0",
 } satisfies Record<"owner" | "group" | "other", string>;
 
+/**
+ * Every string `icacls <path>`'s plain listing might print for a well-known
+ * principal: the numeric `*S-...` form {@link WELL_KNOWN_PRINCIPALS} writes
+ * with (language-independent, what `/grant` takes), and the friendly display
+ * name Windows resolves that SID to when *reading* an ACL back — both cited
+ * against the same well-known-SID table (docs/notes/windows-permissions.md
+ * §1). Read-back matching (`Icacls.ts`'s `permissionsSatisfied`) needs both
+ * forms because writing and reading render the same SID differently, not
+ * because either form alone is wrong.
+ *
+ * UNVERIFIED: no Windows machine has confirmed a plain listing actually
+ * resolves `*S-1-3-4` to "OWNER RIGHTS" rather than leaving a raw SID string
+ * on some build/locale — see docs/notes/windows-permissions.md §7. The two
+ * real fixtures `Icacls.test.ts` pins against do independently confirm
+ * `BUILTIN\Users` is the friendly form actually printed for `S-1-5-32-545`.
+ */
+export const WELL_KNOWN_PRINCIPAL_ALIASES = {
+  owner: [WELL_KNOWN_PRINCIPALS.owner, "OWNER RIGHTS"],
+  group: [WELL_KNOWN_PRINCIPALS.group, "BUILTIN\\Users"],
+  other: [WELL_KNOWN_PRINCIPALS.other, "Everyone"],
+} satisfies Record<"owner" | "group" | "other", readonly string[]>;
+
 /** One principal's grant: a Sid (or `icacls` Sid-string) and its rights. */
 export interface WindowsGrant {
   readonly principal: string;

@@ -2,7 +2,15 @@ import { expect, it } from "@effect/vitest";
 import * as Fs from "node:fs";
 import * as Path from "node:path";
 import * as Result from "effect/Result";
-import { grantedRights, isNoBroaderThan, parseIcacls } from "../../src/windows/Icacls.ts";
+import { fromPosixMode } from "../../src/windows/FilePermissions.ts";
+import {
+  grantedRights,
+  isNoBroaderThan,
+  matchesMode,
+  parseIcacls,
+  permissionsSatisfied,
+  type IcaclsListing,
+} from "../../src/windows/Icacls.ts";
 
 /**
  * Both fixtures are real `icacls` output, captured on a real Windows machine
@@ -119,4 +127,93 @@ it("isNoBroaderThan: a subset of allowed rights matches, an extra right does not
   expect(isNoBroaderThan(new Set(["RD", "RC"]), ["RD", "RC", "S"])).toBe(true);
   expect(isNoBroaderThan(new Set(["RD", "WD"]), ["RD", "RC", "S"])).toBe(false);
   expect(isNoBroaderThan(new Set(), ["RD", "RC", "S"])).toBe(true);
+});
+
+/** A listing shaped exactly like what `toIcaclsArgv(path, toWindowsAclPlan(fromPosixMode(0o600, "file")))`
+ * asked for, then read back — the owner's alias resolved to its friendly
+ * display name, per `WELL_KNOWN_PRINCIPAL_ALIASES`'s documented UNVERIFIED
+ * assumption about what a plain listing prints back. */
+const listingFor0o600: IcaclsListing = {
+  path: "C:\\secret",
+  aces: [
+    {
+      principal: "OWNER RIGHTS",
+      inherited: false,
+      inheritanceFlags: [],
+      rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"],
+    },
+  ],
+};
+
+it("permissionsSatisfied: true for a listing that grants exactly a 0o600 owner-only intent", () => {
+  expect(permissionsSatisfied(listingFor0o600, fromPosixMode(0o600, "file"))).toBe(true);
+});
+
+it("permissionsSatisfied: false when Everyone gained a right 0o600 withholds", () => {
+  const drifted: IcaclsListing = {
+    ...listingFor0o600,
+    aces: [
+      ...listingFor0o600.aces,
+      { principal: "Everyone", inherited: false, inheritanceFlags: [], rights: ["RD"] },
+    ],
+  };
+  expect(permissionsSatisfied(drifted, fromPosixMode(0o600, "file"))).toBe(false);
+});
+
+it("permissionsSatisfied: accepts the numeric SID form as well as the friendly name", () => {
+  const listing: IcaclsListing = {
+    path: "C:\\secret",
+    aces: [{ principal: "*S-1-3-4", inherited: false, inheritanceFlags: [], rights: ["RD"] }],
+  };
+  // A listing granting less than 0o600's full owner bundle still satisfies —
+  // the documented asymmetry (isNoBroaderThan's doc comment): this cannot
+  // detect a principal that lost rights `mode` promised.
+  expect(permissionsSatisfied(listing, fromPosixMode(0o600, "file"))).toBe(true);
+});
+
+it("permissionsSatisfied: BUILTIN\\Users granted read for 0o644 satisfies, granted write does not", () => {
+  const readOnly: IcaclsListing = {
+    path: "C:\\shared",
+    aces: [
+      {
+        principal: "OWNER RIGHTS",
+        inherited: false,
+        inheritanceFlags: [],
+        rights: ["RD", "REA", "RA", "RC", "S", "WD", "AD", "WEA", "WA"],
+      },
+      { principal: "BUILTIN\\Users", inherited: false, inheritanceFlags: [], rights: ["RD", "RC"] },
+      { principal: "Everyone", inherited: false, inheritanceFlags: [], rights: ["RD", "RC"] },
+    ],
+  };
+  expect(permissionsSatisfied(readOnly, fromPosixMode(0o644, "file"))).toBe(true);
+
+  const writable: IcaclsListing = {
+    ...readOnly,
+    aces: [
+      ...readOnly.aces,
+      { principal: "BUILTIN\\Users", inherited: false, inheritanceFlags: [], rights: ["WD"] },
+    ],
+  };
+  expect(permissionsSatisfied(writable, fromPosixMode(0o644, "file"))).toBe(false);
+});
+
+it("matchesMode: composes parseIcacls and permissionsSatisfied for a matching 0o600 ACL", () => {
+  const stdout =
+    "C:\\secret OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+  const result = matchesMode(stdout, "C:\\secret", 0o600, "file");
+  expect(result).toEqual(Result.succeed(true));
+});
+
+it("matchesMode: resolves to a real (non-error) `false` when the live ACL is broader than mode", () => {
+  const stdout =
+    "C:\\secret OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA)\n" +
+    "           Everyone:(RD)\n\n" +
+    "Successfully processed 1 files; Failed processing 0 files\n";
+  const result = matchesMode(stdout, "C:\\secret", 0o600, "file");
+  expect(result).toEqual(Result.succeed(false));
+});
+
+it("matchesMode: fails (does not silently report false) when stdout cannot be parsed", () => {
+  const result = matchesMode("nonsense", "C:\\secret", 0o600, "file");
+  expect(Result.isFailure(result)).toBe(true);
 });

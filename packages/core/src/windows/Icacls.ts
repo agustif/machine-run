@@ -1,5 +1,12 @@
 import * as Data from "effect/Data";
 import * as Result from "effect/Result";
+import {
+  fromPosixMode,
+  rightsForClass,
+  WELL_KNOWN_PRINCIPAL_ALIASES,
+  type FilePermissions,
+  type PermissionsTarget,
+} from "./FilePermissions.ts";
 
 /**
  * Parses `icacls <path>`'s plain-listing output — the read side of the seam
@@ -231,3 +238,66 @@ export const isNoBroaderThan = (
   const allowedSet = new Set(allowed);
   return [...granted].every((right) => allowedSet.has(right));
 };
+
+const PERMISSION_CLASS_KEYS: ReadonlyArray<"owner" | "group" | "other"> = [
+  "owner",
+  "group",
+  "other",
+];
+
+/**
+ * {@link grantedRights}, unioned across every alias a well-known principal
+ * might appear under in a plain listing — see
+ * {@link WELL_KNOWN_PRINCIPAL_ALIASES}'s doc comment for why both the numeric
+ * SID and the friendly name are needed.
+ */
+const grantedRightsForClass = (
+  listing: IcaclsListing,
+  key: "owner" | "group" | "other",
+): ReadonlySet<string> =>
+  new Set(
+    WELL_KNOWN_PRINCIPAL_ALIASES[key].flatMap((principal) => [...grantedRights(listing, principal)]),
+  );
+
+/**
+ * Does a parsed ACL satisfy a `mode`'s intent? Applies {@link isNoBroaderThan}
+ * per class (owner/group/other), against each class's well-known principal —
+ * the composite check `observe` needs, as opposed to `isNoBroaderThan`'s
+ * one-principal building block. Carries the same accepted asymmetry: a
+ * principal granted fewer rights than `permissions` promises still reads as
+ * satisfied (see `isNoBroaderThan`'s doc comment and
+ * docs/notes/windows-permissions.md §6-§7).
+ */
+export const permissionsSatisfied = (
+  listing: IcaclsListing,
+  permissions: FilePermissions,
+): boolean =>
+  PERMISSION_CLASS_KEYS.every((key) =>
+    isNoBroaderThan(grantedRightsForClass(listing, key), rightsForClass(permissions[key])),
+  );
+
+/**
+ * The one function a resource's Windows-aware `matches` should call in place
+ * of comparing `fs.stat().mode` to a pinned POSIX `mode` (which cannot work at
+ * all — see `FilePermissions.ts`'s header comment and
+ * docs/notes/windows-permissions.md §2). Parses `stdout` (`icacls <path>`'s
+ * own raw output, for the exact `path` it was run against — same requirement
+ * as {@link parseIcacls}), decomposes `mode`/`target` the same way `apply`
+ * would via {@link fromPosixMode}, and answers whether the live ACL satisfies
+ * that intent via {@link permissionsSatisfied}.
+ *
+ * Fails only when `stdout` itself could not be parsed — format drift, or
+ * `icacls` itself reporting a failure — never as a way of saying "doesn't
+ * match": a live ACL that parses cleanly but grants more than `mode` allows
+ * resolves as `Result.succeed(false)`, a real answer for `matches` to act on,
+ * not an error.
+ */
+export const matchesMode = (
+  stdout: string,
+  path: string,
+  mode: number,
+  target: PermissionsTarget,
+): Result.Result<boolean, IcaclsParseError> =>
+  Result.map(parseIcacls(stdout, path), (listing) =>
+    permissionsSatisfied(listing, fromPosixMode(mode, target)),
+  );
