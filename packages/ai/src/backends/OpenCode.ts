@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import type * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { CREDENTIAL_DIRECTORY_MODE, writeCredentialFileString } from "@machine-run/core";
@@ -68,6 +69,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * exactly the kind of "patch around it" AGENTS.md rule 11 rules out. See
  * docs/ai-notes.md.
  */
+const configFile = (home: string, path: Path.Path) =>
+  path.join(home, ".config/opencode/opencode.jsonc");
+
 const readDocument = (
   configPath: string,
   ctx: AiToolContext,
@@ -174,9 +178,11 @@ export const OpenCodeBackend: AiToolBackend = {
   skillsDir: ".config/opencode/skills",
   reviewedConfigFiles: [],
   mcp: {
+    configFile,
+
     observe: (name, ctx) =>
       Effect.gen(function* () {
-        const configPath = ctx.path.join(ctx.home, ".config/opencode/opencode.jsonc");
+        const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
         const raw = isRecord(doc.mcp) ? doc.mcp : {};
         const servers = yield* decodeMcpServers(raw).pipe(
@@ -192,7 +198,7 @@ export const OpenCodeBackend: AiToolBackend = {
 
     apply: (name, desired, ctx) =>
       Effect.gen(function* () {
-        const configPath = ctx.path.join(ctx.home, ".config/opencode/opencode.jsonc");
+        const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
         const raw = isRecord(doc.mcp) ? doc.mcp : {};
         yield* writeDocument(

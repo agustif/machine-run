@@ -92,6 +92,10 @@ export const GrokBackend: AiToolBackend = {
   skillsDir: ".grok/skills",
   reviewedConfigFiles: [".grok/config.toml"],
   mcp: {
+    // Mutated through `grok mcp add/list`, never written directly, but this is
+    // still the file those subcommands contend for.
+    configFile: (home, path) => path.join(home, ".grok/config.toml"),
+
     observe: (name, ctx) =>
       ctx.exec({ command: Sh.sh("grok", "mcp", "list", "--json"), shell: true }).pipe(
         Effect.flatMap((result) =>

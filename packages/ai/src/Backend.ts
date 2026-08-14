@@ -166,6 +166,27 @@ export interface AiToolContext {
  * names.
  */
 export interface AiMcpBackend {
+  /**
+   * The file this tool's MCP registrations live in.
+   *
+   * This exists so `Ai.McpServer` can use it as its `address` — the engine
+   * derives mutual exclusion and pre-overwrite snapshotting from `address`, and
+   * a synthetic key like `ai-mcp-config:claude` serialises two `Ai.McpServer`
+   * resources against each other while sharing nothing with a
+   * `Machine.File`, `Machine.ManagedBlock` or `Machine.Template` pointed at the
+   * same real file. Two resources that write one file must agree on one
+   * address, and the only spelling every resource can agree on is the path.
+   *
+   * Narrower than `AiToolContext` on purpose: locating a config file needs a
+   * home directory and a path joiner, not an `exec` or a filesystem, and
+   * `address` is a pure synchronous function with no context to hand over.
+   *
+   * Codex and Grok mutate their TOML through the tool's own CLI rather than
+   * writing the file directly, but the file is still the thing being contended
+   * for, so they report it too.
+   */
+  readonly configFile: (home: string, path: Path.Path) => string;
+
   /** The server named `name`'s current registration, or `undefined` if it has none. */
   readonly observe: (
     name: string,

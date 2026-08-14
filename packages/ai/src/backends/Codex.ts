@@ -142,6 +142,10 @@ export const CodexBackend: AiToolBackend = {
   skillsDir: ".codex/skills",
   reviewedConfigFiles: [".codex/config.toml", ".codex/AGENTS.md"],
   mcp: {
+    // Mutated through `codex mcp add/get`, never written directly, but this is
+    // still the file those subcommands contend for.
+    configFile: (home, path) => path.join(home, ".codex/config.toml"),
+
     observe: (name, ctx) =>
       ctx.exec({ command: Sh.sh("codex", "mcp", "get", name, "--json"), shell: true }).pipe(
         Effect.flatMap((result) =>

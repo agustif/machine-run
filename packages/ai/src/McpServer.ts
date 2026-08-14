@@ -229,7 +229,25 @@ export const makeMcpServerReconciler: Effect.Effect<
     // `Machine.ManagedBlock`. Sharing this address, rather than addressing
     // per server name, is what makes the engine serialise them against each
     // other instead of racing.
-    address: (props) => `ai-mcp-config:${props.tool}`,
+    //
+    // The address is that document's *path*, not a synthetic
+    // `ai-mcp-config:<tool>` key as it was before. The synthetic key achieved
+    // the serialisation described above and nothing else: a `Machine.File`,
+    // `Machine.ManagedBlock` or `Machine.Template` pointed at `~/.claude.json`
+    // computes a path, so it shared neither a lock nor a snapshot with this
+    // resource, and the two could interleave read-modify-write cycles over one
+    // file. Resources contending for one file have to agree on one address, and
+    // a path is the only spelling all of them can produce.
+    //
+    // A tool whose backend has no MCP support keeps a synthetic address: there
+    // is no file to name, and `observe`/`desired` fail with
+    // `AiToolMcpUnsupported` before the address matters.
+    address: (props) => {
+      const backend = aiToolBackend(props.tool);
+      return backend.mcp === undefined
+        ? `ai-mcp-unsupported:${props.tool}`
+        : backend.mcp.configFile(paths.home, path);
+    },
 
     observe: (props, ctx) =>
       Effect.gen(function* () {

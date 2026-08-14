@@ -319,3 +319,52 @@ it.effect("observe reports absent for a server that was never registered", () =>
     expect(observed).toBeUndefined();
   }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * `address` is what the engine derives mutual exclusion and pre-overwrite
+ * snapshotting from, so two resources that write one file must produce the same
+ * address string. This one used to be a synthetic `ai-mcp-config:<tool>` key,
+ * which serialised `Ai.McpServer` resources against each other and against
+ * nothing else — a `Machine.File` or `Machine.ManagedBlock` on the same
+ * `~/.claude.json` computes a path, so the two shared no lock and could
+ * interleave read-modify-write cycles over one document.
+ *
+ * The assertion is deliberately against `paths.expand("~/.claude.json")` rather
+ * than against a hand-written string: that is exactly the expression every
+ * path-addressed reconciler in the repo uses, so this compares the two things
+ * that actually have to agree.
+ */
+it.effect("addresses the real config file, identically to a path-addressed resource", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+    const paths = yield* MachinePaths.pipe(Effect.provide(withHome(home)));
+
+    const props: McpServerProps = {
+      tool: "claude",
+      name: "srv",
+      transport: { _tag: "Stdio", command: "npx" },
+    };
+    const address = reconciler.address(props);
+
+    expect(address).toBe(paths.expand("~/.claude.json"));
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+/** Two tools write two different files, so they must not serialise against
+ * each other — the same property in the other direction. */
+it.effect("two tools do not share an address", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+
+    const stdio = { _tag: "Stdio", command: "npx" } as const;
+    const claude: McpServerProps = { tool: "claude", name: "srv", transport: stdio };
+    const opencode: McpServerProps = { tool: "config-opencode", name: "srv", transport: stdio };
+
+    expect(reconciler.address(claude)).not.toBe(reconciler.address(opencode));
+
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);

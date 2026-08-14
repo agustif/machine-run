@@ -386,6 +386,40 @@ encoded in two places out of five.
 
 ---
 
+### 1b.7 A resource addressed the file it writes by a name no other resource could produce — *fixed*
+
+`packages/ai/src/McpServer.ts`.
+
+`address` is the engine's serialisation key: the doc comment on
+`Reconciler.address` says mutual exclusion and pre-overwrite snapshotting are
+both derived from it, "so they cannot be forgotten per resource". `Ai.McpServer`
+returned `ai-mcp-config:${props.tool}`.
+
+That achieved exactly what its comment claimed — two `Ai.McpServer` resources for
+one tool serialise against each other — and nothing more. `~/.claude.json` is a
+real file, and a `Machine.File`, `Machine.ManagedBlock` or `Machine.Template`
+pointed at it computes `paths.expand(props.path)`. Two different strings, so no
+shared lock and no shared snapshot, so two read-modify-write cycles over one
+document could interleave and lose the loser's write silently.
+
+**Fixed:** `AiMcpBackend` gained `configFile(home, path)`, implemented by all
+four MCP backends, and `address` returns it. Claude and OpenCode also stopped
+computing that path inline in two places each. A tool with no MCP support keeps a
+synthetic address, since there is no file to name and `observe` fails with
+`AiToolMcpUnsupported` first. The test asserts the address equals
+`paths.expand("~/.claude.json")` — the same expression every path-addressed
+reconciler uses, so it compares the two things that must agree — and that two
+tools do *not* share an address.
+
+**What remains, and is not fixed:** nothing checks this property. Addresses are
+paths in 13 kinds and synthetic keys in the rest, and the synthetic ones are
+mostly right (`defaults:<domain>`, `gsettings:<schema>:<key>`, `<manager>` — none
+of those name a file a user would reasonably manage as a file). But the engine
+cannot tell a legitimately-synthetic address from one that should have been a
+path, so the next instance of this bug is found the same way this one was: by
+reading all twenty-nine address implementations at once. A reconciler declaring
+the set of real paths it writes would make it checkable.
+
 ## Tier 1c — the architectural finding
 
 Three separate audits, hunting three different things, converged on one shape.

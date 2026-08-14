@@ -1,4 +1,5 @@
 import * as Effect from "effect/Effect";
+import type * as Path from "effect/Path";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { CREDENTIAL_DIRECTORY_MODE, writeCredentialFileString } from "@machine-run/core";
@@ -57,6 +58,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * one key this backend owns is decoded; everything else round-trips as
  * opaque `unknown` — read, never inspected, written back byte-for-byte.
  */
+const configFile = (home: string, path: Path.Path) => path.join(home, ".claude.json");
+
 const readDocument = (
   configPath: string,
   ctx: AiToolContext,
@@ -162,9 +165,11 @@ export const ClaudeBackend: AiToolBackend = {
   skillsDir: ".claude/skills",
   reviewedConfigFiles: [".claude/settings.json"],
   mcp: {
+    configFile,
+
     observe: (name, ctx) =>
       Effect.gen(function* () {
-        const configPath = ctx.path.join(ctx.home, ".claude.json");
+        const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
         const raw = isRecord(doc.mcpServers) ? doc.mcpServers : {};
         const servers = yield* decodeMcpServers(raw).pipe(
@@ -179,7 +184,7 @@ export const ClaudeBackend: AiToolBackend = {
 
     apply: (name, desired, ctx) =>
       Effect.gen(function* () {
-        const configPath = ctx.path.join(ctx.home, ".claude.json");
+        const configPath = configFile(ctx.home, ctx.path);
         const doc = yield* readDocument(configPath, ctx);
         const raw = isRecord(doc.mcpServers) ? doc.mcpServers : {};
         yield* writeDocument(
