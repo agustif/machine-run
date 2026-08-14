@@ -47,12 +47,12 @@ yield * SystemPackages.packages("brew", ["fd", "jq", "mise"]);
 Per [docs/MAP.md](../../docs/MAP.md) §4, verification is tracked per backend,
 not per package — this package's 19 ids are at very different points:
 
-|          | Verified (`✓`)                                                  | Written, never run (`~`) | Known broken (`!`) |
-| -------- | ----------------------------------------------------------------- | ------------------------- | ------------------ |
-| macOS    | `brew`, `brew-cask`, `mas` (list only)                            | `port` (MacPorts)         |                    |
-| Linux    | `apt`, `dnf`, `pacman`, `yay`, `flatpak`, `snap`                  | `paru`                    |                    |
-| Windows  | `choco`                                                            |                            | `winget`           |
-| language | `cargo`, `npm`, `pipx`, `uv-tool`, `gem`, `go-install`             |                            |                    |
+|          | Verified (`✓`)                                         | Written, never run (`~`) | Known broken (`!`) |
+| -------- | ------------------------------------------------------ | ------------------------ | ------------------ |
+| macOS    | `brew`, `brew-cask`, `mas` (list only)                 | `port` (MacPorts)        |                    |
+| Linux    | `apt`, `dnf`, `pacman`, `yay`, `flatpak`, `snap`       | `paru`                   |                    |
+| Windows  | `choco`                                                |                          | `winget`           |
+| language | `cargo`, `npm`, `pipx`, `uv-tool`, `gem`, `go-install` |                          |                    |
 
 Three backends are worth calling out specifically:
 
@@ -71,9 +71,9 @@ Three backends are worth calling out specifically:
   See `docs/notes/system-packages-notes.md`.
 - **`snap` (`✓`)** — a plain container genuinely cannot reach a running
   `snapd`, but a privileged, systemd-booted one can (`docker run --privileged
-  --cgroupns=host` with a real `/sbin/init` PID 1) — the same technique
+--cgroupns=host` with a real `/sbin/init` PID 1) — the same technique
   `system-services`' `systemd-user` backend already relies on. `snap install
-  hello-world` ran snapd's real first-install bootstrap and the installed
+hello-world` ran snapd's real first-install bootstrap and the installed
   snap actually executed. See `docs/notes/system-packages-notes.md`.
 
 ## What it deliberately does not do
