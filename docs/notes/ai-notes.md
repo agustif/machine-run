@@ -7,12 +7,22 @@ dispatched by id — see `packages/ai/src/Backend.ts` and `Store.ts`) and adds
 
 ## Verified on this machine vs. not
 
-This machine has `claude`, `codex`, `grok`, and `opencode` installed and on
-`PATH`. Every fixture used in `packages/ai/test/` is real captured output —
-either the tool's own CLI run against an isolated `$HOME`/`$CODEX_HOME` (never
-the operator's real config), or, for opencode, corroborated further by the
-installed `@opencode-ai/sdk` package's own `McpLocalConfig`/`McpRemoteConfig`
-type declarations. No fixture was invented.
+An earlier session had `claude`, `codex`, `grok`, and `opencode` installed
+locally and on `PATH`, and verified against that real install. A later
+session re-verified all four from scratch in Docker containers instead
+(`node:22-slim`, `npm install -g <package>`, `HOME`/`CODEX_HOME` pointed at
+the container's own isolated `/root`, never any real account on the host) —
+specifically to resolve a contradiction between these doc comments (which
+claimed real verification) and `docs/MAP.md`/`packages/ai/TASKS.md` (which
+claimed none of the 12 backends had ever been run against its real tool).
+Verdict: the claims held up for all four — every command in each backend's
+doc comment was re-run for real this session, and the resulting JSON/TOML
+matched what the `Schema` decoders expect, with one exception (Grok's
+`headers` field, below). Every fixture used in `packages/ai/test/` is real
+captured output — either the tool's own CLI run against an isolated
+`$HOME`/`$CODEX_HOME` (never the operator's real config), or, for opencode,
+corroborated further by the installed `@opencode-ai/sdk` package's own
+`McpLocalConfig`/`McpRemoteConfig` type declarations. No fixture was invented.
 
 MCP registration backends exist (`AiMcpBackend` populated) for exactly these
 four — `AiMcpToolId` is a closed literal set restricted to them, so naming a
@@ -20,23 +30,39 @@ fifth is a compile error, not a runtime `AiToolMcpUnsupported`:
 
 - **claude** — JSON file, `~/.claude.json`, top-level `mcpServers` key
   (user scope). Verified via `claude mcp add-json`/`claude mcp add --transport
-  http ... -s user` against an isolated `$HOME`.
+  http ... -s user` against an isolated `$HOME` (`@anthropic-ai/claude-code@2.1.232`
+  in a container, this session).
 - **codex** — TOML, `~/.codex/config.toml`, `[mcp_servers.<name>]` table.
   Verified via `codex mcp add`/`codex mcp get --json` against an isolated
-  `$CODEX_HOME`. Remote servers only support a bearer-token env var, not
-  arbitrary headers (`codex mcp add --help` has no `--header`) — a `headers`
-  prop for this tool fails with a typed `AiToolFieldUnsupported` rather than
-  being silently dropped.
+  `$CODEX_HOME` (`@openai/codex@0.147.0` in a container, this session). Remote
+  servers only support a bearer-token env var, not arbitrary headers (`codex
+  mcp add --help` has no `--header`) — a `headers` prop for this tool fails
+  with a typed `AiToolFieldUnsupported` rather than being silently dropped.
 - **grok** — TOML, `~/.grok/config.toml`, structurally the same
   `[mcp_servers.<name>]` shape as Codex. Verified via `grok mcp add`/`grok mcp
-  list --json` against an isolated `$HOME`. Unlike Codex, `grok mcp add
-  --transport http` does take `-H "Name: Value"` headers.
+  list --json` against an isolated `$HOME` (`@xai-official/grok@1.0.3` — xAI's
+  own npm package, confirmed by installing it, not guessed — in a container,
+  this session). Unlike Codex, `grok mcp add --transport http` does take
+  `-H "Name: Value"` headers. **Bug found and fixed this session**: the real
+  `grok mcp list --json` output for a remote server includes a `headers`
+  field the `GrokServer` schema had never decoded, so `observe` silently
+  dropped a remote server's headers on every read even though `apply` could
+  set them. See `backends/Grok.ts`'s doc comments.
 - **config-opencode** — JSON(C), `~/.config/opencode/opencode.jsonc`,
   top-level `mcp` key. Field names diverge from every other backend here
   (`command` is the whole argv as one array; env vars are `environment`, not
   `env`) — genuinely a different shape per tool, which is the whole reason
   this seam exists. Verified via `opencode mcp add` against an isolated
-  `$HOME`.
+  `$HOME` (`opencode-ai@1.18.18` in a container, this session).
+
+`skillsDir` was also checked this session for all four, by grepping each
+installed CLI's own compiled binary for literal path strings (decompressing
+Grok's Brotli-packed binary first) rather than trusting the doc-only claim:
+`.claude/skills/SKILL.md`, `.codex/skills` + `CODEX_HOME/skills` (Codex ships
+an entire embedded `ext/skills/src/...` Rust loader), `.grok/skills`, and a
+bundled help table row reading `~/.config/opencode/skill(s)/<name>/SKILL.md`
+were all found baked into the respective binary — none of the four
+`skillsDir` values were wrong.
 
 **Not represented as MCP candidates at all**, because neither a CLI nor public
 documentation could be checked from this machine: `copilot`, `agents`, and the

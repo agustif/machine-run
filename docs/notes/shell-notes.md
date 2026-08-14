@@ -29,17 +29,31 @@ for anyone using a different shell.
 - **fish** — `function ... --on-variable PWD`. Confirmed live: three `cd`s,
   three firings.
 - **nu** — `$env.config.hooks.env_change.PWD`, a list of `{|before, after|
-  ...}` closures. **Registration confirmed, firing not confirmed.** Every
-  non-interactive invocation tried (`nu -c "..."`, a script file, piped stdin
-  with `-i`) either ran the `cd`s without the hook ever firing, or nu refused
-  outright ("launched as a REPL, but STDIN is not a TTY"). nu only runs
-  `env_change` hooks from its interactive reedline loop. Getting a real TTY
-  into a container proved unreliable here: a Python `pty.fork()` harness spun
-  at 100% CPU and had to be killed, and an `expect` script hung past its
-  timeout. So this rests on nu's own documented hook semantics, not this
-  package's observation of it firing — a real gap. The registration mechanism
-  itself (assigning into `$env.config`, reading `hooks.env_change.PWD |
-  length` back as `1`) is confirmed correct.
+  ...}` closures. **Firing confirmed live, in a container, this session.**
+  The earlier blocker wasn't "needs a TTY" in the abstract — a `docker exec
+  -it <container> nu` *does* get nu past the "launched as a REPL, but STDIN
+  is not a TTY" refusal and into its real reedline loop, allocating a genuine
+  pty. The actual blocker one layer deeper: nu's reedline queries the
+  terminal for cursor position via the ANSI DSR escape (`\x1b[6n`,
+  "Device Status Report") before it will draw a prompt, and expects a
+  `\x1b[<row>;<col>R` reply on stdin. A bare pty (a raw `expect spawn` of
+  `docker exec -it`, or `script -qec`) never answers that query — there is no
+  terminal emulator on the other end to reply — so reedline sits there
+  re-issuing `[?2004h[6n[?2004l` forever and no prompt is ever drawn; that is
+  what the prior sessions' "TTY was unreliable" hang actually was, not a
+  generic TTY-availability problem. `tmux` fixed it: a `tmux` pane is a real
+  terminal emulator, not just a pty — it answers DSR/device-attribute queries
+  itself. Running `tmux new-session -d -s nutest -x 220 -y 50 "docker exec -it
+  <container> nu"` and driving it with `tmux send-keys` / `tmux capture-pane
+  -p` got a real `~>` prompt, and a `cd` into a directory matching the
+  hook's `str starts-with` prefix visibly ran the hook body: a marker file
+  written from inside the closure gained a line
+  (`fired before=/home/nushell after=/home/nushell/work/sub`) after each
+  matching `cd`, confirmed twice in the same session, and
+  `$env.config.hooks.env_change.PWD | length` read back `1` in the same live
+  session — registration and firing confirmed together, not just inferred
+  from separate runs. The registration mechanism itself (assigning into
+  `$env.config`) was already independently confirmed correct.
 - **pwsh** —
   `$ExecutionContext.SessionState.InvokeCommand.LocationChangedAction`
   (PowerShell 7.1+). Confirmed live: assigning a closure and calling
@@ -160,11 +174,11 @@ it always wraps every rendered value in a forced single-quoted literal
 
 ## What the container environment itself limited
 
-Two things below are gaps in *this session's* verification, not in the
-shells' own documented behaviour:
+One thing below is a gap in *this session's* verification, not in the
+shell's own documented behaviour (nu's hook firing, previously listed here
+too, is resolved above — `tmux` supplies the terminal-emulator layer a bare
+pty lacks):
 
-- **nu's hook firing** (above) — TTY access into a container was unreliable
-  with the tools available (Python `pty`, `expect`), not something about nu.
 - **pwsh's `$env:PATH` mutation and `-like` matching**, each individually
   ordinary, repeatedly crashed the pwsh container
   (`TargetInvocationException` / `SIGSEGV` from qemu's x86_64-on-arm64
