@@ -1,0 +1,17 @@
+# Normalise to LF in the repository. This is a TypeScript workspace built and
+# tested on Linux, macOS and Windows runners, and a file that changes shape
+# depending on which machine checked it out is a source of failures that only
+# reproduce on one OS.
+* text=auto eol=lf
+
+# Patches must never be line-ending converted. `git apply` matches context
+# lines byte for byte against files in `node_modules`, which npm extracts from
+# a tarball with LF regardless of platform. A CRLF-converted patch therefore
+# stops applying on Windows only — which is exactly how it failed the first
+# time, in postinstall, with a message about the patch no longer applying that
+# pointed at upstream drift rather than at the checkout.
+*.patch -text
+
+# Shell scripts run through bash on every platform, including Git Bash on
+# Windows, which does not accept CRLF line endings in a script.
+*.sh text eol=lf

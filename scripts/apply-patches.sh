@@ -35,8 +35,11 @@ for patch in "${patches[@]}"; do
   if ! git apply --check "$patch" 2>/dev/null; then
     echo "patches: $patch NO LONGER APPLIES." >&2
     echo >&2
-    echo "  Upstream has changed the code this patch targets, or the dependency" >&2
-    echo "  version moved. Do not force it. Check whether the bug it works around" >&2
+    echo "  Upstream has changed the code this patch targets, the dependency" >&2
+    echo "  version moved, or — on Windows — the patch was line-ending" >&2
+    echo "  converted on checkout. \`.gitattributes\` marks *.patch as -text to" >&2
+    echo "  prevent the last one; check it is still there before assuming drift." >&2
+    echo "  Do not force it. Check whether the bug it works around" >&2
     echo "  is fixed upstream — if it is, delete the patch and the workaround it" >&2
     echo "  supports. If it is not, regenerate the patch against the new source." >&2
     echo "  Each patch's header says what it fixes and where that is documented." >&2
