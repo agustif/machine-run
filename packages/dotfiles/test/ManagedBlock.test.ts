@@ -184,6 +184,70 @@ it("still replaces a single well-formed region in place", () => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// CRLF content — a Windows `.gitconfig`/`.ssh/config` routinely carries
+// `\r\n`. Before the fix, `normalize`'s `content.replace(/\n+$/, "")` left a
+// trailing `\r` on the extracted region, and compared a CRLF region's
+// internal `\r\n`s against `props.content`'s plain `\n`s byte-for-byte — both
+// meant the region's hash could never equal `desired`'s, so every run saw
+// drift and rewrote the file, forever.
+// ---------------------------------------------------------------------------
+
+it("readBlock reads back exactly the region's content from a CRLF file, with no stray \\r", () => {
+  const file =
+    "# hand-written\r\n# machine-run:example BEGIN\r\nline one\r\nline two\r\n# machine-run:example END\r\n# trailer\r\n";
+  expect(readBlock(file, "example")).toBe("line one\nline two");
+});
+
+it("renderFile replacing a region in a CRLF file reports no drift on the very next read", () => {
+  const existing =
+    "# hand-written\r\n# machine-run:example BEGIN\r\nold content\r\n# machine-run:example END\r\n";
+  const result = renderFile(existing, "example", "old content");
+  expect(Result.isSuccess(result)).toBe(true);
+  if (Result.isSuccess(result)) {
+    // The load-bearing assertion: before the fix, the region read back from
+    // the rendered file would still carry a `\r` (or otherwise fail to equal
+    // the canonical form of `props.content`), so a second `renderFile` call
+    // asked to write the *same* content would still see something to change.
+    expect(readBlock(result.success, "example")).toBe("old content");
+  }
+});
+
+it("renderFile preserves a CRLF file's line endings, including inside a multi-line region", () => {
+  const existing = "# hand-written\r\n";
+  const withRegion = render(existing, "example", "line one\nline two");
+  expect(withRegion).toBe(
+    "# hand-written\r\n# machine-run:example BEGIN\r\nline one\r\nline two\r\n# machine-run:example END\r\n",
+  );
+});
+
+it.effect("CRLF file: the reconciler reports no drift after writing the same content twice", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeManagedBlockReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, ".gitconfig");
+
+    yield* fs.writeFileString(target, "[user]\r\n\temail = a@example.com\r\n");
+
+    const props: ManagedBlockProps = {
+      path: target,
+      marker: "persona",
+      content: "[includeIf]\n  path = personal.gitconfig",
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+
+    // Before the fix: `observe`'s hash of the CRLF-extracted region never
+    // equalled `desired`'s hash of the plain-LF `props.content`, so this
+    // reports drift even though nothing changed since the write above.
+    const observed = yield* reconciler.observe(props, observeCtx);
+    expect(observed).toBeDefined();
+    expect(reconciler.matches(observed!, desired)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);
+
 /**
  * `~/.zshrc`, `~/.gitconfig`, `~/.ssh/config` — the files `ManagedBlock`
  * exists for — carry substantial hand-written content this tool does not

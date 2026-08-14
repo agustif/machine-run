@@ -1,4 +1,10 @@
-import { isNotFound, MachinePaths } from "@machine-run/core";
+import {
+  detectLineEnding,
+  isNotFound,
+  joinLines,
+  MachinePaths,
+  splitLines,
+} from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -147,7 +153,18 @@ const isIgnoredLine = (line: string): boolean => {
  */
 export const parseKnownHosts = (content: string): readonly KnownHostEntry[] => {
   const entries: KnownHostEntry[] = [];
-  for (const line of content.split("\n")) {
+  // `splitLines`, not a raw `content.split("\n")`: `line.trim()` below
+  // happens to strip a lone trailing `\r` too (it is a LineTerminator
+  // character as far as `String.prototype.trim` is concerned), so this
+  // parser's own field extraction was never actually fooled by one. But
+  // relying on that is exactly the kind of accidental correctness this
+  // module's other two siblings (`LineInFile`, `ManagedBlock`) got wrong in
+  // a more consequential way — a future edit that reads a field without
+  // trimming first (or trims only the host/keyType and forwards `publicKey`
+  // raw) would silently reintroduce the bug `trim()` currently happens to
+  // paper over. Splitting correctly in the first place removes the
+  // dependency on that coincidence.
+  for (const line of splitLines(content)) {
     if (isIgnoredLine(line)) continue;
     const fields = line.trim().split(/\s+/);
     const host = fields[0];
@@ -166,12 +183,19 @@ export const findKnownHostEntry = (
 ): KnownHostEntry | undefined =>
   entries.find((entry) => entry.host === host && entry.keyType === keyType);
 
-/** Appends one line, adding a trailing newline to `content` first if it's missing one. */
+/**
+ * Appends one line, adding a trailing terminator to `content` first if it's
+ * missing one — in whichever line ending `content` already uses (`"lf"` for
+ * empty content, since there is nothing there to preserve; see
+ * `LineEndings.ts`'s doc comment). A CRLF `known_hosts` — Windows OpenSSH's
+ * own convention — otherwise ends up with every line but the last one
+ * terminated by `\r\n` and the newest line terminated by a bare `\n`, a
+ * mixed file this tool itself introduced.
+ */
 export const appendKnownHostLine = (content: string, entry: KnownHostEntry): string => {
   const line = `${entry.host} ${entry.keyType} ${entry.publicKey}`;
-  if (content.length === 0) return `${line}\n`;
-  if (content.endsWith("\n")) return `${content}${line}\n`;
-  return `${content}\n${line}\n`;
+  const ending = detectLineEnding(content);
+  return joinLines([...splitLines(content), line], ending);
 };
 
 const DEFAULT_MODE = 0o644;

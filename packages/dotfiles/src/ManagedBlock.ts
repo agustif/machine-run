@@ -1,6 +1,14 @@
-import { MachinePaths, makeSha256, readIfPresent } from "@machine-run/core";
+import {
+  detectLineEnding,
+  LineEndingChars,
+  MachinePaths,
+  makeSha256,
+  readIfPresent,
+  splitLines,
+} from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -151,8 +159,29 @@ export interface RenderOptions {
   readonly position?: Position | undefined;
 }
 
-/** Region content is compared and stored without trailing blank lines. */
-const normalize = (content: string) => content.replace(/\n+$/, "");
+/**
+ * Region content is compared, and stored in {@link ManagedBlockState}'s hash,
+ * in its canonical LF form with trailing blank lines dropped — never in the
+ * file's own line-ending convention.
+ *
+ * This has to be convention-independent for the same reason a raw
+ * `content.replace(/\n+$/, "")` was wrong: on a CRLF file, the region
+ * extracted by {@link readBlock} carries `\r\n` between its lines, while
+ * `desired`'s `props.content` is an ordinary LF TypeScript string literal —
+ * comparing those byte-for-byte would report drift forever even when nobody
+ * touched a single character, purely because of which OS's editor last saved
+ * the surrounding file. Canonicalizing both sides here, once, is what makes
+ * "does the content differ" and "which bytes does this file happen to use"
+ * two separate questions; `renderFile` is the one place that answers the
+ * second one, by re-rendering this canonical form in `existing`'s own
+ * convention before anything is written to disk.
+ */
+const normalize = (content: string): string => {
+  const lines = splitLines(content);
+  let end = lines.length;
+  while (end > 0 && lines[end - 1] === "") end--;
+  return lines.slice(0, end).join("\n");
+};
 
 /** How many times `needle` appears in `haystack`, counting non-overlapping hits. */
 const occurrences = (haystack: string, needle: string): number => haystack.split(needle).length - 1;
@@ -176,7 +205,14 @@ export const readBlock = (
   if (beginIndex === -1) return undefined;
   const endIndex = existing.indexOf(end, beginIndex + begin.length);
   if (endIndex === -1) return undefined;
-  return normalize(existing.slice(beginIndex + begin.length, endIndex).replace(/^\n/, ""));
+  // The slice starts right after BEGIN's own text, so its first character(s)
+  // are still the terminator that ends the BEGIN line — `\r\n` on a CRLF
+  // file, `\n` on an LF one. `\r?\n` (the same idiom `Windows/Icacls.ts`
+  // already uses for line-ending-agnostic parsing) strips exactly that one
+  // terminator regardless of which it is; a bare `/^\n/` left the `\r` behind
+  // on a CRLF file, becoming a leading blank line `normalize` never asked to
+  // trim.
+  return normalize(existing.slice(beginIndex + begin.length, endIndex).replace(/^\r?\n/, ""));
 };
 
 /**
@@ -211,7 +247,17 @@ export const renderFile = (
     });
   }
 
-  const region = `${begin}\n${body}\n${end}`;
+  // The file's own convention, preserved rather than overwritten — see
+  // `LineEndings.ts`'s doc comment for the policy and why LF is the default
+  // for `existing === ""` (a brand-new file has nothing to preserve).
+  // `body` is `normalize`'s canonical LF form, so re-splitting it on a plain
+  // `"\n"` (rather than `splitLines`, which also handles `\r\n`) is safe —
+  // and `Array.prototype.join`, not `joinLines`, is used deliberately here:
+  // `joinLines` always terminates its last line too, which would double up
+  // the separator this template already places before `end`.
+  const eol = LineEndingChars[detectLineEnding(existing)];
+  const bodyForFile = splitLines(body).join(eol);
+  const region = `${begin}${eol}${bodyForFile}${eol}${end}`;
 
   const beginIndex = existing.indexOf(begin);
   // END is searched for after BEGIN so an inverted pair is detected rather
@@ -232,10 +278,22 @@ export const renderFile = (
 
   if (beginIndex === -1 && endIndex === -1) {
     if (options.position === "prepend") {
-      return Result.succeed(existing.length === 0 ? `${region}\n` : `${region}\n${existing}`);
+      return Result.succeed(
+        Boolean.match(existing.length === 0, {
+          onTrue: () => `${region}${eol}`,
+          onFalse: () => `${region}${eol}${existing}`,
+        }),
+      );
     }
-    const separator = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
-    return Result.succeed(`${existing}${separator}${region}\n`);
+    // `existing.endsWith("\n")` still correctly answers "does the file
+    // already end in a terminator" for a CRLF file too, since `\r\n` itself
+    // ends with `\n` — only the separator actually inserted needs to change
+    // with the convention, not this check.
+    const separator = Boolean.match(existing.length > 0 && !existing.endsWith("\n"), {
+      onTrue: () => eol,
+      onFalse: () => "",
+    });
+    return Result.succeed(`${existing}${separator}${region}${eol}`);
   }
 
   if (beginIndex === -1) {
