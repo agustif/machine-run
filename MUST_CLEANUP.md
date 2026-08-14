@@ -10,11 +10,100 @@ error classes that exist precisely to be matched on by consumers.
 
 **The bar for removing an entry:** the smell is gone, not renamed.
 
+**Provenance.** Entries marked *verified* were re-read line by line while
+writing this. The rest come from a three-part audit and carry file and line but
+were not independently re-read — the distinction is kept because publishing
+someone else's confidence as your own is how a document like this rots.
+
 Ordered by what it costs, not by how easy it is. [TASKS.md](./docs/TASKS.md) is
 the work backlog; this is the list of things that are *wrong* rather than
 missing. Where they overlap, this file explains why and TASKS.md tracks the doing.
 
 ---
+
+## Tier 0 — data loss, verified
+
+These destroy data that cannot be recovered. Each was re-read line by line
+before being written down here.
+
+### 0.1 A locked keychain silently destroys every encrypted state row
+
+`packages/state/src/DataKey.ts:136-147`.
+
+`ensureDataKey` wraps `readDataKey` in `Effect.catch(() => ...)` — catching
+*every* failure — and responds by minting a fresh random key and persisting it
+with `security add-generic-password -U`, which updates in place.
+
+`readDataKey` folds every `SecretError` into one `DataKeyUnavailable`, so
+"there is no key yet" and "the keychain is locked", "user interaction is not
+allowed" (the headless case), or "`security` was momentarily busy" are
+indistinguishable at the catch. A transient read failure therefore **overwrites
+the real key**. Every row already encrypted under it becomes permanently
+undecryptable, and `EncryptedState.get` degrades that to `undefined` with a log
+warning — so the next plan reads the whole machine as unmanaged.
+
+The tests cover the entry being deleted and the ciphertext being tampered with.
+They do not cover a read failing while the entry still exists, which is the case
+that loses the data.
+
+**Fix:** only mint on a genuine absent signal. The keychain backend needs a
+distinct "no such entry" case rather than folding it into a general read
+failure — the same distinction `isNotFound` already draws for the filesystem.
+
+### 0.2 `ManagedBlock` can overwrite a file it does not own
+
+`packages/dotfiles/src/ManagedBlock.ts:247-248` — `readFileOrEmpty` is
+`fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""))`, used by both
+`observe` and `apply`.
+
+Any read failure becomes "the file is empty". `ManagedBlock` exists precisely
+for files this tool does *not* own outright — `~/.zshrc`, `~/.gitconfig`,
+`~/.ssh/config` — so a permission change or I/O error makes `apply` write just
+the marker block over somebody's hand-written shell config.
+
+`snapshotBeforeApply` is set, but it only fires on adoption (`output === undefined
+|| olds === undefined`). On an ordinary re-apply of an already-managed file there
+is no backup, which is exactly when this fires.
+
+**Fix:** the `stat` + `isNotFound` pattern from `File.ts:94-102`.
+
+### 0.3 `LineInFile` has the same bug
+
+`packages/dotfiles/src/LineInFile.ts:233-234`. Identical mechanism, identical
+consequence, on files like `/etc/hosts`. Same fix.
+
+### 0.4 `File` throws away its own discipline one line later
+
+`packages/dotfiles/src/File.ts:104`.
+
+The sharpest illustration in the repo. Lines 94-102 do the careful thing: `stat`,
+and raise `FilePathUnreadable` for anything that is not a not-found. Line 104
+then reads the file with `Effect.orElseSucceed(() => "")`, discarding it. A
+permission change between the two, or any read error, reads as empty content →
+drift → overwrite.
+
+Lower practical severity than 0.2 because `File` owns its content outright, but
+it is the same bug, and the doc comment fifteen lines above describes this exact
+failure mode as the thing being prevented.
+
+**Fix:** same `catchTag` + `isNotFound` treatment as the `stat` two lines up.
+`Template` inherits the fix for free through `makeFileReconciler`.
+
+### 0.5 The pattern behind 0.1–0.4
+
+These are one architectural problem wearing four faces: **the repo has a house
+rule for telling "absent" from "unreadable", and nothing makes following it
+easier than not.**
+
+`ssh/src/Key.ts` and `ssh/src/KnownHost.ts` are the gold standard;
+`File.ts`'s `stat` is correct and its read is not. The discipline lives in prose
+and in imitation, so each new resource re-derives it — and `ManagedBlock`,
+`LineInFile`, `Git.Repo` and `Codex` each got it wrong in a different place.
+
+**Fix that actually closes it:** put the pattern in `core` as a named helper
+(`readIfPresent`, `statIfPresent`) that returns "absent" only for a real
+not-found and raises otherwise. Then the correct thing is the short thing to
+write. A lint rule cannot express this; a helper can.
 
 ## Tier 1 — costs correctness
 
@@ -54,6 +143,108 @@ it", which is exactly the distinction this repo claims to care about.
 
 **Fix:** a one-line decision per resource, in its own doc comment. Not
 necessarily an implementation.
+
+---
+
+## Tier 1b — wrong results (from the audit, not independently re-verified)
+
+### 1b.1 Exit codes collapsed into a definite answer
+
+`packages/system-services/src/backends/linux/SystemdUser.ts:74-80,96-105` and
+`macos/Launchd.ts:117-123`.
+
+`observeEnabled`/`observeActive` treat *every* non-zero exit as a definite
+"disabled"/"not running", not only the verified codes. `systemctl --user`
+without a reachable D-Bus user session — cron, ssh, no lingering session — exits
+non-zero with a bus error that is indistinguishable by exit code from genuinely
+disabled. `matches` then reports false convergence and hides real drift.
+
+This is the same hazard class already found and mitigated for `gsettings`,
+reappearing in a package written later.
+
+**Fix:** collapse only the specific verified codes; propagate anything else.
+
+### 1b.2 `Codex` treats every command error as "server absent"
+
+`packages/ai/src/backends/Codex.ts:89-96`. The swallow is justified for
+"command not found" and is documented for a specific stderr message, but the
+code checks only the former, so a corrupted `$CODEX_HOME` or a permissions
+problem reads as absent and `apply` blindly re-adds the server.
+
+`Grok.ts` in the same package does the correct thing, right next to it.
+
+**Fix:** match the documented stderr text, propagate the rest — the pattern
+`git/src/toplevel.ts:36` already uses.
+
+### 1b.3 `Git.Repo` folds unreadable into absent
+
+`packages/git/src/Repo.ts:175,184-186`. Same shape as 0.2–0.4: a permission
+error on the parent reads as "nothing here", so the plan says "clone". Lower
+severity because the clone then fails loudly, so it is a wrong plan rather than
+lost data.
+
+### 1b.4 `System.Setting`'s `unapply` can report a false failure
+
+`packages/system-settings/src/Setting.ts:409-418` raises
+`SettingResetNotObserved` when the post-reset value equals what was written —
+but if the schema default happens to equal it, a successful reset reports as a
+failure. Notably the *inverse* of everything else here: a false negative, not a
+false success.
+
+### 1b.5 Read-after-write confirmation is applied to two resources out of five
+
+`System.Setting` and `System.Service` re-read after writing and raise if the
+write did not take (`Setting.ts:375-391`, `Service.ts:218-249`), citing the
+`gsettings` silent-no-op precedent. `System.Package` (`Package.ts:179-197`),
+`System.Repo` (`Repo.ts:150-165`) and `MacOS.Default` (`Default.ts:118-139`) do
+not.
+
+The audit found no live bug of this shape in the 19 package-manager backends, so
+this is a **defensive-posture gap, not a demonstrated failure**. It is listed
+because it is the same coherence problem as 0.5: a lesson learned once and
+encoded in two places out of five.
+
+---
+
+## Tier 1c — the architectural finding
+
+Three separate audits, hunting three different things, converged on one shape.
+
+**The architecture is sound. The abstractions fit. What is incoherent is that
+this repo's hard-won disciplines live as prose and imitation rather than as
+shared code.**
+
+The evidence, measured rather than asserted:
+
+- The engine abstraction *fits*: 23 of 23 resources use `toProvider` with zero
+  escapes (2.1).
+- Error modelling is coherent: 113 `Data.TaggedError`, zero `Schema.TaggedError`
+  — matching Alchemy's own choice rather than diverging from it.
+- No raw `process.env` anywhere in source; `Config` is used throughout.
+- Parsing splits correctly: `Schema` where a tool emits JSON, hand-written
+  parsing where it emits fixed-width text that `Schema` genuinely cannot express.
+- `Machine.Exec` is not a duplicate of Alchemy's `Command.Exec`: ours is
+  idempotent by *observing a guard*, theirs re-runs on input change. Different
+  resources, and `Machine.providers()` deliberately excludes Alchemy's.
+
+Against that, the same failure recurs three times:
+
+| Discipline | Encoded where | Followed by |
+|---|---|---|
+| absent vs unreadable | prose + imitation | `ssh/Key`, `ssh/KnownHost`, `File`'s `stat` — but not `ManagedBlock`, `LineInFile`, `File`'s read, `Git.Repo`, `Codex` |
+| read-after-write confirmation | prose + imitation | `System.Setting`, `System.Service` — not `Package`, `Repo`, `MacOS.Default` |
+| collapse only verified exit codes | prose + imitation | `Git.Config`, `Grok` — not `SystemdUser`, `Launchd`, `Codex` |
+
+Each was learned the expensive way — a container proving `gsettings set` lies, a
+real `asdf` exiting non-zero while printing its answer — written into a doc
+comment, and then not followed by the next package, because nothing made
+following it easier than not following it.
+
+**This is the highest-leverage fix in this document.** Not because any single
+instance is the worst bug, but because it is the mechanism that generates them.
+Three helpers in `core` — `readIfPresent`, `confirmWrite`, `exitCodeMeaning` —
+would make the correct thing the short thing to write. Prose has now failed
+three times; the next failure is already being written.
 
 ---
 
@@ -156,6 +347,86 @@ pointed at from code.
 
 ---
 
+## Tier 3b — duplication, counted
+
+From the duplication audit; the first entry re-verified while writing this.
+
+### 3b.1 `isNotFound` is exported by `core` and reinvented three times — *verified*
+
+`packages/core/src/Paths.ts:73` exports it. `dotfiles/src/Directory.ts:85`,
+`Download.ts:142` and `Symlink.ts:71` each define a byte-identical private copy.
+
+The cheapest fix in this document — delete three lines, extend an existing
+import — and the most telling, because this is the very predicate the Tier 0
+bugs are about. The discipline of 0.5 has a helper already; three files did not
+find it and wrote their own instead. That is the mechanism, caught in the act.
+
+### 3b.2 Parent-directory creation, hand-written six times
+
+`fs.makeDirectory(path.dirname(...), { recursive: true, ...mode })` appears
+identically in `File.ts:134`, `ManagedBlock.ts:282`, `LineInFile.ts:286`,
+`SecretFile.ts:154`, `KnownHost.ts:301`, `Key.ts:372`, in two textual variants.
+
+`Template.ts` does **not** duplicate it — it delegates to `makeFileReconciler`,
+which is the pattern the other six should have followed. One file already proves
+it is fixable. Extract `ensureParentDir(fs, path, mode)` into `core`.
+
+### 3b.3 `directoryMode`, quantified
+
+Seven resources each declare their own `directoryMode` prop
+(`File.ts:36`, `ManagedBlock.ts:73`, `LineInFile.ts:82`, `Template.ts:128`,
+`SecretFile.ts:31`, `KnownHost.ts:49`, `Key.ts:48`), and `DEFAULT_DIRECTORY_MODE
+= 0o700` is redefined verbatim in three of them with the literal hardcoded a
+fourth time in `Host.ts:96`.
+
+The cost is sharper than "repetition": two resources can disagree about the same
+directory's mode and nothing detects it. See 2.2.
+
+### 3b.4 `BackendParseError` defined twice, plus a near-copy
+
+`system-packages/src/Backend.ts:7-13` and `runtimes/src/Backend.ts:8-14` are the
+same class with the same runtime `_tag`. `system-services/src/Backend.ts:22-28`
+is a third with the field renamed. Two distinct classes sharing one tag string
+breaks the moment anything unions them or keys telemetry by tag.
+
+### 3b.5 `Number(info.mode) & 0o777` — seven times — *verified*
+
+Across `Directory.ts`, `File.ts`, `Download.ts`, `SecretFile.ts`. An unclaimed
+`posixMode(info)` helper that four files independently reinvented.
+
+### 3b.6 `fakeExec` copied into seven test files
+
+Identical four-line helper in `runtimes`, `system-packages` (×2),
+`system-services`, `system-settings` (×2) and `secrets` tests. If `Exec`'s result
+shape gains a field, seven files need the same edit. `git`'s variants genuinely
+differ (they model exit codes) and should stay.
+
+### 3b.7 `core/src/windows/` has zero callers
+
+`FilePermissions.ts` and `Icacls.ts` — 494 lines with three test files and **no
+consumer in any of the 16 resource packages**. It is honestly labelled as a
+prototype in `docs/MAP.md`, so it is not hidden. But nothing forces it to stay
+correct, and if the real Windows integration needs a different shape, this has
+had no pressure to match it. Wire it up or delete it; do not let it age.
+
+### 3b.8 One fact, five documents
+
+"Alchemy applies with `concurrency: unbounded`, therefore `FileLock` exists" is
+independently derived — not cross-referenced — in `AGENTS.md` §7,
+`ARCHITECTURE.md:90-101`, `SYSTEM-DESIGN.md:68-76`, `V1-PLAN.md:50` and
+`CONCEPTS.md`. Five places must agree if the concurrency model or the lock's
+scope ever changes.
+
+### 3b.9 Backend registries live in three different places
+
+`ai`, `secrets`, `shell`, `system-settings` use a root `Store.ts`;
+`system-packages` and `system-services` inline the map in the resource file;
+`git` nests `Backend.ts` and `Store.ts` under `src/backends/`, contradicting the
+layout `AGENTS.md` §13 documents. Three answers to "where does this seam
+register its backends".
+
+---
+
 ## Tier 4 — process smells
 
 ### 4.1 A worktree build can be green and prove nothing
@@ -204,6 +475,33 @@ Checked and found correct. Listed so the next audit does not spend time here.
 - **Two examples** — `example-machine` (meant to run) and `complete-machine`
   (every kind, as a compiled reference) have different jobs, and the second is
   enforced by a test.
+- **`macos-defaults/src/Default.ts:130-134`** — the `killall` swallow. Three
+  independent checks agreed: `killall` exits non-zero when the app is not
+  running, the swallow wraps only that one exec, and the `defaults write` two
+  lines earlier still dies loudly via `Effect.die` at the outer `catchTag`.
+- **`system-packages/src/detect.ts:28-29`** — an unreadable distro marker is
+  treated as "not this distro", documented as intentional. Composition-time
+  only, and the user can name the manager explicitly.
+- **`secrets/backends/*`** — CLI-text error classification with a documented
+  generic fallback is AGENTS.md rule 11 working as intended, not a swallow.
+- **`PackageIndex.ts`'s plan/apply cache split** — two independent memoized
+  listings rather than one shared cache, deliberately, so a plan-time result
+  cannot mask drift at apply time.
+- **`lines()` duplicated between `system-packages` and `runtimes`** — six lines
+  of pure string handling, with the runtimes copy's own doc comment explaining
+  the choice. A shared package for six lines of trimming would be worse.
+- **The 19 package-manager backends looking alike** — each carries a verified
+  quirk (pipx's empty-state banner, cargo's indented sub-lines, uv-tool's `v\d`
+  header, gem's comma-joined versions). Collapsing them would either lose those
+  or smuggle them back as conditionals. `parse.ts`'s `lines`/`firstTokens`
+  already extract the genuinely common part; that is the right cut.
+- **`GitRepoCommandFailed` / `GitConfigCommandFailed` / `GitMaintenanceCommandFailed`**
+  — structurally identical, deliberately distinct tags, because `catchTag` needs
+  to know which resource failed.
+- **`Ssh.KnownHost` not built on `Machine.LineInFile`** — it compares structural
+  host/keyType/publicKey fields, not a generic regex. Real specialisation.
+- **`Git.Maintenance.repo` vs `Git.Repo.path`** — `repo` mirrors git's own
+  `maintenance.repo` config key, so it tracks external vocabulary.
 - **`as` in `packages/cli/src/Commands.ts`** — one narrowing, named
   (`withoutEvalStackInternals`), bounded to exactly the two services `evalStack`
   provides internally, so a third requirement appearing later is a compile error

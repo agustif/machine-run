@@ -105,18 +105,20 @@ core ─┬───────────────────────
                  ├─ macos-defaults      │   and secrets branches meet here
                  ├─ system-settings     │
                  ├─ system-packages     │
-                 ├─ system-services     │   not yet in `machine` below —
-                 └─ runtimes            │   see docs/TASKS.md
+                 ├─ system-services     │
+                 └─ runtimes            │
                                         │
    machine ─── aggregates ──────────────┴── ai, dotfiles, git, macos-defaults,
-                                            runtimes, secrets, shell,
+                                            runtimes, secrets, shell, ssh,
+                                            system-services,
                                             system-packages, system-settings,
                                             tailscale
 ```
 
-`machine` does **not** depend on `ssh` — a gap, since `ssh` has no `providers()`
-of its own to aggregate (it only composes `dotfiles` resources). Harmless today;
-it becomes a real hole the moment `ssh` grows `Ssh.Key`.
+`machine` aggregates every resource-defining package, `ssh` and
+`system-services` included. `AggregateCompleteness.test.ts` enforces it by
+reading source, so this diagram cannot drift from the code again without a test
+failing.
 
 ---
 
