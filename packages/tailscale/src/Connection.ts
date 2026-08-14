@@ -1,5 +1,5 @@
 import { Sh } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -151,6 +151,20 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
       onDefined: (hostname) => observed.hostname === hostname,
     }),
 
+  // Unordered: two hostnames are just different strings, never "ahead" or
+  // "behind" one another.
+  drift: (observed, desired): Drift =>
+    UndefinedOr.match(desired.hostname, {
+      onUndefined: () => [],
+      onDefined: (hostname) =>
+        observed.hostname === hostname
+          ? []
+          : [{ field: "hostname", observed: observed.hostname ?? "", desired: hostname }],
+    }),
+
+  // No `unapply`: TASKS.md/README.md already judge logging the machine out
+  // of the tailnet unsafe to automate — it could cut the operator's own
+  // remote access to it. Nothing here should re-add a logout path.
   apply: ({ props, observed, desired }, ctx) =>
     Effect.gen(function* () {
       const hostnameFlag = UndefinedOr.match(desired.hostname, {

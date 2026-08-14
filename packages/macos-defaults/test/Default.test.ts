@@ -78,6 +78,45 @@ it.effect("matches: a real difference in array order IS reported as drift", () =
 );
 
 it.effect(
+  "drift: two spellings of the same value (different key order) report no drift, matching `matches`",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeMacDefaultReconciler;
+      const live = { a: 1, b: 2 };
+      const recipe = { b: 2, a: 1 };
+
+      const observed = yield* reconciler.observe(props(live), fakeExecOk(xmlOf(live)));
+      const desired = yield* reconciler.desired(props(recipe));
+
+      expect(reconciler.drift?.(Option.getOrThrow(observed), desired)).toEqual([]);
+    }),
+);
+
+it.effect(
+  "drift: a real value difference reports \"value\" with the canonical XML on each side, no direction",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeMacDefaultReconciler;
+      const observed = yield* reconciler.observe(props(1), fakeExecOk(xmlOf(1)));
+      const desired = yield* reconciler.desired(props(2));
+
+      const drift = reconciler.drift?.(Option.getOrThrow(observed), desired) ?? [];
+      expect(drift).toHaveLength(1);
+      expect(drift[0]?.field).toBe("value");
+      expect(drift[0]?.direction).toBeUndefined();
+      expect(drift[0]?.observed).toBe(xmlOf(1));
+      expect(drift[0]?.desired).toBe(xmlOf(2));
+    }),
+);
+
+it.effect("MacOS.Default has no unapply — no prior value is ever captured to restore", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeMacDefaultReconciler;
+    expect(reconciler.unapply).toBeUndefined();
+  }),
+);
+
+it.effect(
   "observe reports absent when the domain or key doesn't exist (plutil/defaults exits non-zero)",
   () =>
     Effect.gen(function* () {

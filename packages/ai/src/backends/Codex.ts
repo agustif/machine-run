@@ -213,5 +213,15 @@ export const CodexBackend: AiToolBackend = {
             Effect.catchTag("CommandError", (error) => classifyCliError("codex", "codex", error)),
           );
       }),
+
+    // `codex mcp remove <name>` is already the no-op this backend's `remove`
+    // is documented as — verified this session: removing an unregistered
+    // name prints `No MCP server named '<name>' found.` and exits `0`,
+    // unlike Grok's identical-looking case (see `Grok.ts`'s `NO_SUCH_SERVER`
+    // doc comment), so no absence-detecting classifier is needed here.
+    remove: (name, ctx) =>
+      ctx
+        .exec({ command: Sh.sh("codex", "mcp", "remove", name), shell: true })
+        .pipe(Effect.asVoid, Effect.catchTag("CommandError", (error) => classifyCliError("codex", "codex", error))),
   },
 };

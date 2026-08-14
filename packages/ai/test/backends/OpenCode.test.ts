@@ -96,6 +96,48 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
+it.effect(
+  "remove deletes only the named server, leaving plugins, providers, and the other server untouched",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      yield* fs.makeDirectory(path.join(home, ".config/opencode"), { recursive: true });
+      yield* fs.writeFileString(configPathOf(path, home), REAL_OPENCODE_JSONC);
+
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+      yield* OpenCodeBackend.mcp!.remove("existing", ctx);
+
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(configPathOf(path, home)),
+      );
+      expect(field(written, "mcp", "existing")).toBeNull();
+      expect(field(written, "plugins")).toEqual([
+        "./plugin/lmstudio-v2.ts",
+        "./plugin/restart-command.ts",
+      ]);
+      expect(field(written, "providers", "lmstudio", "options", "baseURL")).toBe(
+        "http://127.0.0.1:1234/v1",
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("remove is a no-op when the named server was never registered", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    yield* fs.makeDirectory(path.join(home, ".config/opencode"), { recursive: true });
+    yield* fs.writeFileString(configPathOf(path, home), REAL_OPENCODE_JSONC);
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+    yield* OpenCodeBackend.mcp!.remove("does-not-exist", ctx);
+
+    expect(yield* fs.readFileString(configPathOf(path, home))).toBe(REAL_OPENCODE_JSONC);
+  }).pipe(Effect.provide(layer)),
+);
+
 it.effect("observe round-trips the pre-existing remote server", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

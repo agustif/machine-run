@@ -12,6 +12,7 @@ import {
   KnownHostKeyMismatch,
   makeKnownHostReconciler,
   parseKnownHosts,
+  removeKnownHostLine,
   type KnownHostProps,
 } from "../src/KnownHost.ts";
 
@@ -77,6 +78,22 @@ it("appendKnownHostLine adds exactly one line, adding a missing trailing newline
   expect(appendKnownHostLine("existing-no-newline", entry)).toBe(
     "existing-no-newline\nh ssh-ed25519 AAAA\n",
   );
+});
+
+it("removeKnownHostLine drops exactly the matching line and nothing else", () => {
+  const entries = parseKnownHosts(REAL_GITHUB_KEYSCAN);
+  const target = findKnownHostEntry(entries, "github.com", "ssh-ed25519");
+  expect(target).toBeDefined();
+
+  const removed = removeKnownHostLine(REAL_GITHUB_KEYSCAN, target!);
+  expect(parseKnownHosts(removed)).toEqual(entries.filter((e) => e.keyType !== "ssh-ed25519"));
+  // Comment lines are untouched — same disinterest as parseKnownHosts.
+  expect(removed).toContain("# github.com:22 SSH-2.0-feb815a");
+});
+
+it("removeKnownHostLine is a no-op when no line matches", () => {
+  const entry = { host: "nowhere.example.com", keyType: "ssh-ed25519", publicKey: "AAAA" };
+  expect(removeKnownHostLine(REAL_GITHUB_KEYSCAN, entry)).toBe(REAL_GITHUB_KEYSCAN);
 });
 
 // ---------------------------------------------------------------------------
@@ -242,6 +259,110 @@ it.effect(
       );
       expect(reconciler.matches({ ...desired, host: "other.example.com" }, desired)).toBe(false);
     }).pipe(Effect.provide(layer)),
+);
+
+// --- drift: agrees with matches; every field is categorical, none get a direction. ---
+
+it.effect("drift is empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeKnownHostReconciler;
+    const props = propsFor("/tmp/irrelevant-known_hosts");
+    const desired = yield* reconciler.desired(props);
+
+    expect(reconciler.matches(desired, desired)).toBe(true);
+    expect(reconciler.drift?.(desired, desired)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'key' field, with no direction, for a differing publicKey", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeKnownHostReconciler;
+    const props = propsFor("/tmp/irrelevant-known_hosts");
+    const desired = yield* reconciler.desired(props);
+    const observed = { ...desired, publicKey: "AAAAdifferentkey" };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "key", observed: "AAAAdifferentkey", desired: desired.publicKey },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'host' field for a differing host", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeKnownHostReconciler;
+    const props = propsFor("/tmp/irrelevant-known_hosts");
+    const desired = yield* reconciler.desired(props);
+    const observed = { ...desired, host: "other.example.com" };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "host", observed: "other.example.com", desired: desired.host },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+// --- unapply: removes the exact line apply wrote — a real, safe reverse. ---
+
+it.effect("unapply removes the line apply wrote, leaving everything else untouched", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeKnownHostReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "known_hosts");
+
+    const first = propsFor(target);
+    const firstDesired = yield* reconciler.desired(first);
+    yield* reconciler.apply({ props: first, observed: Option.none(), desired: firstDesired }, applyCtx);
+
+    const second = propsFor(target, {
+      host: "gitlab.com",
+      keyType: "ssh-rsa",
+      publicKey: "AAAAB3NzaC1yc2Uh",
+    });
+    const secondDesired = yield* reconciler.desired(second);
+    yield* reconciler.apply(
+      { props: second, observed: Option.none(), desired: secondDesired },
+      applyCtx,
+    );
+
+    yield* reconciler.unapply!(
+      { props: second, observed: secondDesired, recorded: secondDesired },
+      applyCtx,
+    );
+
+    const written = yield* fs.readFileString(target);
+    expect(written).toBe(`github.com ssh-ed25519 ${first.publicKey}\n`);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply is a no-op when the live line no longer matches what was recorded — it never guesses",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKnownHostReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "known_hosts");
+
+      const props = propsFor(target);
+      const recorded = yield* reconciler.desired(props);
+      // The file's line has since changed to a different key — hand-edited,
+      // or re-pinned by a later run — so it is no longer this resource's own
+      // contribution.
+      const changedLine = { ...recorded, publicKey: "AAAAsomeoneelsespinnedthis" };
+      yield* fs.writeFileString(
+        target,
+        `${recorded.host} ${recorded.keyType} ${changedLine.publicKey}\n`,
+      );
+
+      yield* reconciler.unapply!({ props, observed: changedLine, recorded }, applyCtx);
+
+      const written = yield* fs.readFileString(target);
+      expect(written).toBe(`${recorded.host} ${recorded.keyType} ${changedLine.publicKey}\n`);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect(

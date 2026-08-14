@@ -252,6 +252,61 @@ it.effect("observe raises KeyPairIncomplete for a lone .pub with no private key"
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
+it.effect("drift is unconditionally empty, agreeing with matches' unconditional true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeKeyReconciler;
+    const props = propsFor("/tmp/irrelevant");
+    const desired = yield* reconciler.desired(props);
+    const observedLikeState = {
+      path: desired.path,
+      publicKeyPath: desired.publicKeyPath,
+      publicKeyType: "ssh-rsa",
+      comment: "whatever is already there",
+      fingerprint: "SHA256:whatever",
+    };
+    expect(reconciler.matches(observedLikeState, desired)).toBe(true);
+    expect(reconciler.drift?.(observedLikeState, desired)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "drift never contains anything derived from the private key — it never reports any field at all",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKeyReconciler;
+      const c = yield* ctx;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "id_ed25519");
+
+      const props = propsFor(target, { comment: "test-comment" });
+      const desired = yield* reconciler.desired(props);
+      const generated = yield* reconciler.apply({ props, observed: Option.none(), desired }, c);
+      const observed = yield* reconciler.observe(props, c);
+      expect(Option.isSome(observed)).toBe(true);
+
+      // Two shapes `drift` could ever be called with: the real observed state
+      // against `desired`, and against a `desired` whose props deliberately
+      // disagree with what's on disk (the only other input `toProvider.diff`
+      // could ever pass) — proving the private key never surfaces regardless
+      // of which comparison is made, not just that it happens not to today.
+      const againstDesired = reconciler.drift?.(Option.getOrThrow(observed), desired) ?? [];
+      const againstDifferentProps = reconciler.drift?.(
+        Option.getOrThrow(observed),
+        yield* reconciler.desired(propsFor(target, { algorithm: "rsa", comment: "different" })),
+      ) ?? [];
+
+      for (const fields of [againstDesired, againstDifferentProps]) {
+        expect(fields).toEqual([]);
+      }
+      // Sanity: the private key really was written, so an empty `drift` here
+      // is a guarantee, not an accident of nothing existing to leak.
+      const privateContent = yield* fs.readFileString(generated.path);
+      expect(privateContent).toContain("BEGIN OPENSSH PRIVATE KEY");
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
 it.effect(
   "matches always reports convergence once a keypair exists — this resource never regenerates one",
   () =>

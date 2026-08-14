@@ -1,5 +1,5 @@
 import { MachinePaths, Sh } from "@machine-run/core";
-import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as EffectConfig from "effect/Config";
@@ -389,6 +389,28 @@ export const makeGitConfigReconciler: Effect.Effect<
       observed.values.length === desired.values.length &&
       observed.values.every((value, index) => value === desired.values[index]),
 
+    // `values` is order-sensitive (see this module's doc comment on
+    // convergence), but not ordered in {@link DriftField.direction}'s sense —
+    // there is no "behind"/"ahead" between two different orderings of the
+    // same set of strings.
+    drift: (observed, desired): Drift => {
+      const fields = [];
+      if (observed.key !== desired.key) {
+        fields.push({ field: "key", observed: observed.key, desired: desired.key });
+      }
+      const sameValues =
+        observed.values.length === desired.values.length &&
+        observed.values.every((value, index) => value === desired.values[index]);
+      if (!sameValues) {
+        fields.push({
+          field: "value",
+          observed: observed.values.join(", "),
+          desired: desired.values.join(", "),
+        });
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
         yield* unsetAll(props.key, ctx.exec);
@@ -397,6 +419,15 @@ export const makeGitConfigReconciler: Effect.Effect<
         }
         return desired;
       }),
+
+    // Reverses what `apply` set — `--unset-all`, the same primitive `apply`
+    // itself uses, tolerating "already unset" (real exit `5`; see
+    // `unsetAll`'s doc comment). This clears the key entirely rather than
+    // restoring some prior value: `apply` never captures one (every apply,
+    // including the first, already unsets before adding — see this module's
+    // "Convergence, not patching" section), so there is nothing truthful to
+    // restore, only this resource's own contribution to remove.
+    unapply: ({ recorded }, ctx) => unsetAll(recorded.key, ctx.exec),
   };
 });
 

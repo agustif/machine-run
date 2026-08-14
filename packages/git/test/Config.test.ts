@@ -175,6 +175,60 @@ it.effect("matches treats a different value order as drift", () =>
   }).pipe(Effect.provide(layer)),
 );
 
+// --- drift: agrees with matches, and names its fields the way a reader would. ---
+
+it.effect("drift is empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitConfigReconciler;
+    const state = { key: "user.name", values: ["Agusti Fernandez"] };
+
+    expect(reconciler.matches(state, state)).toBe(true);
+    expect(reconciler.drift?.(state, state)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'value' field, with no direction, for a differing values array", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitConfigReconciler;
+    const observed = { key: "credential.helper", values: ["osxkeychain"] };
+    const desired = { key: "credential.helper", values: ["gh", "osxkeychain"] };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "value", observed: "osxkeychain", desired: "gh, osxkeychain" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+// --- unapply: --unset-all, the same primitive `apply` uses, tolerating "already unset". ---
+
+it.effect("unapply removes the key that apply set", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitConfigReconciler;
+    const calls: string[] = [];
+    const recorded = { key: "credential.helper", values: ["osxkeychain"] };
+
+    yield* reconciler.unapply!(
+      { props: props(), observed: recorded, recorded },
+      applyCtx(capturingExec(calls).exec),
+    );
+
+    expect(calls).toEqual(["git config --global --unset-all credential.helper"]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("unapply tolerates the real exit code 5 for a key already unset", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitConfigReconciler;
+    const recorded = { key: "credential.helper", values: ["osxkeychain"] };
+
+    yield* reconciler.unapply!(
+      { props: props(), observed: recorded, recorded },
+      applyCtx(fakeExecExit(5).exec),
+    );
+  }).pipe(Effect.provide(layer)),
+);
+
 // --- apply: always unset-all then one --add per desired value, converging from any prior state. ---
 
 it.effect("apply clears every existing value before re-adding, tolerating 'nothing to unset'", () =>

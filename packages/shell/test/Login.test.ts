@@ -177,6 +177,30 @@ it("Login reconciler matches ignores previousShell — it's bookkeeping, not des
   expect(observed.shell === desired.shell).toBe(true);
 });
 
+it.effect("Login reconciler drift is empty exactly when matches is true, ignoring previousShell too", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeLoginReconcilerAt("/etc/shells");
+    const observed = { shell: "/bin/zsh", previousShell: "/bin/bash" };
+    const desired = { shell: "/bin/zsh" };
+
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(reconciler.drift?.(observed, desired)).toEqual([]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("Login reconciler drift reports a 'shell' field, with no direction, for a differing shell", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeLoginReconcilerAt("/etc/shells");
+    const observed = { shell: "/bin/zsh" };
+    const desired = { shell: "/bin/bash" };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "shell", observed: "/bin/zsh", desired: "/bin/bash" },
+    ]);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior shell", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

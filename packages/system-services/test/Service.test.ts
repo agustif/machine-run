@@ -207,6 +207,105 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
+it.effect("drift: mirrors matches — empty iff satisfied, non-empty naming enabled/running", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeServiceReconciler;
+    const desired: ServiceState = {
+      backend: "brew-services",
+      name: "thing",
+      installed: true,
+      enabled: true,
+      running: true,
+    };
+    expect(reconciler.drift?.(desired, desired)).toEqual([]);
+    // `installed` is excluded from drift, mirroring `matches`.
+    expect(reconciler.drift?.({ ...desired, installed: false }, desired)).toEqual([]);
+    expect(reconciler.drift?.({ ...desired, enabled: false }, desired)).toEqual([
+      { field: "enabled", observed: "false", desired: "true" },
+    ]);
+    expect(reconciler.drift?.({ ...desired, running: false }, desired)).toEqual([
+      { field: "running", observed: "false", desired: "true" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+/** `unapply` never reads `observed`/`recorded` — see `Service.ts`'s doc comment — so a fixed, fully-on state stands in for both across every test below. */
+const onState: ServiceState = {
+  backend: "brew-services",
+  name: "thing",
+  installed: true,
+  enabled: true,
+  running: true,
+};
+
+it.effect(
+  "unapply: disables and stops brew-services, then confirms via a fresh observation",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      const p = props({ name: "thing" });
+      const { exec, calls } = queuedExec([
+        "", // `brew services stop thing`
+        brewInfo(true, false, false), // re-observe: still registered, now off
+      ]);
+
+      yield* reconciler.unapply!({ props: p, observed: onState, recorded: onState }, applyCtx(exec));
+
+      expect(calls).toEqual(["brew services stop thing", "brew services info thing --json"]);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply: reverses only the named service — a second Service resource on the same backend is untouched",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      const thing = props({ name: "thing" });
+      const { exec, calls } = queuedExec(["", brewInfo(true, false, false)]);
+
+      yield* reconciler.unapply!(
+        { props: thing, observed: onState, recorded: onState },
+        applyCtx(exec),
+      );
+
+      // Every command this issued names "thing" — never "other-thing", the
+      // sibling resource that happens to share a backend.
+      expect(calls.every((call) => call.includes("thing") && !call.includes("other-thing"))).toBe(
+        true,
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply: fails loudly with ServiceNotConverged when a fresh observation still shows it on",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeServiceReconciler;
+      const p = props({ name: "thing" });
+      const { exec } = queuedExec([
+        "", // `brew services stop thing` "succeeds"
+        brewInfo(true, true, true), // but a fresh read still shows it fully on
+      ]);
+
+      const result = yield* Effect.flip(
+        reconciler.unapply!(
+          { props: p, observed: onState, recorded: onState },
+          applyCtx(exec),
+        ),
+      );
+
+      expect(result).toBeInstanceOf(ServiceNotConverged);
+      expect(result).toMatchObject({
+        backend: "brew-services",
+        name: "thing",
+        expectedEnabled: false,
+        expectedRunning: false,
+        actualEnabled: true,
+        actualRunning: true,
+      });
+    }).pipe(Effect.provide(layer)),
+);
+
 it.effect(
   "launchd end-to-end through the full reconciler: a plist at the conventional path is reported installed",
   () =>

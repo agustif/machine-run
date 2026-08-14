@@ -1,5 +1,5 @@
 import { MachinePaths, Sh } from "@machine-run/core";
-import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -245,6 +245,15 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
     desired: (props) => Effect.succeed({ repo: paths.expand(props.repo) }),
 
     matches: (observed, desired) => observed.repo === desired.repo,
+
+    // `repo` is a path, not ordered — no `direction`. In practice `observe`
+    // only ever reports a repo under this same address once it's registered
+    // under exactly `desired.repo`, so this is empty whenever `matches` is —
+    // recorded honestly rather than hand-waved.
+    drift: (observed, desired): Drift =>
+      observed.repo === desired.repo
+        ? []
+        : [{ field: "repo", observed: observed.repo, desired: desired.repo }],
 
     apply: ({ desired }, ctx) =>
       Effect.gen(function* () {

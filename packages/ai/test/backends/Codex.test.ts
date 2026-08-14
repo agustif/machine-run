@@ -220,6 +220,40 @@ it.effect(
     }),
 );
 
+it.effect("remove runs `codex mcp remove <name>`", () =>
+  Effect.gen(function* () {
+    const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+      [];
+    yield* CodexBackend.mcp!.remove("testserver", ctxWith(capturingExec("", calls)));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("codex mcp remove testserver");
+  }),
+);
+
+it.effect(
+  "remove is a no-op for a name that isn't registered — codex's own `remove` already exits 0",
+  () =>
+    Effect.gen(function* () {
+      // Real, verified behaviour: `codex mcp remove doesnotexist` prints
+      // "No MCP server named 'doesnotexist' found." and exits 0 — unlike
+      // Codex's own `get`, this never raises at all.
+      yield* CodexBackend.mcp!.remove("doesnotexist", ctxWith(fakeExec("")));
+    }),
+);
+
+it.effect("remove reports AiToolCliMissing when the codex binary itself is absent", () =>
+  Effect.gen(function* () {
+    const error = new CommandError({
+      command: "codex mcp remove x",
+      reason: new UnexpectedExit({ exitCode: 127, stderr: "codex: command not found" }),
+    });
+    const failure = yield* CodexBackend.mcp!.remove("x", ctxWith(failingExec(error))).pipe(
+      Effect.flip,
+    );
+    expect(failure).toMatchObject({ _tag: "AiToolCliMissing", tool: "codex" });
+  }),
+);
+
 it.effect(
   "apply fails with AiToolFieldUnsupported when asked for headers, which codex has no way to express",
   () =>

@@ -2,8 +2,41 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
-import { AiToolConfigMalformed, type AiMcpServerSpec, type AiToolBackend } from "../Backend.ts";
-import { classifyCliError, metaToken } from "./cliMcp.ts";
+import type { CommandError } from "alchemy/Command";
+import {
+  AiToolCliMissing,
+  AiToolConfigMalformed,
+  type AiMcpServerSpec,
+  type AiToolBackend,
+} from "../Backend.ts";
+import { classifyCliError, isCommandNotFound, metaToken, stderrOf } from "./cliMcp.ts";
+
+/**
+ * `grok mcp remove <name> -s user` exits `1` with this text on stderr when
+ * the name isn't registered — verified this session against the real,
+ * installed `grok` CLI (`grok mcp remove doesnotexist -s user` printed
+ * exactly `No MCP server named 'doesnotexist' in user config` and exited 1),
+ * unlike `codex mcp remove`, which exits `0` for the identical case. Matched
+ * the same way `Codex.ts`'s `NO_SUCH_SERVER` is: case-insensitively, as a
+ * substring.
+ */
+const NO_SUCH_SERVER = /No MCP server named/i;
+
+/**
+ * Classifies a failed `grok mcp remove <name> -s user`. Command-not-found
+ * promotes to {@link AiToolCliMissing}; "not registered" is genuine absence
+ * — this backend's `remove` is documented as a no-op in that case — and
+ * everything else propagates unchanged.
+ */
+const classifyGrokMcpRemoveError = (
+  error: CommandError,
+): Effect.Effect<void, AiToolCliMissing | CommandError> => {
+  if (isCommandNotFound(error)) {
+    return Effect.fail(new AiToolCliMissing({ tool: "grok", cli: "grok", cause: error }));
+  }
+  if (NO_SUCH_SERVER.test(stderrOf(error))) return Effect.void;
+  return Effect.fail(error);
+};
 
 /**
  * `grok mcp list --json`'s own shape, verified by running the real,
@@ -161,5 +194,14 @@ export const GrokBackend: AiToolBackend = {
             Effect.catchTag("CommandError", (error) => classifyCliError("grok", "grok", error)),
           );
       }),
+
+    // `-s user`, matching the scope `add`/`list` implicitly target and this
+    // backend's `configFile` names — never the unscoped search across user
+    // *and* project config, which could remove a same-named server from a
+    // project's own `.grok/config.toml` this backend has no address for.
+    remove: (name, ctx) =>
+      ctx
+        .exec({ command: Sh.sh("grok", "mcp", "remove", name, "-s", "user"), shell: true })
+        .pipe(Effect.asVoid, Effect.catchTag("CommandError", classifyGrokMcpRemoveError)),
   },
 };

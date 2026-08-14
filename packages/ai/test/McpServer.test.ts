@@ -10,6 +10,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as UndefinedOr from "effect/UndefinedOr";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { jsonRecordOr } from "../src/backends/jsonConfigFile.ts";
@@ -403,6 +404,172 @@ it.effect("addresses the real config file, identically to a path-addressed resou
 
     expect(address).toBe(paths.expand("~/.claude.json"));
   }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect("drift: empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+
+    const props: McpServerProps = {
+      tool: "claude",
+      name: "my-server",
+      transport: { _tag: "Stdio", command: "npx", env: { LOG_LEVEL: "debug" } },
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(reconciler.drift?.(observed, desired)).toEqual([]);
+
+    const changedProps: McpServerProps = {
+      ...props,
+      transport: { _tag: "Stdio", command: "npx", env: { LOG_LEVEL: "trace" } },
+    };
+    const changedDesired = yield* reconciler.desired(changedProps);
+    expect(reconciler.matches(observed, changedDesired)).toBe(false);
+    const drift = reconciler.drift?.(observed, changedDesired) ?? [];
+    expect(drift.length).toBeGreaterThan(0);
+    expect(drift).toContainEqual({
+      field: "envLiteral",
+      observed: "LOG_LEVEL=debug",
+      desired: "LOG_LEVEL=trace",
+    });
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift: a transport tag mismatch (Stdio vs Remote) is reported as \"transport\"", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+
+    const stdioProps: McpServerProps = {
+      tool: "claude",
+      name: "my-server",
+      transport: { _tag: "Stdio", command: "npx" },
+    };
+    const stdioDesired = yield* reconciler.desired(stdioProps);
+    yield* reconciler.apply(
+      { props: stdioProps, observed: Option.none(), desired: stdioDesired },
+      applyCtx,
+    );
+    const observed = Option.getOrThrow(yield* reconciler.observe(stdioProps, observeCtx));
+
+    const remoteDesired = yield* reconciler.desired({
+      tool: "claude",
+      name: "my-server",
+      transport: { _tag: "Remote", url: "https://mcp.example.test" },
+    });
+
+    expect(reconciler.matches(observed, remoteDesired)).toBe(false);
+    expect(reconciler.drift?.(observed, remoteDesired)).toEqual([
+      { field: "transport", observed: "Stdio", desired: "Remote" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+/**
+ * The most valuable test in this file: `drift` may report which env/header
+ * keys appeared or disappeared, and may report a literal value, but must
+ * never surface a secret's resolved value — even when there is genuine drift
+ * to report alongside it. `McpTransportState`'s `envLiteral` only ever holds
+ * entries whose declared prop value was already a plain string, so this
+ * failing would mean that guarantee broke somewhere upstream.
+ */
+it.effect("drift never contains a secret value, even when there is real drift to report", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const home = yield* fs.makeTempDirectoryScoped();
+    const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+
+    const props: McpServerProps = {
+      tool: "claude",
+      name: "my-server",
+      transport: {
+        _tag: "Stdio",
+        command: "npx",
+        env: {
+          API_KEY: { _tag: "Env", variable: "MCP_DRIFT_SECRET" },
+          LOG_LEVEL: "debug",
+        },
+      },
+    };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler
+      .apply({ props, observed: Option.none(), desired }, applyCtx)
+      .pipe(Effect.provide(envConfig({ MCP_DRIFT_SECRET: "sk-must-never-leak" })));
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+    // Real drift: the literal value changed, and the secret's key vanishes.
+    const changedDesired = yield* reconciler.desired({
+      tool: "claude",
+      name: "my-server",
+      transport: { _tag: "Stdio", command: "npx", env: { LOG_LEVEL: "trace" } },
+    });
+
+    expect(reconciler.matches(observed, changedDesired)).toBe(false);
+    const drift = reconciler.drift?.(observed, changedDesired) ?? [];
+    expect(drift.length).toBeGreaterThan(0);
+    for (const field of drift) {
+      expect(field.observed).not.toContain("sk-must-never-leak");
+      expect(field.desired).not.toContain("sk-must-never-leak");
+    }
+    // Swept as a whole structure as well as field by field, so a `DriftField`
+    // gaining a new string later is covered without this test being updated.
+    // Projected first because `direction` is optional, and an optional property
+    // is not a `Json` value.
+    const serialisable = drift.map((field) =>
+      UndefinedOr.match(field.direction, {
+        onUndefined: () => [field.field, field.observed, field.desired],
+        onDefined: (direction) => [field.field, field.observed, field.desired, direction],
+      }),
+    );
+    expect(toJsonString(serialisable)).not.toContain("sk-must-never-leak");
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "unapply removes only its own server entry — a hand-written server and an unrelated top-level key survive",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const reconciler = yield* makeMcpServerReconciler.pipe(Effect.provide(withHome(home)));
+
+      // Content this resource never wrote and must never touch.
+      yield* fs.writeFileString(
+        path.join(home, ".claude.json"),
+        toJsonString({
+          onboarding: true,
+          mcpServers: { "hand-written": { command: "other-binary" } },
+        }),
+      );
+
+      const props: McpServerProps = {
+        tool: "claude",
+        name: "my-server",
+        transport: { _tag: "Stdio", command: "npx" },
+      };
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+      const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+
+      yield* reconciler.unapply!({ props, observed, recorded: desired }, applyCtx);
+
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(path.join(home, ".claude.json")),
+      );
+      expect(field(written, "mcpServers", "my-server")).toBeNull();
+      expect(field(written, "mcpServers", "hand-written")).toEqual({ command: "other-binary" });
+      expect(field(written, "onboarding")).toBe(true);
+
+      const reobserved = yield* reconciler.observe(props, observeCtx);
+      expect(Option.isNone(reobserved)).toBe(true);
+    }).pipe(Effect.provide(layer)),
 );
 
 /** Two tools write two different files, so they must not serialise against

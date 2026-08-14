@@ -5,7 +5,7 @@ import {
   MachinePaths,
   splitLines,
 } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -199,6 +199,26 @@ export const appendKnownHostLine = (content: string, entry: KnownHostEntry): str
   return joinLines([...splitLines(content), line], ending);
 };
 
+/**
+ * Drops every line matching `entry` exactly on `host`/`keyType`/`publicKey` —
+ * the real reverse of {@link appendKnownHostLine}. Comment and marker lines
+ * are never touched, matching {@link parseKnownHosts}'s own disinterest in
+ * them.
+ */
+export const removeKnownHostLine = (content: string, entry: KnownHostEntry): string => {
+  const ending = detectLineEnding(content);
+  const kept = splitLines(content).filter((line) => {
+    if (isIgnoredLine(line)) return true;
+    const fields = line.trim().split(/\s+/);
+    return !(
+      fields[0] === entry.host &&
+      fields[1] === entry.keyType &&
+      fields[2] === entry.publicKey
+    );
+  });
+  return joinLines(kept, ending);
+};
+
 const DEFAULT_MODE = 0o644;
 const DEFAULT_DIRECTORY_MODE = 0o700;
 const DEFAULT_PATH = "~/.ssh/known_hosts";
@@ -305,6 +325,24 @@ export const makeKnownHostReconciler: Effect.Effect<
       observed.keyType === desired.keyType &&
       observed.publicKey === desired.publicKey,
 
+    // Every field here is categorical, not ordered — no `direction`.
+    drift: (observed, desired): Drift => {
+      const fields = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.host !== desired.host) {
+        fields.push({ field: "host", observed: observed.host, desired: desired.host });
+      }
+      if (observed.keyType !== desired.keyType) {
+        fields.push({ field: "keyType", observed: observed.keyType, desired: desired.keyType });
+      }
+      if (observed.publicKey !== desired.publicKey) {
+        fields.push({ field: "key", observed: observed.publicKey, desired: desired.publicKey });
+      }
+      return fields;
+    },
+
     apply: ({ props, observed, desired }) =>
       Effect.gen(function* () {
         // `observed` is only `Option.some` here when `matches` returned false
@@ -356,6 +394,27 @@ export const makeKnownHostReconciler: Effect.Effect<
 
         return desired;
       }),
+
+    /**
+     * Removes the exact line `apply` wrote — a real, safe reverse: unlike
+     * `Ssh.Key`, nothing here is unrecoverable (the same line can always be
+     * re-pinned from the same out-of-band source that produced it the first
+     * time).
+     *
+     * Only when `observed`'s key still matches `recorded`'s: if the line has
+     * since changed to something else (hand-edited, or re-pinned to a
+     * different key by a later run), it is no longer this resource's own
+     * contribution to remove — deleting it would be exactly the kind of
+     * guess {@link KnownHostKeyMismatch} refuses to make on `apply`'s side,
+     * so `unapply` refuses it too and leaves the file untouched.
+     */
+    unapply: ({ recorded, observed }) =>
+      observed.publicKey !== recorded.publicKey
+        ? Effect.void
+        : Effect.gen(function* () {
+            const current = yield* readContentOrEmpty(recorded.path);
+            yield* fs.writeFileString(recorded.path, removeKnownHostLine(current, recorded));
+          }),
   };
 });
 

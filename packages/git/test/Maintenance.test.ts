@@ -177,6 +177,26 @@ it.effect("matches is true iff the (expanded) repo path is identical", () =>
   }).pipe(Effect.provide(layer)),
 );
 
+// --- drift: agrees with matches over the one field, `repo` — no direction, it's a path. ---
+
+it.effect("drift is empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitMaintenanceReconciler;
+    expect(reconciler.matches({ repo: "/repo" }, { repo: "/repo" })).toBe(true);
+    expect(reconciler.drift?.({ repo: "/repo" }, { repo: "/repo" })).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'repo' field for a differing repo", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitMaintenanceReconciler;
+    expect(reconciler.matches({ repo: "/repo" }, { repo: "/other" })).toBe(false);
+    expect(reconciler.drift?.({ repo: "/repo" }, { repo: "/other" })).toEqual([
+      { field: "repo", observed: "/repo", desired: "/other" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
 // --- apply: `git maintenance start`, and its one real, common failure mode. ---
 
 it.effect("apply runs `git maintenance start` against the repo and returns desired", () =>

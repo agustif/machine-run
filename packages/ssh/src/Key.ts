@@ -1,5 +1,5 @@
 import { isNotFound, MachinePaths, Sh } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -361,6 +361,15 @@ export const makeKeyReconciler: Effect.Effect<
     // convergence" — this is the resource-level guarantee that an existing
     // keypair is never regenerated.
     matches: () => true,
+
+    // Must agree with `matches` above, which is unconditionally `true` — so
+    // this is unconditionally `[]`, never comparing `algorithm`/`bits`/
+    // `comment` against what's on disk. This is also what keeps the private
+    // key out of plan output for free: there is nothing to report, so
+    // nothing derived from the private key's bytes (which this resource
+    // never reads in the first place — see the module doc comment) can ever
+    // reach a `DriftField`.
+    drift: (): Drift => [],
 
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {

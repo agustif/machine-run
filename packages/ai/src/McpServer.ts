@@ -1,5 +1,5 @@
 import { MachinePaths } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
@@ -198,6 +198,93 @@ const recordsEqual = (
   return arraysEqual(aKeys, bKeys) && aKeys.every((key) => a[key] === b[key]);
 };
 
+/** Sorted, comma-joined — never a secret value, since only key *names* pass through here. */
+const stringifyKeys = (values: readonly string[] | undefined): string => (values ?? []).join(", ");
+
+/**
+ * Sorted, comma-joined `key=value` pairs. Only ever called on `envLiteral`/
+ * `headerLiteral`, which by construction (see `McpTransportState`'s doc
+ * comment) hold nothing but the subset of entries whose declared value was
+ * already a plain string — never a secret-sourced one — so this can never
+ * render a secret into a `DriftField`.
+ */
+const stringifyLiteral = (values: Record<string, string> | undefined): string =>
+  Object.entries(values ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+
+/**
+ * Drift within one transport, keyed off `McpTransportState`'s own tag rather
+ * than a synthetic combined field. `undefined` reads as the tag `"none"` —
+ * `observed.transport` can genuinely be absent (see its doc comment); a
+ * `desired` this reconciler builds itself never is.
+ *
+ * Only ever reports a key's presence (`envKeys`/`headerKeys`) or a literal
+ * value (`envLiteral`/`headerLiteral`) — never a secret-sourced value, which
+ * `McpTransportState` never carries in the first place. No field here is
+ * ordered, so no `direction` is ever set.
+ */
+const transportDrift = (
+  observed: McpTransportState | undefined,
+  desired: McpTransportState | undefined,
+): Drift => {
+  const observedTag = observed?._tag ?? "none";
+  const desiredTag = desired?._tag ?? "none";
+  if (observedTag !== desiredTag) {
+    return [{ field: "transport", observed: observedTag, desired: desiredTag }];
+  }
+  if (observed === undefined || desired === undefined) return [];
+
+  const fields: DriftField[] = [];
+  if (observed._tag === "Stdio" && desired._tag === "Stdio") {
+    if (observed.command !== desired.command) {
+      fields.push({ field: "command", observed: observed.command, desired: desired.command });
+    }
+    if (!arraysEqual(observed.args, desired.args)) {
+      fields.push({
+        field: "args",
+        observed: stringifyKeys(observed.args),
+        desired: stringifyKeys(desired.args),
+      });
+    }
+    if (!arraysEqual(observed.envKeys, desired.envKeys)) {
+      fields.push({
+        field: "envKeys",
+        observed: stringifyKeys(observed.envKeys),
+        desired: stringifyKeys(desired.envKeys),
+      });
+    }
+    if (!recordsEqual(observed.envLiteral, desired.envLiteral)) {
+      fields.push({
+        field: "envLiteral",
+        observed: stringifyLiteral(observed.envLiteral),
+        desired: stringifyLiteral(desired.envLiteral),
+      });
+    }
+  }
+  if (observed._tag === "Remote" && desired._tag === "Remote") {
+    if (observed.url !== desired.url) {
+      fields.push({ field: "url", observed: observed.url, desired: desired.url });
+    }
+    if (!arraysEqual(observed.headerKeys, desired.headerKeys)) {
+      fields.push({
+        field: "headerKeys",
+        observed: stringifyKeys(observed.headerKeys),
+        desired: stringifyKeys(desired.headerKeys),
+      });
+    }
+    if (!recordsEqual(observed.headerLiteral, desired.headerLiteral)) {
+      fields.push({
+        field: "headerLiteral",
+        observed: stringifyLiteral(observed.headerLiteral),
+        desired: stringifyLiteral(desired.headerLiteral),
+      });
+    }
+  }
+  return fields;
+};
+
 /** `props.transport`'s declared `env`, or `undefined` when `transport` is `Remote` (which has no `env`). */
 const declaredEnv = (transport: McpTransport): Record<string, McpEnvValue> | undefined =>
   Match.value(transport).pipe(
@@ -371,6 +458,21 @@ export const makeMcpServerReconciler: Effect.Effect<
           ),
       }),
 
+    // Never a secret value: `tool`/`name` are recipe-authored identifiers,
+    // and `transportDrift` only ever surfaces key presence and literal
+    // values — see its doc comment and `McpTransportState`'s.
+    drift: (observed, desired) => {
+      const fields: DriftField[] = [];
+      if (observed.tool !== desired.tool) {
+        fields.push({ field: "tool", observed: observed.tool, desired: desired.tool });
+      }
+      if (observed.name !== desired.name) {
+        fields.push({ field: "name", observed: observed.name, desired: desired.name });
+      }
+      fields.push(...transportDrift(observed.transport, desired.transport));
+      return fields;
+    },
+
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
         const mcp = yield* requireMcp(props.tool);
@@ -410,6 +512,16 @@ export const makeMcpServerReconciler: Effect.Effect<
         yield* mcp.apply(props.name, spec, { exec: ctx.exec, fs, path, home: paths.home });
 
         return desired;
+      }),
+
+    // Removing the one server this resource registered is a real reverse of
+    // its own write — and every backend's `remove` (see each `backends/*.ts`)
+    // touches only that one entry in a document shared with every other
+    // server and every other top-level key, never the whole file.
+    unapply: ({ props }, ctx) =>
+      Effect.gen(function* () {
+        const mcp = yield* requireMcp(props.tool);
+        yield* mcp.remove(props.name, { exec: ctx.exec, fs, path, home: paths.home });
       }),
   };
 });

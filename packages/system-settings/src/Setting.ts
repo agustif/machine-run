@@ -1,4 +1,4 @@
-import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -335,6 +335,51 @@ const planFor = (props: SettingProps): SettingPlan =>
   );
 
 /**
+ * The identity fields relevant to one `SettingState`'s own variant —
+ * `schema`/`key` for `Gsettings`, plus `path` for `GsettingsRelocatable`, or
+ * just `path` for `Dconf` — dispatched the same way {@link planFor} dispatches
+ * `address`, rather than blindly diffing every optional field regardless of
+ * which case actually uses it.
+ */
+const identityDrift = (observed: SettingState, desired: SettingState): DriftField[] =>
+  Match.value(desired.variant).pipe(
+    Match.when(
+      "Gsettings",
+      (): DriftField[] => [
+        ...(observed.schema !== desired.schema
+          ? [{ field: "schema", observed: observed.schema ?? "", desired: desired.schema ?? "" }]
+          : []),
+        ...(observed.key !== desired.key
+          ? [{ field: "key", observed: observed.key ?? "", desired: desired.key ?? "" }]
+          : []),
+      ],
+    ),
+    Match.when(
+      "GsettingsRelocatable",
+      (): DriftField[] => [
+        ...(observed.schema !== desired.schema
+          ? [{ field: "schema", observed: observed.schema ?? "", desired: desired.schema ?? "" }]
+          : []),
+        ...(observed.path !== desired.path
+          ? [{ field: "path", observed: observed.path ?? "", desired: desired.path ?? "" }]
+          : []),
+        ...(observed.key !== desired.key
+          ? [{ field: "key", observed: observed.key ?? "", desired: desired.key ?? "" }]
+          : []),
+      ],
+    ),
+    Match.when(
+      "Dconf",
+      (): DriftField[] => [
+        ...(observed.path !== desired.path
+          ? [{ field: "path", observed: observed.path ?? "", desired: desired.path ?? "" }]
+          : []),
+      ],
+    ),
+    Match.exhaustive,
+  );
+
+/**
  * The provider body, exported separately from `SettingProvider` so a test
  * can build it directly and drive `observe`/`matches`/`apply` without the
  * alchemy engine or a real `CommandExecutor` — see
@@ -372,6 +417,19 @@ export const makeSettingReconciler: Effect.Effect<
     observed.path === desired.path &&
     observed.key === desired.key &&
     observed.value === desired.value,
+
+  // GVariant text is not ordered, so nothing here ever sets `direction`.
+  drift: (observed, desired): Drift => {
+    const fields: DriftField[] = [];
+    if (observed.variant !== desired.variant) {
+      fields.push({ field: "variant", observed: observed.variant, desired: desired.variant });
+    }
+    fields.push(...identityDrift(observed, desired));
+    if (observed.value !== desired.value) {
+      fields.push({ field: "value", observed: observed.value, desired: desired.value });
+    }
+    return fields;
+  },
 
   apply: ({ props, desired }, ctx) =>
     Effect.gen(function* () {

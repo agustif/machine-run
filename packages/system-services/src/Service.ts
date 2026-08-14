@@ -1,5 +1,5 @@
 import { MachinePaths } from "@machine-run/core";
-import { type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type DriftField, type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -216,6 +216,34 @@ export const makeServiceReconciler: Effect.Effect<
       observed.enabled === desired.enabled &&
       observed.running === desired.running,
 
+    // Mirrors `matches`. `installed` is excluded for the identical reason
+    // `matches` excludes it. Neither `enabled` nor `running` is ordered —
+    // each is a state, not a position on a scale — so no `direction`.
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.backend !== desired.backend) {
+        fields.push({ field: "backend", observed: observed.backend, desired: desired.backend });
+      }
+      if (observed.name !== desired.name) {
+        fields.push({ field: "name", observed: observed.name, desired: desired.name });
+      }
+      if (observed.enabled !== desired.enabled) {
+        fields.push({
+          field: "enabled",
+          observed: observed.enabled ? "true" : "false",
+          desired: desired.enabled ? "true" : "false",
+        });
+      }
+      if (observed.running !== desired.running) {
+        fields.push({
+          field: "running",
+          observed: observed.running ? "true" : "false",
+          desired: desired.running ? "true" : "false",
+        });
+      }
+      return fields;
+    },
+
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
         const backend = backends[props.backend];
@@ -247,6 +275,34 @@ export const makeServiceReconciler: Effect.Effect<
         }
 
         return { backend: props.backend, name: props.name, ...reobserved };
+      }),
+
+    /**
+     * Disables and stops the service — the honest reverse of what `apply`
+     * does, since this resource never touches `installed` either direction
+     * (see `desired`'s doc comment): it only ever converges `enabled`/
+     * `running`, so undoing it means converging those same two flags back to
+     * off, never deleting the definition a different resource owns.
+     * Re-observes and confirms for the identical reason `apply` does.
+     */
+    unapply: ({ props }, ctx) =>
+      Effect.gen(function* () {
+        const backend = backends[props.backend];
+        yield* backend.converge(props.name, props.path, { enabled: false, running: false }, ctx.exec);
+
+        const reobserved = yield* backend.observe(props.name, props.path, ctx.exec);
+        if (reobserved.enabled || reobserved.running) {
+          return yield* Effect.fail(
+            new ServiceNotConverged({
+              backend: props.backend,
+              name: props.name,
+              expectedEnabled: false,
+              expectedRunning: false,
+              actualEnabled: reobserved.enabled,
+              actualRunning: reobserved.running,
+            }),
+          );
+        }
       }),
   };
 });

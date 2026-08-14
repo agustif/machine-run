@@ -204,6 +204,13 @@ export interface AiMcpBackend {
     desired: AiMcpServerDesired,
     ctx: AiToolContext,
   ) => Effect.Effect<void, AiToolError>;
+
+  /**
+   * Removes the server named `name` from this tool's config, touching only
+   * that one entry — every other server and every other top-level key is
+   * left exactly as `apply` leaves them. A no-op if `name` is not registered.
+   */
+  readonly remove: (name: string, ctx: AiToolContext) => Effect.Effect<void, AiToolError>;
 }
 
 /**

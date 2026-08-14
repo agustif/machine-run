@@ -199,6 +199,58 @@ it.effect(
     }),
 );
 
+it.effect("Setting reconciler drift: empty exactly when matches is true, naming \"value\"", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSettingReconciler;
+    const desired: SettingState = {
+      variant: "Gsettings",
+      schema: "org.gnome.desktop.interface",
+      path: undefined,
+      key: "clock-format",
+      value: "'24h'",
+    };
+    expect(reconciler.matches(desired, desired)).toBe(true);
+    expect(reconciler.drift?.(desired, desired)).toEqual([]);
+
+    const changed = { ...desired, value: "'12h'" };
+    expect(reconciler.matches(changed, desired)).toBe(false);
+    expect(reconciler.drift?.(changed, desired)).toEqual([
+      { field: "value", observed: "'12h'", desired: "'24h'" },
+    ]);
+  }),
+);
+
+it.effect(
+  "Setting reconciler drift: a GsettingsRelocatable mismatch reports \"path\", a Dconf one does not",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const desired: SettingState = {
+        variant: "GsettingsRelocatable",
+        schema: "org.example.relocatable",
+        path: "/org/example/testpath1/",
+        key: "greeting",
+        value: "'hi'",
+      };
+      const observed = { ...desired, path: "/org/example/testpath2/" };
+      expect(reconciler.matches(observed, desired)).toBe(false);
+      expect(reconciler.drift?.(observed, desired)).toEqual([
+        { field: "path", observed: "/org/example/testpath2/", desired: "/org/example/testpath1/" },
+      ]);
+
+      const dconfDesired: SettingState = {
+        variant: "Dconf",
+        schema: undefined,
+        path: "/test/mypath",
+        key: undefined,
+        value: "['a', 'b']",
+      };
+      // A wholly different variant (observed is GsettingsRelocatable, desired
+      // is Dconf) is reported via "variant" itself.
+      expect(reconciler.drift?.(desired, dconfDesired)?.map((f) => f.field)).toContain("variant");
+    }),
+);
+
 it.effect("Setting reconciler apply: writes the value and confirms it by reading it back", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;

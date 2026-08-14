@@ -1,6 +1,8 @@
 import { MachinePaths } from "@machine-run/core";
 import {
   type ApplyContext,
+  type Drift,
+  type DriftField,
   type Exec,
   type ObserveContext,
   type Reconciler,
@@ -240,6 +242,33 @@ const scopeEquals = (a: RuntimeScope, b: RuntimeScope): boolean => {
   return a._tag === "Directory" && b._tag === "Directory" ? a.path === b.path : true;
 };
 
+const describeScope = (scope: RuntimeScope): string =>
+  scope._tag === "Global" ? "Global" : `Directory:${scope.path}`;
+
+/** Dotted-numeric shape, same rule `versionSatisfies` tests a request against. */
+const DOTTED = /^\d+(\.\d+)*$/;
+
+/**
+ * `observed` versus `desired`, only when both are plain dotted-numeric
+ * strings — a channel name (`"stable"`, `"nightly"`) has no ordering to
+ * report. `undefined` (no established direction) is also the answer when
+ * both parse but are equal component-wise, which should not arise here in
+ * practice: `matches`/`drift` only ever call this once `versionSatisfies`
+ * has already failed, and an exact or prefix match satisfies that check.
+ */
+const versionDirection = (observed: string, desired: string): "behind" | "ahead" | undefined => {
+  if (!DOTTED.test(observed) || !DOTTED.test(desired)) return undefined;
+  const observedParts = observed.split(".").map(Number);
+  const desiredParts = desired.split(".").map(Number);
+  const length = Math.max(observedParts.length, desiredParts.length);
+  for (let i = 0; i < length; i++) {
+    const o = observedParts[i] ?? 0;
+    const d = desiredParts[i] ?? 0;
+    if (o !== d) return o < d ? "behind" : "ahead";
+  }
+  return undefined;
+};
+
 /**
  * Whether anything a backend reported satisfies `requested`, and if so,
  * which concrete string to report as `version` — the active one winning over
@@ -467,6 +496,54 @@ export const makeRuntimeToolReconciler: Effect.Effect<
       observed.installed &&
       (desired.active ? observed.active : true),
 
+    // Mirrors `matches` field for field. `version` gets a `direction` only in
+    // the clean dotted case (`versionDirection`) — a channel name like
+    // `"stable"` has nothing to be ahead or behind. `active` is skipped
+    // entirely when `desired.active` is false, the same "unconstrained field"
+    // treatment `matches` gives it.
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.manager !== desired.manager) {
+        fields.push({ field: "manager", observed: observed.manager, desired: desired.manager });
+      }
+      if (observed.tool !== desired.tool) {
+        fields.push({ field: "tool", observed: observed.tool ?? "", desired: desired.tool ?? "" });
+      }
+      if (!scopeEquals(observed.scope, desired.scope)) {
+        fields.push({
+          field: "scope",
+          observed: describeScope(observed.scope),
+          desired: describeScope(desired.scope),
+        });
+      }
+      if (!versionSatisfies(desired.version, observed.version)) {
+        const direction = versionDirection(observed.version, desired.version);
+        fields.push({
+          field: "version",
+          observed: observed.version,
+          desired: desired.version,
+          ...(direction !== undefined ? { direction } : {}),
+        });
+      }
+      if (!observed.installed) {
+        fields.push({ field: "installed", observed: "false", desired: "true" });
+      }
+      if (desired.active && !observed.active) {
+        fields.push({ field: "active", observed: "false", desired: "true" });
+      }
+      return fields;
+    },
+
+    /**
+     * No `unapply`: install commonly pulls in transitive state an uninstall
+     * would not clean up (mise/asdf/rustup/uv all resolve and cache more than
+     * one file per version), and, more importantly, this resource may also
+     * have *activated* the version — reversing that honestly means restoring
+     * whichever version was active before, which nothing here captures.
+     * Uninstalling the version while leaving activation pointed at now-missing
+     * state would be a regression, not a safe undo — see
+     * `@machine-run/engine`'s `Reconciler.unapply` doc comment.
+     */
     apply: ({ props, observed, desired }, ctx: ApplyContext) =>
       Effect.gen(function* () {
         const plan = planFor(props);

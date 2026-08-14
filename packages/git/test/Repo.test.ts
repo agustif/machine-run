@@ -222,6 +222,44 @@ it.effect("observe surfaces a real command failure rather than treating it as ab
   }).pipe(Effect.provide(layer)),
 );
 
+// --- drift: agrees with matches; `remote` gets no direction, it's a URL. ---
+
+it.effect("drift is empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitRepoReconciler;
+    const state = { path: "/repo", remote: "git@example.com:me/repo.git" };
+
+    expect(reconciler.matches(state, state)).toBe(true);
+    expect(reconciler.drift?.(state, state)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'remote' field, with no direction, for a differing remote", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitRepoReconciler;
+    const observed = { path: "/repo", remote: "https://example.com/old.git" };
+    const desired = { path: "/repo", remote: "https://example.com/new.git" };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "remote", observed: "https://example.com/old.git", desired: "https://example.com/new.git" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports '(none)' for a missing remote rather than leaving the field out", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeGitRepoReconciler;
+    const observed = { path: "/repo" };
+    const desired = { path: "/repo", remote: "https://example.com/repo.git" };
+
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(reconciler.drift?.(observed, desired)).toEqual([
+      { field: "remote", observed: "(none)", desired: "https://example.com/repo.git" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
 it.effect(
   "apply clones when nothing was observed, never pre-creating the target directory itself",
   () =>

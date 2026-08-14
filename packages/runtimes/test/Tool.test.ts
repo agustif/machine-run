@@ -315,6 +315,90 @@ it.effect("apply: `active: false` installs but never calls activate", () =>
   }).pipe(Effect.provide(layer)),
 );
 
+it.effect("drift: empty exactly when matches is true", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRuntimeToolReconciler;
+    const desired = yield* reconciler.desired(props({ version: "22" }));
+    const observed: RuntimeToolState = {
+      manager: "Mise",
+      tool: "node",
+      scope: { _tag: "Global" },
+      version: "22.11.0",
+      installed: true,
+      active: true,
+    };
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(reconciler.drift?.(observed, desired)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "drift: a version behind the request reports \"version\" with direction \"behind\"",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const desired = yield* reconciler.desired(props({ version: "22.11.0" }));
+      const observed: RuntimeToolState = {
+        manager: "Mise",
+        tool: "node",
+        scope: { _tag: "Global" },
+        version: "22.9.5",
+        installed: true,
+        active: true,
+      };
+      expect(reconciler.matches(observed, desired)).toBe(false);
+      const drift = reconciler.drift?.(observed, desired) ?? [];
+      expect(drift).toContainEqual({
+        field: "version",
+        observed: "22.9.5",
+        desired: "22.11.0",
+        direction: "behind",
+      });
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift: a rustup channel mismatch reports \"version\" with no direction", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRuntimeToolReconciler;
+    const desired = yield* reconciler.desired({ _tag: "Rustup", channel: "stable" });
+    const observed: RuntimeToolState = {
+      manager: "Rustup",
+      scope: { _tag: "Global" },
+      version: "beta",
+      installed: true,
+      active: true,
+    };
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    const drift = reconciler.drift?.(observed, desired) ?? [];
+    expect(drift).toContainEqual({ field: "version", observed: "beta", desired: "stable" });
+    expect(drift.find((f) => f.field === "version")?.direction).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift: `active: false` in props never reports \"active\", even when observed isn't", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRuntimeToolReconciler;
+    const desired = yield* reconciler.desired(props({ version: "22", active: false }));
+    const observed: RuntimeToolState = {
+      manager: "Mise",
+      tool: "node",
+      scope: { _tag: "Global" },
+      version: "22.11.0",
+      installed: true,
+      active: false,
+    };
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(reconciler.drift?.(observed, desired)).toEqual([]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("Runtime.Tool has no unapply: uninstalling could strand activation at a missing version", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeRuntimeToolReconciler;
+    expect(reconciler.unapply).toBeUndefined();
+  }).pipe(Effect.provide(layer)),
+);
+
 it.effect("address: is the manager's shared config file, not the manager id alone", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRuntimeToolReconciler;

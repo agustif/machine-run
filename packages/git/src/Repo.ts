@@ -1,5 +1,5 @@
 import { isNotFound, MachinePaths, Sh, statIfPresent } from "@machine-run/core";
-import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -258,6 +258,24 @@ export const makeGitRepoReconciler: Effect.Effect<
 
     matches: (observed, desired) =>
       observed.path === desired.path && observed.remote === desired.remote,
+
+    // `remote` is a URL, not ordered — no `direction`. `path` almost never
+    // differs in practice (both sides derive from the same `props.path`) but
+    // is reported the same honest way if it ever does.
+    drift: (observed, desired): Drift => {
+      const fields = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.remote !== desired.remote) {
+        fields.push({
+          field: "remote",
+          observed: observed.remote ?? "(none)",
+          desired: desired.remote ?? "(none)",
+        });
+      }
+      return fields;
+    },
 
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {

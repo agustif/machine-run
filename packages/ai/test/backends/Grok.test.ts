@@ -142,6 +142,47 @@ it.effect("observe reports AiToolCliMissing when the grok binary itself is absen
   }),
 );
 
+it.effect("remove runs `grok mcp remove <name> -s user`, scoped to the file this backend owns", () =>
+  Effect.gen(function* () {
+    const calls: { command: string; env: Record<string, string | Redacted.Redacted<string>> }[] =
+      [];
+    yield* GrokBackend.mcp!.remove("postgres", ctxWith(capturingExec("", calls)));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.command).toBe("grok mcp remove postgres -s user");
+  }),
+);
+
+it.effect(
+  "remove is a no-op for a name that isn't registered — grok's own exit-1 \"not found\" is absorbed",
+  () =>
+    Effect.gen(function* () {
+      // Real, verified behaviour: `grok mcp remove doesnotexist -s user`
+      // prints "No MCP server named 'doesnotexist' in user config" and exits
+      // 1 — unlike codex, which exits 0 for the identical case.
+      const error = new CommandError({
+        command: "grok mcp remove doesnotexist -s user",
+        reason: new UnexpectedExit({
+          exitCode: 1,
+          stderr: "No MCP server named 'doesnotexist' in user config",
+        }),
+      });
+      yield* GrokBackend.mcp!.remove("doesnotexist", ctxWith(failingExec(error)));
+    }),
+);
+
+it.effect("remove reports AiToolCliMissing when the grok binary itself is absent", () =>
+  Effect.gen(function* () {
+    const error = new CommandError({
+      command: "grok mcp remove x -s user",
+      reason: new UnexpectedExit({ exitCode: 127, stderr: "grok: command not found" }),
+    });
+    const failure = yield* GrokBackend.mcp!.remove("x", ctxWith(failingExec(error))).pipe(
+      Effect.flip,
+    );
+    expect(failure).toMatchObject({ _tag: "AiToolCliMissing", tool: "grok" });
+  }),
+);
+
 it.effect(
   "apply builds a stdio `grok mcp add` with a literal env value quoted in the command",
   () =>

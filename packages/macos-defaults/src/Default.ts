@@ -1,5 +1,5 @@
 import { Sh } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
@@ -125,6 +125,31 @@ export const makeMacDefaultReconciler: Effect.Effect<
     observed.key === desired.key &&
     observed.xml === desired.xml,
 
+  // A property-list value has no ordering — two spellings of the same value
+  // already compare equal via `canonicalXml`, so a real difference here is
+  // just "different", never "ahead" or "behind".
+  drift: (observed, desired): Drift => {
+    const fields = [
+      ...(observed.domain !== desired.domain
+        ? [{ field: "domain", observed: observed.domain, desired: desired.domain }]
+        : []),
+      ...(observed.key !== desired.key
+        ? [{ field: "key", observed: observed.key, desired: desired.key }]
+        : []),
+      ...(observed.xml !== desired.xml
+        ? [{ field: "value", observed: observed.xml, desired: desired.xml }]
+        : []),
+    ];
+    return fields;
+  },
+
+  /**
+   * No `unapply`: restoring a prior value needs one captured before this
+   * resource's first write, and `MacDefaultState` never carries that (see its
+   * doc comment) — nothing calls {@link ApplyContext.snapshot} here. Deleting
+   * the key instead of restoring it would not be an undo, only a different
+   * change nobody asked for.
+   */
   apply: ({ props, desired }, ctx) =>
     Effect.gen(function* () {
       yield* ctx.exec({

@@ -121,6 +121,52 @@ it.effect("apply updates an existing server in place rather than duplicating it"
   }).pipe(Effect.provide(layer)),
 );
 
+it.effect(
+  "remove deletes only the named server, leaving every other server and top-level key untouched",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      yield* fs.writeFileString(path.join(home, ".claude.json"), REAL_CLAUDE_JSON);
+
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+      yield* ClaudeBackend.mcp!.apply(
+        "second",
+        { command: "npx", args: ["other"] },
+        ctx,
+      );
+      yield* ClaudeBackend.mcp!.remove("second", ctx);
+
+      const written = yield* decodeWrittenDocument(
+        yield* fs.readFileString(path.join(home, ".claude.json")),
+      );
+      expect(field(written, "mcpServers", "second")).toBeNull();
+      expect(field(written, "mcpServers", "testserver")).toEqual({
+        command: "npx",
+        args: ["-y", "my-mcp-server"],
+        env: { API_KEY: "xxx" },
+      });
+      expect(field(written, "machineID")).toBe(
+        "39c6d1f88e9ff5de5fb5dc8888812647353dddc00943e6fc88bb1e5696f617a4",
+      );
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect("remove is a no-op when the named server was never registered", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const home = yield* fs.makeTempDirectoryScoped();
+    yield* fs.writeFileString(path.join(home, ".claude.json"), REAL_CLAUDE_JSON);
+
+    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+    yield* ClaudeBackend.mcp!.remove("does-not-exist", ctx);
+
+    expect(yield* fs.readFileString(path.join(home, ".claude.json"))).toBe(REAL_CLAUDE_JSON);
+  }).pipe(Effect.provide(layer)),
+);
+
 it.effect("observe reports undefined for a server that was never registered", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

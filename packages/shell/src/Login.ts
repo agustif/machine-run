@@ -1,5 +1,5 @@
 import { Sh } from "@machine-run/core";
-import type { Exec, Reconciler } from "@machine-run/engine";
+import type { Drift, Exec, Reconciler } from "@machine-run/engine";
 import { toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -175,6 +175,14 @@ export const makeLoginReconcilerAt = (
       // ever asks for, so it takes no part in whether an observed state is
       // good enough — matching `Machine.File`'s treatment of an unset `mode`.
       matches: (observed, desired) => observed.shell === desired.shell,
+
+      // `shell` is a path, not ordered — no `direction`. `previousShell` is
+      // bookkeeping, excluded from the comparison for the same reason
+      // `matches` above ignores it.
+      drift: (observed, desired): Drift =>
+        observed.shell === desired.shell
+          ? []
+          : [{ field: "shell", observed: observed.shell, desired: desired.shell }],
 
       apply: ({ observed, desired }, ctx) =>
         Effect.gen(function* () {

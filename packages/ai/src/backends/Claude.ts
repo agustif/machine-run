@@ -152,5 +152,15 @@ export const ClaudeBackend: AiToolBackend = {
           ctx,
         );
       }),
+
+    remove: (name, ctx) =>
+      Effect.gen(function* () {
+        const configPath = configFile(ctx.home, ctx.path);
+        const doc = yield* readDocument(configPath, ctx);
+        const raw = jsonRecordOr(doc.mcpServers ?? null, {});
+        if (!(name in raw)) return;
+        const rest = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== name));
+        yield* writeDocument(configPath, { ...doc, mcpServers: rest }, ctx);
+      }),
   },
 };

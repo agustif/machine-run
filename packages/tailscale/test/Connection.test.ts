@@ -129,6 +129,32 @@ it.effect("matches: a pinned hostname that differs from the live one is real dri
   }),
 );
 
+it.effect("drift: unset when the recipe doesn't pin a hostname, whatever is live", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeTailscaleConnectionReconciler;
+    const desired = yield* reconciler.desired(props);
+    expect(reconciler.drift?.({ hostname: "whatever-the-tailnet-picked" }, desired)).toEqual([]);
+  }),
+);
+
+it.effect("drift: a pinned hostname that differs from the live one reports \"hostname\", unordered", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeTailscaleConnectionReconciler;
+    const desired = yield* reconciler.desired({ ...props, hostname: "pinned-name" });
+    expect(reconciler.drift?.({ hostname: "other-name" }, desired)).toEqual([
+      { field: "hostname", observed: "other-name", desired: "pinned-name" },
+    ]);
+    expect(reconciler.drift?.({ hostname: "pinned-name" }, desired)).toEqual([]);
+  }),
+);
+
+it.effect("Tailscale.Connection has no unapply — logging out could cut the operator's own access", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeTailscaleConnectionReconciler;
+    expect(reconciler.unapply).toBeUndefined();
+  }),
+);
+
 it.effect(
   "apply, when not yet connected, reads the auth key from its backend and passes it via env — never interpolated into the command string",
   () =>
