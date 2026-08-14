@@ -35,13 +35,11 @@ export type SettingsBackendId = typeof SettingsBackendId.Type;
  * never carry. Caught before any command runs, so it carries no
  * `CommandError` cause — mirrors `secrets`' `SecretRefInvalid`.
  *
- * Unlike the previous shape (a single `key: string`, split apart by a
- * regex), `field`/`value` name exactly which part of an already-structured
- * {@link GsettingsIdentity}/{@link GsettingsRelocatableIdentity}/{@link
- * DconfIdentity} failed, because there is no longer one combined string to
- * blame — `SettingProps`'s cases (`Setting.ts`) hand each backend already-
- * separated fields, so this error is about a field's *content*, not its
- * shape as a substring of something bigger.
+ * `field`/`value` name exactly which part of a {@link GsettingsIdentity},
+ * {@link GsettingsRelocatableIdentity} or {@link DconfIdentity} failed.
+ * `SettingProps`'s cases (`Setting.ts`) hand each backend already-separated
+ * fields, so this error is always about a field's *content* — never about
+ * whether a combined string was carved up correctly.
  */
 export class SettingKeyInvalid extends Data.TaggedError("SettingKeyInvalid")<{
   backend: SettingsBackendId;

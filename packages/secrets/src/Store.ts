@@ -14,12 +14,10 @@ import { PassBackend } from "./backends/Pass.ts";
  * the one backend that knows that store's addressing scheme.
  *
  * This mirrors how `System.Package` dispatches to a package-manager backend:
- * one generic resource, one small module per store. It used to be a plain
- * record keyed by a string id (`secretBackends[props.source]`), which worked
- * because every backend shared one `read(ref: string, exec)` signature. Now
- * that each backend's `read` is narrowed to the one `SecretSource` variant it
- * understands, a record lookup can no longer type-check — the lookup would
- * have to hand every backend the same union type, which is exactly the
+ * one generic resource, one small module per store. Dispatch is an exhaustive
+ * match rather than a record keyed by id, because each backend's `read` is
+ * narrowed to the one `SecretSource` variant it understands: a record lookup
+ * would have to hand every backend the same union type, which is exactly the
  * un-narrowed shape this whole change exists to avoid. `Match.tagsExhaustive`
  * dispatches instead: it narrows `source` to each variant before handing it
  * to that variant's backend, and — this is the actual point — adding a sixth

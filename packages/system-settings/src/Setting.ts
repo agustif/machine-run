@@ -40,14 +40,12 @@ const valueField = {
  *
  * ## Why three cases, not `{ backend, key, value }`
  *
- * The previous shape spelled every store's key as one opaque
- * `Schema.String`, split apart at runtime by each backend's own regex:
- * `"schema-id:key-name"` for `gsettings`, an absolute path for `dconf`. That
- * meant a caller could hand `dconf`'s backend a `gsettings`-shaped string (or
- * vice versa) and the mismatch surfaced only as a `SettingKeyInvalid` at
- * `observe`/`apply` time — the identical "runtime check policing an illegal
- * combination the type system allowed" shape `Runtime.Tool`'s
- * `RuntimeToolMismatch` had (see `@machine-run/runtimes`' `Tool.ts`). Here,
+ * The two stores address a key by genuinely different grammars:
+ * `gsettings` names a schema and a key within it, while `dconf` names one
+ * absolute path. Spelling both as a single string means a caller can hand one
+ * backend the other's shape, and the mismatch can only be caught at
+ * `observe`/`apply` time — a runtime check policing a combination the type
+ * system allowed. Here,
  * `Gsettings`/`GsettingsRelocatable`/`Dconf` each carry exactly the fields
  * their CLI invocation needs, so a `dconf`-shaped `path` can no longer be
  * handed to `gsettings`'s `schema`/`key` fields, or the reverse: there is no
