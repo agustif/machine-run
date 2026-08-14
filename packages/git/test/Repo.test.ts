@@ -189,10 +189,7 @@ it.effect(
 
       const error = yield* reconciler
         .observe({ path: target, remote: "irrelevant" }, notARepoExec)
-        .pipe(
-          Effect.ensuring(Effect.orDie(fs.chmod(locked, 0o700))),
-          Effect.flip,
-        );
+        .pipe(Effect.ensuring(Effect.orDie(fs.chmod(locked, 0o700))), Effect.flip);
       expect(error).toBeInstanceOf(GitRepoPathUnreadable);
     }).pipe(Effect.provide(layer)),
 );

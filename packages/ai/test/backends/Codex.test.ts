@@ -117,28 +117,26 @@ it.effect(
     }),
 );
 
-it.effect(
-  "observe propagates an unrelated CommandError instead of reading it as absent",
-  () =>
-    Effect.gen(function* () {
-      // Not command-not-found and not the documented "no such server" text
-      // — a corrupted `$CODEX_HOME` or a permissions problem, which must
-      // fail loudly rather than be swallowed into `undefined` (the shape
-      // `apply` would then read as "safe to `codex mcp add`", papering over
-      // a real failure — see MUST_CLEANUP.md 1b.2).
-      const error = new CommandError({
-        command: "codex mcp get testserver --json",
-        reason: new UnexpectedExit({
-          exitCode: 1,
-          stderr: "Error: permission denied reading /home/user/.codex/config.toml",
-        }),
-      });
-      const failure = yield* CodexBackend.mcp!.observe(
-        "testserver",
-        ctxWith(failingExec(error)),
-      ).pipe(Effect.flip);
-      expect(failure).toBe(error);
-    }),
+it.effect("observe propagates an unrelated CommandError instead of reading it as absent", () =>
+  Effect.gen(function* () {
+    // Not command-not-found and not the documented "no such server" text
+    // — a corrupted `$CODEX_HOME` or a permissions problem, which must
+    // fail loudly rather than be swallowed into `undefined` (the shape
+    // `apply` would then read as "safe to `codex mcp add`", papering over
+    // a real failure — see MUST_CLEANUP.md 1b.2).
+    const error = new CommandError({
+      command: "codex mcp get testserver --json",
+      reason: new UnexpectedExit({
+        exitCode: 1,
+        stderr: "Error: permission denied reading /home/user/.codex/config.toml",
+      }),
+    });
+    const failure = yield* CodexBackend.mcp!.observe(
+      "testserver",
+      ctxWith(failingExec(error)),
+    ).pipe(Effect.flip);
+    expect(failure).toBe(error);
+  }),
 );
 
 it.effect("observe reports AiToolCliMissing when the codex binary itself is absent", () =>
