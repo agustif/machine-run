@@ -205,6 +205,17 @@ jobs:
         continue-on-error: true
         run: brew install mas && mas version && mas list || echo "mas unavailable on this runner"
 
+      # The steps above exercise the *commands* `MacOS.Default` depends on. This
+      # runs the engine over them: plan, deploy, an empty second plan, drift, and a
+      # destroy that must leave the value alone. It is the only kind no Linux
+      # container can cover, so without this it was the one kind never deployed.
+      #
+      # Runs on the host rather than in a container, which is why the script
+      # confines itself to `com.machine-run.deploycheck` and removes it on every
+      # exit path — the same script is meant to be runnable on a developer's Mac.
+      - name: scripts/deploy-check-macos.sh
+        run: bash scripts/deploy-check-macos.sh
+
   verify-linux-backends:
     name: verify dnf / pacman parsers
     runs-on: ubuntu-latest

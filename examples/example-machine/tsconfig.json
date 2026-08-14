@@ -20,5 +20,10 @@
     { "path": "../../packages/system-settings" },
     { "path": "../../packages/tailscale" }
   ],
-  "include": ["alchemy.run.ts", "alchemy.container.ts", "alchemy.systemd.ts"]
+  "include": [
+    "alchemy.run.ts",
+    "alchemy.container.ts",
+    "alchemy.systemd.ts",
+    "alchemy.macos.ts"
+  ]
 }
