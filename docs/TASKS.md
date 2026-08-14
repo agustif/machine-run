@@ -348,6 +348,32 @@ package whose `observe`/`apply` the engine has never run.
       implement `unapply`; which of the remaining ~18 can honestly reverse
       themselves is still open (V1-PLAN §5).
 - [ ] **License.** `UNLICENSED` with no `LICENSE` file blocks any release.
+- [ ] **Nine high-severity advisories, none of them reachable — decide what to
+      say about it.** `npm audit` reports 9 high and 5 moderate; GitHub counts 43
+      across the default branch. Every one is transitive, and every one arrives
+      through `alchemy`'s own hard `dependencies` — `@alchemy.run/cloudflare-runtime`
+      (→ `@puppeteer/browsers` → `extract-zip`, unvalidated symlink path
+      traversal) and `@prisma/dev` (→ `hono`, `@hono/node-server` authorization
+      bypass), plus `sharp`'s libvips CVEs and `lodash`'s `_.template` code
+      injection. Neither is optional or peer, so they cannot be dropped from the
+      tree.
+
+      They are also not reachable from this repo. Checked statically rather than
+      asserted: the twenty alchemy modules that import any of them are all under
+      `lib/Cloudflare/` or `lib/Prisma/`, and machine-run imports neither
+      subtree (nor `sharp`, `hono`, `puppeteer` or `lodash` directly — the only
+      source matches for those names are the words "honoured" and "sharpest" in
+      two doc comments).
+
+      So this is a reporting problem rather than an exposure, and the fix is not
+      ours to make: upstream would have to move those to optional deps. What
+      needs deciding before publishing is what consumers are told, since they
+      will see the advisories on install. `overrides` are ruled out by the
+      max-type-safety/no-overrides rule and would in any case be forcing
+      versions inside puppeteer's own tree. The patch set is a third option —
+      it already patches alchemy — but dropping a hard dependency there breaks
+      alchemy's Cloudflare paths for anyone who does use them, so it is a real
+      decision and not a cleanup.
 - [ ] **Publishing** — versioning policy, and validate the `exports` maps
       resolve for a real non-workspace consumer. Only ever exercised inside
       this workspace.
