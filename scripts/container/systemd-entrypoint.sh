@@ -21,12 +21,13 @@ assert_true() {
 WORKSPACE=/workspace
 ALCHEMY="$WORKSPACE/node_modules/.bin/alchemy"
 RECIPE="$WORKSPACE/examples/example-machine/lib/alchemy.systemd.js"
-LOG_DIR="$(mktemp -d)"
-# World-writable because every alchemy invocation below runs as `runner` via
-# `sudo -u`, while this script runs as root: a root-owned 0700 temp dir silently
-# swallowed every `tee`, and the assertions then failed on a missing file rather
-# than on anything the engine did.
-chmod 0777 "$LOG_DIR"
+# Deliberately not `mktemp -d`, and deliberately not under /tmp. systemd mounts
+# `tmp.mount` as a fresh tmpfs during boot, so a directory created in /tmp before
+# the wait below simply disappears when that mount lands — `tee` then failed with
+# "No such file or directory" and every assertion reported a missing file rather
+# than anything the engine did. Under the runner's own home it survives the boot
+# and is writable by the user each alchemy invocation runs as.
+LOG_DIR=/home/runner/deploy-check-logs
 
 note "Wait for the system instance to finish booting"
 for _ in $(seq 1 60); do
@@ -38,6 +39,8 @@ for _ in $(seq 1 60); do
   sleep 1
 done
 echo "system state: ${state:-unknown}"
+
+install -d -o runner -g runner "$LOG_DIR"
 
 note "Give the runner a real user manager (loginctl enable-linger)"
 loginctl enable-linger runner
