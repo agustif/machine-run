@@ -28,6 +28,8 @@ before being written down here.
 
 ### 0.1 A locked keychain silently destroys every encrypted state row
 
+> **FIXED.** `SecretNotFound` is now a distinct error, recognised from exit 44 *and* the specific stderr together, and `ensureDataKey` mints on that tag alone. Measured rather than assumed — and a locked keychain turned out to return no programmatic error at all, blocking on an interactive prompt instead, so the dangerous cases are the headless "user interaction is not allowed" and transient failures.
+
 `packages/state/src/DataKey.ts:136-147`.
 
 `ensureDataKey` wraps `readDataKey` in `Effect.catch(() => ...)` — catching
@@ -52,6 +54,8 @@ failure — the same distinction `isNotFound` already draws for the filesystem.
 
 ### 0.2 `ManagedBlock` can overwrite a file it does not own
 
+> **FIXED.** Now uses `core`'s `readIfPresent`, with a typed `ManagedBlockFileUnreadable`. Test verified to fail without the fix.
+
 `packages/dotfiles/src/ManagedBlock.ts:247-248` — `readFileOrEmpty` is
 `fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""))`, used by both
 `observe` and `apply`.
@@ -69,10 +73,14 @@ is no backup, which is exactly when this fires.
 
 ### 0.3 `LineInFile` has the same bug
 
+> **FIXED.** Same, with `LineInFileUnreadable`.
+
 `packages/dotfiles/src/LineInFile.ts:233-234`. Identical mechanism, identical
 consequence, on files like `/etc/hosts`. Same fix.
 
 ### 0.4 `File` throws away its own discipline one line later
+
+> **FIXED.** The read now carries the same discipline as the `stat` above it.
 
 `packages/dotfiles/src/File.ts:104`.
 
@@ -90,6 +98,8 @@ failure mode as the thing being prevented.
 `Template` inherits the fix for free through `makeFileReconciler`.
 
 ### 0.6 A prop is interpolated raw into a shell command — *verified*
+
+> **FIXED.** `Sh.sh("gh", "auth", "switch", "--user", ghAccount)`, with a test that spawns a real shell against a stubbed `gh` and a companion guard proving the old form *does* execute the injection.
 
 `packages/git/src/Identity.ts:149`:
 
@@ -130,6 +140,8 @@ write. A lint rule cannot express this; a helper can.
 ## Tier 1 — costs correctness
 
 ### 1.1 `list` is stubbed to empty at the engine seam
+
+> **FIXED.** `Reconciler.list` is optional and passed through; no resource implements it yet, which is now an explicit absence rather than the adapter's decision.
 
 `packages/engine/src/toProvider.ts:179` — `list: () => Effect.succeed([])`, for
 all 23 resources.
@@ -274,6 +286,8 @@ three times; the next failure is already being written.
 
 ### 2.1 `ProviderOverrides` is dead code
 
+> **FIXED.** Deleted. Alchemy's `Provider.effect` already defaults a missing `list` to an empty array, so omitting the key is behaviourally identical to the stub — but the claim now belongs to whoever decided it.
+
 `packages/engine/src/toProvider.ts:20` defines it; line 157 accepts it. **Zero
 of the 23 `toProvider` call sites pass it.** It is referenced nowhere else in
 `src` or `test`.
@@ -392,6 +406,8 @@ pointed at from code.
 From the duplication audit; the first entry re-verified while writing this.
 
 ### 3b.1 `isNotFound` is exported by `core` and reinvented three times — *verified*
+
+> **FIXED.** The three private copies are gone.
 
 `packages/core/src/Paths.ts:73` exports it. `dotfiles/src/Directory.ts:85`,
 `Download.ts:142` and `Symlink.ts:71` each define a byte-identical private copy.
