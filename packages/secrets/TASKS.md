@@ -29,22 +29,51 @@ path }`, `Env { variable }` — dispatched exhaustively in `Store.ts` via
 debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       `pass show` reading both a single-line and a multi-line entry back
       correctly — see `docs/notes/secrets-pass-notes.md` and
-      `src/backends/Pass.ts`'s doc comment. `pass` is now `✓` in
-      [docs/MAP.md](../../docs/MAP.md); the other four backends
-      (`1password`, `doppler`, `keychain`, `env`) are still `~` — each needs
-      either a real authenticated account (which this repo deliberately never
-      automates creating, `AGENTS.md` rule 8) or a real macOS login keychain,
-      neither of which a disposable container can supply. This remains the
-      least-verified seam in the repo, and it is the one writing `0o600`
-      files on the strength of being right.
-- [ ] **Verify `op read`'s output shape against a real `op` CLI.** Not installed
-      on the development machine, so no output-shaping flag is used and bytes
-      are returned verbatim. Confirm whether `op read` appends a newline, then
-      document the right `trailingNewline` default per secret kind.
-- [ ] **Fixture-based classifier tests for the remaining backends** using real
-      captured stderr. `doppler` is installable in a container (no account
-      needed just to observe its CLI's own error text for a bad ref); `op` and
-      `bw` are not.
+      `src/backends/Pass.ts`'s doc comment. `pass` is `✓` in
+      [docs/MAP.md](../../docs/MAP.md).
+- [x] **`env` verified with no account and no CLI at all.** `Config.redacted`
+      against the real, unmocked default `ConfigProvider` inside `docker run
+  --rm -e MACHINE_RUN_TEST_SECRET=... node:22-slim` (this repo's pinned
+      `effect@4.0.0-rc.108`): a set variable round-tripped its exact literal
+      value, an unset one failed with a real `ConfigError`. See
+      `docs/notes/secrets-env-notes.md`. `env` is `✓` in
+      [docs/MAP.md](../../docs/MAP.md).
+- [x] **`op`/`doppler`'s `SecretAuthRequired` classification checked against
+      real, unauthenticated CLIs — and both had a real gap, now fixed.**
+      `op read` with zero accounts configured (`docker run --rm
+  debian:stable` + the official 1Password apt repo) produces `No
+  accounts configured for use with 1Password CLI.`, which matched none
+      of `classify`'s three original substrings. `doppler secrets get` with
+      no token produces `Doppler Error: you must provide a token`, which
+      likewise matched neither of its two. Both real "not authenticated"
+      states used to fall through to the generic `SecretReadFailed` bucket
+      instead of `SecretAuthRequired`; both classifiers now also match these
+      real captured strings, pinned in `test/OnePassword.test.ts` /
+      `test/Doppler.test.ts`. See `docs/notes/secrets-op-notes.md` and
+      `docs/notes/secrets-doppler-notes.md`. A real vault/project read is
+      still unverified (needs an authenticated account this repo
+      deliberately never creates, `AGENTS.md` rule 8) — `1password` and
+      `doppler` stay `~` in [docs/MAP.md](../../docs/MAP.md).
+- [ ] **`keychain` downgraded to `!`: `KeychainBackend.read` silently
+      returns hex-encoded garbage for any secret with a non-printable
+      byte.** `security find-generic-password -w` prints the ASCII-hex
+      encoding of the stored bytes, not the bytes, whenever the value
+      contains a byte outside `isprint()`'s range (verified on real macOS
+      with an embedded newline and, separately, an embedded tab) — exactly
+      the shape of an SSH key, a PEM cert, or any multi-line secret, with
+      exit code `0` and no signal anything went wrong. Fix sketch: switch
+      from `-w` to `-g` and parse both of its forms (`password: 0x<hex>` vs.
+      a bare `password: "quoted string"` — `-g`'s output disambiguates the
+      two cases where `-w`'s does not). See
+      `docs/notes/secrets-keychain-notes.md` and `docs/notes/test-findings.md`
+      #4; pinned (as a `BUG:`-prefixed test documenting current behaviour,
+      not yet fixed) in `test/Keychain.test.ts`.
+- [ ] **Verify `op read`'s output shape (trailing newline, `--no-newline`)
+      against a real vault read.** `op` itself is now installed and run in
+      this session's container, but only its unauthenticated error path —
+      a real vault read still needs an account this repo deliberately never
+      creates. Confirm whether `op read` appends a newline, then document
+      the right `trailingNewline` default per secret kind.
 - [ ] **`bitwarden` backend.** Deliberately absent from `SecretSource` until
       implemented — a variant that can be named but not constructed is worse
       than a missing one.

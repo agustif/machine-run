@@ -244,26 +244,53 @@ doc comment for the full transcript.
 ### `SecretBackend` — 5 ids, `secrets`
 
 ```
-✓ env   ✓ pass   ! 1password (op)   ! doppler   ! keychain (security)
+✓ env   ✓ pass   ~ 1password (op)   ~ doppler   ! keychain (security)
 ```
 
-**`✓ pass`** — the one backend in this seam a container can fully verify: no
-account, just a locally-generated GPG key. Verified against `docker run --rm
-debian:stable`: a real `gpg --batch --gen-key`, `pass init`, `pass insert -m`
-for both a single-line secret and a multi-line one, and `pass show` reading
-both back — confirming the first-line-is-the-secret convention
-`PassBackend.read` assumes, and that a missing entry's real error text
-classifies as `SecretReadFailed`, not `SecretCliMissing` (see
+**`✓ pass`** — the one CLI-backed backend in this seam a container can fully
+verify: no account, just a locally-generated GPG key. Verified against
+`docker run --rm debian:stable`: a real `gpg --batch --gen-key`, `pass init`,
+`pass insert -m` for both a single-line secret and a multi-line one, and
+`pass show` reading both back — confirming the first-line-is-the-secret
+convention `PassBackend.read` assumes, and that a missing entry's real error
+text classifies as `SecretReadFailed`, not `SecretCliMissing` (see
 `docs/notes/secrets-pass-notes.md`).
 
-**None of the other four has read a real secret.** Doppler's flags were
-checked against `doppler secrets get --help`, which confirms the CLI's
-contract and nothing about its output. `1password`/`keychain` need an
-authenticated vault or a real macOS login keychain, neither of which this
-environment can supply without violating the rule against automating
-authentication to a secret store (`AGENTS.md` rule 8). This remains the
-least-verified seam in the repo, and it is the one that writes files with
-`0o600` on the strength of being right.
+**`✓ env`** — the one backend with no CLI at all: `Config.redacted` against
+the real, unmocked default `ConfigProvider` (no `fromEnvRecord`/`fromEnv({
+env })` override) inside `docker run --rm -e MACHINE_RUN_TEST_SECRET=...
+node:22-slim`, this repo's pinned `effect@4.0.0-rc.108`. A set variable
+round-tripped its exact literal value through `Redacted.value`; an unset one
+failed with a real `ConfigError`, unconditionally caught into
+`SecretReadFailed` (see `docs/notes/secrets-env-notes.md`).
+
+**`~ 1password`/`~ doppler`** — no successful read of either: both need an
+authenticated account this environment deliberately never creates
+(`AGENTS.md` rule 8). What a container *can* verify without any account —
+each CLI's real unauthenticated error text — was checked this session: `op
+read` with zero accounts configured, and `doppler secrets get` with no token
+and with a fake one. Both classifiers had a real gap (a real "not
+authenticated" state that fell through to the generic `SecretReadFailed`
+bucket instead of `SecretAuthRequired`) that is now fixed and pinned against
+the real captured text — see `docs/notes/secrets-op-notes.md` and
+`docs/notes/secrets-doppler-notes.md`. Classification fixed; a real vault
+read is still unverified, so both stay `~`.
+
+**`! keychain`** — downgraded from `~`, not upgraded to `✓`: its
+missing-entry classification (`SecretNotFound`, exit `44`) is genuinely
+verified and correct, but its successful-read path is now *known* to be
+wrong for a real, common case. `security find-generic-password -w` — the
+flag `KeychainBackend.read` uses — silently returns the ASCII-hex encoding
+of the stored bytes, not the bytes themselves, whenever a secret contains a
+non-printable byte (verified on real macOS with an embedded newline and,
+separately, an embedded tab): exactly the shape of an SSH private key, a PEM
+certificate, or any multi-line secret — precisely what `Machine.SecretFile`
+most needs to get right — comes back corrupted, with exit code `0` and no
+signal that anything went wrong. See `docs/notes/secrets-keychain-notes.md`
+and `docs/notes/test-findings.md` #4.
+
+This remains the least-verified seam in the repo, and it is the one that
+writes files with `0o600` on the strength of being right.
 
 ### `SettingsBackend` — 2 ids, `system-settings`
 

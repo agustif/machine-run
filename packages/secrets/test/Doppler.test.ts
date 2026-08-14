@@ -3,15 +3,15 @@ import { CommandError, UnexpectedExit } from "alchemy/Command";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import { DopplerBackend } from "../src/backends/Doppler.ts";
-import { SecretAuthRequired } from "../src/Backend.ts";
+import { SecretAuthRequired, type SecretSource } from "../src/Backend.ts";
 
 const failingExec =
   (command: string, stderr: string): Exec =>
   () =>
     Effect.fail(new CommandError({ command, reason: new UnexpectedExit({ exitCode: 1, stderr }) }));
 
-const source = {
-  _tag: "Doppler" as const,
+const source: Extract<SecretSource, { _tag: "Doppler" }> = {
+  _tag: "Doppler",
   project: "someproj",
   config: "someconfig",
   name: "SOME_SECRET",

@@ -121,6 +121,30 @@ the bug a type could have prevented — see 2.5.
 **Fix:** `Sh.sh("gh", "auth", "switch", "--user", ghAccount)` plus the
 redirection appended as a literal.
 
+### 0.7 `security -w` silently hex-encodes any secret with a non-printable byte
+
+`packages/secrets/src/backends/Keychain.ts` — verified on real macOS.
+
+`security find-generic-password -w` returns the **ASCII-hex encoding of the
+stored bytes rather than the bytes** whenever the value contains a byte outside
+`isprint()`. Exit 0, no warning, nothing in stderr. A value with embedded
+newlines came back as `6c696e65310a6c696e65320a6c696e6533`; a value with a
+single tab behaved identically.
+
+This corrupts exactly what `Machine.SecretFile` exists to place: an SSH private
+key and a PEM certificate are multi-line by definition, so either would be
+written to `~/.ssh` as hex text. OpenSSH would then reject it as an invalid
+format — the failure at least being loud, though only at use time, long after
+the deploy reported success.
+
+`-g` disambiguates where `-w` cannot: it prints `password: 0x<hex>` for the
+raw-byte fallback and `password: "quoted"` for the printable case.
+
+Pinned as a `BUG:` test rather than fixed, so the behaviour is recorded and the
+fix has a failing test waiting for it.
+
+**Fix:** read with `-g` and parse both forms.
+
 ### 0.5 The pattern behind 0.1–0.4
 
 These are one architectural problem wearing four faces: **the repo has a house
