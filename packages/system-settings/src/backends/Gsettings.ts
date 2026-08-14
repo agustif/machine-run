@@ -72,4 +72,22 @@ export const GsettingsBackend: SettingsBackend = {
       ),
       Effect.asVoid,
     ),
+
+  /**
+   * Verified in the same `ubuntu:24.04` container, on 2026-08-14, with no
+   * session D-Bus reachable: `gsettings reset org.gnome.desktop.interface
+   * clock-format` prints the identical `dconf-WARNING **: failed to commit
+   * changes to dconf: Cannot autolaunch D-Bus without X11 $DISPLAY` and
+   * **exits 0** while the key stays exactly as it was — the same silent
+   * no-op `write` has, not a different failure mode `reset` happens to avoid.
+   * With a session bus reachable (`dbus-run-session`), `gsettings reset`
+   * genuinely restores the schema default (`'12h'` → back to `'24h'`).
+   */
+  reset: (key, exec) =>
+    parseKey(key).pipe(
+      Effect.flatMap(({ schema, name }) =>
+        exec({ command: Sh.sh("gsettings", "reset", schema, name), shell: true }),
+      ),
+      Effect.asVoid,
+    ),
 };

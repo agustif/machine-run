@@ -142,6 +142,67 @@ otherwise, but this repo has never load-tested concurrent writes to
 `dconf-service` itself; that would be the thing to check before relying on
 this at real concurrency.
 
+## The unfinished half of the D-Bus finding: `unapply`, and why `observe` still doesn't check for a bus
+
+Re-verified in the same kind of container (`ubuntu:24.04`, same packages) on
+2026-08-14, extending the original finding to `reset`:
+
+- **`gsettings reset` shares `gsettings set`'s exact silent no-op.** With no
+  session D-Bus reachable, `gsettings reset org.gnome.desktop.interface
+  clock-format` prints the identical `dconf-WARNING **: failed to commit
+  changes to dconf: Cannot autolaunch D-Bus without X11 $DISPLAY` and exits
+  `0`, leaving the key completely unchanged. With a session bus reachable
+  (`dbus-run-session`), it genuinely restores the schema default (verified:
+  set to `'12h'`, reset, read back `'24h'`).
+- **`dconf reset` shares `dconf write`'s exact fail-loud behaviour.** No
+  session bus: `error: Cannot autolaunch D-Bus without X11 $DISPLAY`, exit
+  `1`. With a bus: a genuine revert (`dconf read` afterward prints zero
+  bytes, exit `0` — back to "nothing was ever written here").
+
+This is why `unapply` (now implemented — `gsettings reset`/`dconf reset`) uses
+the identical read-back discipline `apply` already used for `write`: reset,
+then re-read, and fail loudly (`SettingResetNotObserved`) if the value never
+actually changed away from what this resource had recorded writing. Unlike
+`apply`, `unapply` doesn't know the *target* value to compare against (a
+gsettings key's schema default isn't something this resource ever learns —
+there's no client-side way to ask "what would this be if never set"), so the
+check is inverted: "did the value change at all from what we wrote", not "did
+it become exactly X". That's still a real, non-tautological check — a
+silently-no-op'd reset leaves `read` returning precisely the value this
+resource itself wrote, which the check catches.
+
+**Decision on the other unfinished-half item — `observe` raising a typed
+error when `DBUS_SESSION_BUS_ADDRESS` is absent — is not to add it.**
+Reasoning, backed by this container run:
+
+1. **Reads never depend on the bus.** Every `gsettings get`/`dconf read` in
+   both this session's and the original session's container testing answered
+   correctly with no session bus reachable at all. `observe` (and therefore
+   `plan`) is not where the lie happens — it already reports accurate live
+   state on a headless machine.
+2. **The env var is neither necessary nor sufficient** as a proxy for "will a
+   write commit": some session setups reach a bus via
+   `$XDG_RUNTIME_DIR/bus` autodiscovery without ever exporting the variable,
+   and a stale/dead address can be set while nothing is actually listening.
+   Gating `observe` on its presence would fail plans on machines where
+   nothing is wrong, and pass machines where the address is stale — a worse
+   signal than what already exists.
+3. **The actual failure mode the task brief described — "successful apply,
+   drift forever, no explanation" — is already closed**, and was closed
+   before this session started: `SettingWriteNotObserved` (`Setting.ts`) has
+   re-read every write since the very first commit that introduced
+   `System.Setting` (`fa95d27`). A headless `apply` today does not look
+   successful when it silently wasn't: it raises a typed, explicit error
+   naming the D-Bus root cause and recommending the `dconf` backend, on the
+   very run that tried to write, not two plans later with no explanation.
+   `unapply` now gets the identical discipline for `reset`.
+
+So the honest status of this TASKS.md item is: the mechanism it asked for
+already existed (behavior-verified, not env-var-sniffed), and this session's
+job was to confirm that, extend the same discipline to `unapply`, and record
+*why* a more literal reading of the task ("check the env var") would have
+been a strictly worse fix layered on top of a better one already in place.
+
 ## What's deferred, and why — not guessed
 
 - **macOS is not a third backend id.** `MacDefaultProps.value` is a

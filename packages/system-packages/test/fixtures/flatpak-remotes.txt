@@ -1,0 +1,2 @@
+flathub	https://dl.flathub.org/repo/
+flathub-beta	https://dl.flathub.org/beta-repo/

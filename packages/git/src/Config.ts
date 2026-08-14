@@ -210,8 +210,11 @@ const typeFlag = (type: GitConfigProps["type"]): readonly string[] =>
  * `--get -z` yields `a\nb\0`, one value, not two) — the newline-delimited
  * default would misparse exactly that case. Splitting on `\0` leaves one
  * trailing empty string from the final terminator, which is not a value.
+ *
+ * Exported for `Maintenance.ts`, which reads the same multi-valued
+ * `maintenance.repo` key the same way.
  */
-const splitNulTerminated = (stdout: string): readonly string[] => {
+export const splitNulTerminated = (stdout: string): readonly string[] => {
   const parts = stdout.split("\0");
   return parts.slice(0, -1);
 };
@@ -305,8 +308,14 @@ const addOne = (
  * not lock config file ...: File exists`, so serialising on *some* address is
  * not optional) and the pre-write `Backups.snapshot`. Recorded as a known gap
  * in `docs/git-notes.md` rather than hidden.
+ *
+ * Exported for `Maintenance.ts`: `git maintenance register`/`start` write the
+ * multi-valued `maintenance.repo` key into this exact same file, so
+ * `Git.Maintenance` shares this address (and therefore this `FileLock`)
+ * rather than computing a second, independent one — see that module's doc
+ * comment.
  */
-const resolveGlobalConfigPath = (
+export const resolveGlobalConfigPath = (
   fs: FileSystem.FileSystem,
   path: Path.Path,
   paths: typeof MachinePaths.Service,

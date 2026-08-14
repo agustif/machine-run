@@ -60,4 +60,18 @@ export const DconfBackend: SettingsBackend = {
       ),
       Effect.asVoid,
     ),
+
+  /**
+   * Verified in the same container, on 2026-08-14: with no session D-Bus
+   * reachable, `dconf reset /test/mypath` fails loudly (`error: Cannot
+   * autolaunch D-Bus without X11 $DISPLAY`, exit 1) — the same fail-loud
+   * behaviour `write` already has, not a distinct code path that happens to
+   * differ. With a session bus reachable, `dconf reset` genuinely removes
+   * the override (`dconf read` afterward prints zero bytes, exit 0).
+   */
+  reset: (key, exec) =>
+    checkKey(key).pipe(
+      Effect.flatMap((path) => exec({ command: Sh.sh("dconf", "reset", path), shell: true })),
+      Effect.asVoid,
+    ),
 };

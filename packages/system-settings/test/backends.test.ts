@@ -101,6 +101,28 @@ it.effect("gsettings backend rejects a key with no schema:key shape before runni
   }),
 );
 
+it.effect("gsettings backend reset shells out to `gsettings reset <schema> <key>`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* GsettingsBackend.reset(
+      "org.gnome.desktop.interface:clock-format",
+      capturingExec("", calls),
+    );
+    expect(calls).toEqual(["gsettings reset org.gnome.desktop.interface clock-format"]);
+  }),
+);
+
+it.effect("gsettings backend reset rejects a key with no schema:key shape before running anything", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const result = yield* Effect.flip(
+      GsettingsBackend.reset("not-a-valid-key", capturingExec("", calls)),
+    );
+    expect(result._tag).toBe("SettingKeyInvalid");
+    expect(calls).toEqual([]);
+  }),
+);
+
 // ---------------------------------------------------------------------------
 // Dconf.ts
 // ---------------------------------------------------------------------------
@@ -147,6 +169,14 @@ it.effect("dconf backend write shells out to `dconf write <path> <value>`", () =
     const calls: string[] = [];
     yield* DconfBackend.write("/test/mypath", "['a', 'b']", capturingExec("", calls));
     expect(calls).toEqual(["dconf write /test/mypath '['\\''a'\\'', '\\''b'\\'']'"]);
+  }),
+);
+
+it.effect("dconf backend reset shells out to `dconf reset <path>`", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    yield* DconfBackend.reset("/test/mypath", capturingExec("", calls));
+    expect(calls).toEqual(["dconf reset /test/mypath"]);
   }),
 );
 

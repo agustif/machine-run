@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { makeAptBackend } from "./backends/linux/Apt.ts";
 import { makeDnfBackend } from "./backends/linux/Dnf.ts";
+import { makeFlatpakBackend } from "./backends/linux/Flatpak.ts";
 import { makeBrewBackend } from "./backends/macos/Brew.ts";
 import type { BackendError, PackageManagerBackend } from "./Backend.ts";
 import { makePackageIndex } from "./PackageIndex.ts";
@@ -31,8 +32,16 @@ import { makePackageIndex } from "./PackageIndex.ts";
  * AUR-sourced package is expressed as a `System.Package` on manager
  * `"yay"`/`"paru"` directly; there is no separate "enable the AUR" step the
  * way there is for a COPR project or a PPA.
+ *
+ * `flatpak` joined this list once `listRepos`/`addRepo` were added to
+ * `backends/linux/Flatpak.ts` — a Flatpak remote (Flathub, most commonly) is
+ * exactly this same "extra repo" concept, just spelled `flatpak remote-add`
+ * instead of `brew tap`/`add-apt-repository`/`dnf copr enable`. See that
+ * module's doc comment for `props.repo`'s two-part `"<name> <location>"`
+ * shape and a real, container-verified limitation in how cleanly it
+ * converges.
  */
-export const RepoManagerId = Schema.Literals(["brew", "apt", "dnf"]);
+export const RepoManagerId = Schema.Literals(["brew", "apt", "dnf", "flatpak"]);
 export type RepoManagerId = typeof RepoManagerId.Type;
 
 export const RepoProps = Schema.Struct({
@@ -98,6 +107,7 @@ export const makeRepoReconciler: Effect.Effect<
     brew: makeBrewBackend(),
     apt: makeAptBackend(),
     dnf: makeDnfBackend(),
+    flatpak: makeFlatpakBackend(),
   } satisfies Record<RepoManagerId, PackageManagerBackend>;
   // Shared with `Package.ts`'s notion of "one memoized listing per manager
   // per phase" — see PackageIndex.ts and `Package.ts`'s `planIndex`/

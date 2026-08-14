@@ -38,8 +38,24 @@ subsumes most of the surface, and the compositions are thin because of it.
 
 ## Coverage
 
-- [ ] **`Git.Maintenance`** (`git maintenance start`) — the one item from
-      V1-PLAN's git table never built.
+- [x] **`Git.Maintenance`** (`git maintenance start`) — the one item from
+      V1-PLAN's git table never built. Implemented (`src/Maintenance.ts`),
+      container-verified (`docs/notes/git-notes.md`) against real git 2.43.0.
+      Two findings that changed the design from the obvious version:
+      `git maintenance start`/`stop` are **not** a matched pair — `stop` is
+      machine-wide (tears down the shared scheduler for every registered
+      repository, not just one), so `unapply` calls `unregister --force`
+      instead, which is correctly scoped to this resource's own repository.
+      And the task brief's own suggested observation check
+      (`maintenance.strategy`) turned out to be a sticky, write-once key that
+      `unregister` never clears — `observe` checks membership in the global,
+      multi-valued `maintenance.repo` instead, the one signal that actually
+      toggles both ways. `address` deliberately shares `Git.Config`'s global
+      config file rather than `props.repo`, since `register`/`start` write
+      into that same file. UNVERIFIED: the macOS `launchd` scheduler path
+      (never run — would mutate a real machine's real `~/.gitconfig` and
+      install a real background job) and systemd-timer scheduling on Linux
+      (only the crontab path was container-verified).
 - [ ] **Per-repo config.** Everything here writes global config or a persona
       include. A machine also has per-repo settings worth reconciling, which
       needs `Git.Config` to take an optional repo path rather than always

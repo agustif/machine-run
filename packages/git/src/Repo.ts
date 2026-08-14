@@ -7,7 +7,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { isExitCode, stderrOf } from "./exitCode.ts";
+import { isExitCode } from "./exitCode.ts";
+import { showToplevel } from "./toplevel.ts";
 
 /**
  * Ensures a clone of `remote` exists at `path` — dotfiles repos, work
@@ -134,33 +135,6 @@ export class GitRepoCommandFailed extends Data.TaggedError("GitRepoCommandFailed
 export type GitRepoError = GitRepoPathOccupied | GitRepoCommandFailed;
 
 /**
- * The repository root `path` is inside, or `None` if `path` is not inside any
- * git repository at all.
- *
- * Verified: a fatal `rev-parse --show-toplevel` always exits `128`, but so do
- * unrelated fatal errors (a corrupt `.git`, an unreadable parent directory) —
- * exit code alone would misclassify those as "not a repository". The stderr
- * check is best-effort text matching for exactly that reason: it only
- * narrows the *common* case, and anything that doesn't match it is treated
- * as a real failure rather than silently swallowed.
- */
-const showToplevel = (
-  target: string,
-  exec: Exec,
-): Effect.Effect<Option.Option<string>, GitRepoCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "-C", target, "rev-parse", "--show-toplevel"),
-    shell: true,
-  }).pipe(
-    Effect.map((result) => Option.some(result.stdout.trim())),
-    Effect.catch((error) =>
-      isExitCode(error, 128) && /not a git repository/i.test(stderrOf(error))
-        ? Effect.succeed(Option.none())
-        : Effect.fail(new GitRepoCommandFailed({ path: target, cause: error })),
-    ),
-  );
-
-/**
  * The first configured fetch URL of `origin`, or `undefined` when no such
  * remote is configured.
  *
@@ -211,7 +185,9 @@ export const makeGitRepoReconciler: Effect.Effect<
           .readDirectory(target)
           .pipe(Effect.orElseSucceed((): readonly string[] => []));
 
-        const toplevel = yield* showToplevel(target, ctx.exec);
+        const toplevel = yield* showToplevel(target, ctx.exec).pipe(
+          Effect.mapError((cause) => new GitRepoCommandFailed({ path: target, cause })),
+        );
 
         if (Option.isSome(toplevel)) {
           // Resolved with `realPath`, not just `MachinePaths.expand`: on

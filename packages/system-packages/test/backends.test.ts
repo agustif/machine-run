@@ -1,5 +1,7 @@
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
+import * as Fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as Effect from "effect/Effect";
 import { makeYayBackend, makeParuBackend } from "../src/backends/linux/Aur.ts";
 import { makeAptBackend } from "../src/backends/linux/Apt.ts";
@@ -40,6 +42,10 @@ const capturingExec =
     calls.push(props.command);
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
   };
+
+/** Real captured CLI output committed under `test/fixtures/` — see `languageBackends.test.ts`. */
+const fixture = (name: string): string =>
+  Fs.readFileSync(fileURLToPath(new URL(`./fixtures/${name}`, import.meta.url)), "utf8");
 
 /** An `ObserveContext` — the shape `diff`/`read` pass while planning. */
 const planCtx = (exec: Exec): ObserveContext => ({ exec });
@@ -524,6 +530,73 @@ it.effect("flatpak backend install shells out to `flatpak install -y --nonintera
   }),
 );
 
+it.effect("flatpak backend listRepos returns [] on a real empty `flatpak remotes` listing", () =>
+  Effect.gen(function* () {
+    // Real captured output from `docker run --rm --platform linux/amd64
+    // ubuntu:24.04` (flatpak 1.14.6, freshly installed, no remotes):
+    // `flatpak remotes --columns=name,url` prints one blank line (not zero
+    // bytes) and exits 0 — see `Flatpak.ts`'s `listRepos` doc comment.
+    const backend = makeFlatpakBackend();
+    const repos = yield* backend.listRepos!(fakeExec(fixture("flatpak-remotes-empty.txt")));
+    expect(repos).toEqual([]);
+  }),
+);
+
+it.effect(
+  "flatpak backend listRepos returns both bare names and reconstructed \"name url\" pairs " +
+    "on a real populated `flatpak remotes` listing",
+  () =>
+    Effect.gen(function* () {
+      // Real captured output after `flatpak remote-add --if-not-exists
+      // flathub https://dl.flathub.org/repo/flathub.flatpakrepo` and the
+      // equivalent `flathub-beta` call, same container as above. Note the
+      // resolved URLs (`https://dl.flathub.org/repo/`,
+      // `https://dl.flathub.org/beta-repo/`) differ from the bootstrap
+      // `.flatpakrepo` URLs that were actually passed to `remote-add` — see
+      // `Flatpak.ts`'s doc comment for why that's a real, unavoidable
+      // limitation, not a parsing bug.
+      const backend = makeFlatpakBackend();
+      const repos = yield* backend.listRepos!(fakeExec(fixture("flatpak-remotes.txt")));
+      expect(repos).toEqual([
+        "flathub",
+        "flathub https://dl.flathub.org/repo/",
+        "flathub-beta",
+        "flathub-beta https://dl.flathub.org/beta-repo/",
+      ]);
+    }),
+);
+
+it.effect(
+  "flatpak backend addRepo shells out to `flatpak remote-add --if-not-exists <name> <location>`",
+  () =>
+    Effect.gen(function* () {
+      const calls: string[] = [];
+      const backend = makeFlatpakBackend();
+      yield* backend.addRepo!(
+        "flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+        capturingExec("", calls),
+      );
+      expect(calls).toEqual([
+        "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+      ]);
+    }),
+);
+
+it.effect(
+  "flatpak backend addRepo fails with BackendParseError on a repo prop with no location, " +
+    "before running anything",
+  () =>
+    Effect.gen(function* () {
+      const backend = makeFlatpakBackend();
+      const calls: string[] = [];
+      const error = yield* backend
+        .addRepo!("flathub", capturingExec("", calls))
+        .pipe(Effect.flip);
+      expect(error._tag).toBe("BackendParseError");
+      expect(calls).toEqual([]);
+    }),
+);
+
 it.effect("snap backend list drops the header row and returns [] on an empty listing", () =>
   Effect.gen(function* () {
     // UNVERIFIED beyond the empty case — see Snap.ts's doc comment. Only
@@ -838,4 +911,75 @@ it.effect("Repo reconciler apply: dnf adds a COPR via `sudo dnf copr enable -y <
     expect(result).toEqual({ manager: "dnf", repo: "atim/lazygit" });
     expect(calls).toEqual(["sudo dnf copr enable -y atim/lazygit"]);
   }),
+);
+
+it.effect(
+  "Repo reconciler observe: flatpak, undefined against a real empty `flatpak remotes` listing",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const observed = yield* reconciler.observe(
+        { manager: "flatpak", repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo" },
+        planCtx(fakeExec(fixture("flatpak-remotes-empty.txt"))),
+      );
+      expect(observed).toBeUndefined();
+    }),
+);
+
+it.effect(
+  "Repo reconciler observe: flatpak, matching the bare remote name against a real populated listing",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      // A recipe naming just the bare remote name — matching whatever this
+      // resource is tracking by name — converges against a real listing.
+      const observed = yield* reconciler.observe(
+        { manager: "flatpak", repo: "flathub" },
+        planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
+      );
+      expect(observed).toEqual({ manager: "flatpak", repo: "flathub" });
+    }),
+);
+
+it.effect(
+  "Repo reconciler observe: flatpak, a real bootstrap-URL repo prop never matches a live listing " +
+    "— the documented, unavoidable Flatpak.ts limitation, not a bug",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const observed = yield* reconciler.observe(
+        { manager: "flatpak", repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo" },
+        planCtx(fakeExec(fixture("flatpak-remotes.txt"))),
+      );
+      // `flatpak remotes` reports the *resolved* URL
+      // (https://dl.flathub.org/repo/), never the bootstrap URL that was
+      // actually passed to `remote-add` — so this never matches, even
+      // though `flathub` really is registered.
+      expect(observed).toBeUndefined();
+    }),
+);
+
+it.effect(
+  "Repo reconciler apply: flatpak adds a remote via " +
+    "`flatpak remote-add --if-not-exists <name> <location>`",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRepoReconciler;
+      const calls: string[] = [];
+      const props = {
+        manager: "flatpak" as const,
+        repo: "flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+      };
+      const desired = yield* reconciler.desired(props);
+
+      const result = yield* reconciler.apply(
+        { props, observed: undefined, desired },
+        applyCtx(capturingExec("", calls)),
+      );
+
+      expect(result).toEqual(props);
+      expect(calls).toEqual([
+        "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo",
+      ]);
+    }),
 );

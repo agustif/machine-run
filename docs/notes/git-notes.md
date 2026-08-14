@@ -97,6 +97,81 @@ rather than assumed:
   correctly, but it resolves to nothing on `PATH` until a human (or a future
   `System.Package`/build-step resource) produces the binary.
 
+## `Git.Maintenance`: `start`/`stop` are not a matched pair — verified, not assumed
+
+Built against real git 2.43.0 in `docker run --rm ubuntu:24.04` (with, and
+then without, `cron` installed) on 2026-08-14, plus read-only checks
+(`git maintenance -h`/`git config --get maintenance.strategy`) against the
+real host's git 2.50.1. Nothing here was assumed from `man git-maintenance`
+without running it — see `AGENTS.md` rule 5.
+
+**`git maintenance start` requires a working scheduler and fails loudly
+without one.** With neither `cron`/`crontab` nor a systemd instance
+available, `git -C /repo maintenance start` exits `128` with `fatal: neither
+systemd timers nor crontab are available` — it does not partially succeed.
+Installing `cron` (`apt-get install cron`, then a running `cron` daemon so
+`crontab` has somewhere to hand its update off to) made it succeed.
+
+**`start` does two independent things; `register`/`unregister` are the two
+halves, separately available.** `git help -a` lists `maintenance` with no
+further subcommand detail (no man page in either container), so this was
+worked out by running `register`, `unregister`, `start`, and `stop` in
+sequence and diffing `~/.gitconfig` and the repo's own `.git/config` after
+each:
+
+| Command | Global `~/.gitconfig` | Local `.git/config` | OS scheduler |
+|---|---|---|---|
+| `register` | adds this repo's canonical toplevel path to multi-valued `maintenance.repo` | sets `maintenance.auto = false`, `maintenance.strategy = incremental` (if unset) | untouched |
+| `unregister` | removes this repo's path from `maintenance.repo` | **untouched** — `auto`/`strategy` are never cleared | untouched |
+| `start` | same as `register` | same as `register` | installs the shared crontab block (or systemd timer) |
+| `stop` | **untouched** — `maintenance.repo` keeps every previously-registered repo | untouched | removes the shared crontab block (or systemd timer) entirely |
+
+The two rows that matter: **`unregister` never clears the local
+`auto`/`strategy` keys**, and **`stop` never clears the global
+`maintenance.repo` list**. Concretely: register a repo, then unregister it —
+`git config --get maintenance.strategy` *inside that repo* still answers
+`incremental` forever, even though the repo is no longer registered anywhere.
+That rules out `maintenance.strategy` as a live "is this currently active"
+signal, which is the check the task brief itself suggested trying first (see
+below).
+
+**Re-registering the same repository is idempotent** — running `register`
+twice does not duplicate the `maintenance.repo` entry, confirming git
+compares against the same canonical toplevel path it stores (not a fresh
+string in every call). **`unregister --force` on an already-unregistered
+repository exits `0`; without `--force` it exits `128`** with `fatal:
+repository '<path>' is not registered` — `--force`, per `git maintenance
+unregister -h`, exists exactly to make it idempotent.
+
+**Design consequence: `Git.Maintenance.unapply` calls `unregister --force`,
+never `stop`.** `stop` is machine-wide — it would silence background
+maintenance for every repository registered on the machine, not just the one
+resource being destroyed. `Reconciler.unapply`'s own doctrine (`packages/
+engine/src/Reconciler.ts`) is that a half-undo that reports success is worse
+than no `unapply` at all; running `stop` from a single resource's `unapply`
+would be exactly that class of mistake, just inverted — an *over*-undo that
+also reports success. `apply` still calls `start` (not bare `register`),
+because `register` alone never gets the background job running at all on a
+machine that's never had `git maintenance start` run once — `start` is the
+name the task brief and V1-PLAN both name for a reason.
+
+**`observe` checks `maintenance.repo` membership, not `maintenance.strategy`** —
+the one signal that toggles correctly both ways, per the table above. This
+directly overturned the task brief's own suggested check
+("`git config --get maintenance.strategy`"); the honest answer, found by
+running it rather than assuming, is that that key is sticky and not a
+description of current state at all.
+
+**Not run against real macOS.** Everything above is Linux/cron-verified only.
+`git maintenance start` on macOS is documented to use `launchd`, not cron,
+and running it for real would install an actual `launchd` job and mutate the
+real `~/.gitconfig` on whatever machine runs it — not something to do against
+a developer's real, non-disposable machine just to verify a test. That path
+(and `systemd --user` timers, as an alternative to cron on Linux) is
+UNVERIFIED; `Maintenance.ts`'s only OS-specific assumption is the two exact
+strings in `GitMaintenanceSchedulerUnavailable`'s detection regex, which is
+Linux-cron-verified only.
+
 ## `Git.Signing`: unverified end-to-end
 
 `packages/git/src/Signing.ts` composes real, individually-verified config
