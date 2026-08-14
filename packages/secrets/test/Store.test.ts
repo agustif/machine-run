@@ -68,8 +68,14 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const calls: Array<string> = [];
-      yield* readSecret({ _tag: "Keychain", service: "github" }, capturing(calls, "token\n"));
-      expect(calls).toEqual([Sh.sh("security", "find-generic-password", "-s", "github", "-w")]);
+      // `-g`, not `-w` — see src/backends/Keychain.ts for why. Real captured
+      // `-g` shape for a plain printable value (test/fixtures/
+      // keychain-g-flag-transcript.txt case 1).
+      yield* readSecret(
+        { _tag: "Keychain", service: "github" },
+        capturing(calls, 'password: "token"\n'),
+      );
+      expect(calls).toEqual([Sh.sh("security", "find-generic-password", "-s", "github", "-g")]);
     }),
 );
 
@@ -78,10 +84,10 @@ it.effect("routes Keychain to `-a` when an account is given", () =>
     const calls: Array<string> = [];
     yield* readSecret(
       { _tag: "Keychain", service: "github", account: "agustif" },
-      capturing(calls, "token\n"),
+      capturing(calls, 'password: "token"\n'),
     );
     expect(calls).toEqual([
-      Sh.sh("security", "find-generic-password", "-s", "github", "-a", "agustif", "-w"),
+      Sh.sh("security", "find-generic-password", "-s", "github", "-a", "agustif", "-g"),
     ]);
   }),
 );
