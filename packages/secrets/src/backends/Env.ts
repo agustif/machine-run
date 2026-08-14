@@ -28,6 +28,29 @@ type EnvSource = Extract<SecretSource, { _tag: "Env" }>;
  * interpolated into a command string on its way to being written — and so the
  * lookup honours whatever `ConfigProvider` is in scope instead of hard-coding
  * one source.
+ *
+ * Verified against a real, unmocked default `ConfigProvider` — no
+ * `ConfigProvider.fromEnvRecord`/`fromEnv({ env })` override — inside
+ * `docker run --rm -e MACHINE_RUN_TEST_SECRET=sup3rEnvSecret node:22-slim`,
+ * running this repo's pinned `effect@4.0.0-rc.108`: `Config.redacted` for a
+ * variable set that way round-tripped the exact literal value through
+ * `Redacted.value`, and a variable never set failed with a real
+ * `ConfigError` (not a `CommandError` — there is no command here to fail).
+ * `Effect.catch` above catches that unconditionally regardless of its tag or
+ * shape, so there is no substring classifier to get wrong the way the
+ * CLI-backed backends have. See `docs/notes/secrets-env-notes.md` and
+ * `packages/secrets/test/fixtures/env-real-container-run.txt` for the full
+ * session, including why the container sets the variable before `node`
+ * starts rather than mutating `process.env` mid-script: `effect`'s default
+ * `ConfigProvider` snapshots `process.env` once, on first access, for the
+ * process's lifetime (independently verified elsewhere in this repo —
+ * `packages/git/test/Config.test.ts`, `packages/ai/test/McpServer.test.ts` —
+ * by reading `effect`'s own `ConfigProvider.fromEnv` source), so a variable
+ * set after that first access is invisible to this backend for the rest of
+ * that process. That is not a concern for `Machine.SecretFile`'s own usage,
+ * which resolves a recipe's secret once per `apply`, but it does mean this
+ * backend cannot observe an environment variable changing underneath a
+ * long-lived process.
  */
 export const EnvBackend: SecretBackend<EnvSource> = {
   id: "Env",

@@ -25,6 +25,26 @@ type KeychainSource = Extract<SecretSource, { _tag: "Keychain" }>;
  * than a CLI error — see {@link isNoSuchKeychainItem} for what was verified
  * about that, and why it means every failure other than a genuine missing
  * entry must be treated as opaque.
+ *
+ * KNOWN BUG, verified on real macOS (2026-08-14), not merely suspected:
+ * `security find-generic-password -w` prints the ASCII-hex encoding of the
+ * stored bytes — not the bytes themselves — whenever the value contains a
+ * byte outside `isprint()`'s range. A value with an embedded newline (an SSH
+ * private key, a PEM certificate, any multi-line secret — exactly what
+ * `Machine.SecretFile` most needs to get right) or even a single embedded
+ * tab comes back as a hex string instead of its real value, silently, with
+ * exit code `0`; a plain single-line ASCII value comes back verbatim. There
+ * is no reliable way to tell the two cases apart from `-w`'s output alone —
+ * a hex-looking result is ambiguous between "this is the fallback encoding"
+ * and "this genuinely is the secret, and it happens to look like hex".
+ * `security find-generic-password -g` does disambiguate (`password:
+ * 0x<hex>` versus a bare `password: "quoted string"`), so the real fix is to
+ * read via `-g` and parse both of its forms instead of `-w` — a real change
+ * to `read` below, not a documentation fix, and out of scope for the
+ * session that found this (see `docs/notes/secrets-keychain-notes.md` and
+ * `packages/secrets/test/fixtures/keychain-multiline-hex-stdout.txt` for the
+ * full captured evidence, and `packages/secrets/TASKS.md` for the fix this
+ * still needs).
  */
 export const KeychainBackend: SecretBackend<KeychainSource> = {
   id: "Keychain",
