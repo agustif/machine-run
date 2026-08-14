@@ -89,6 +89,28 @@ failure mode as the thing being prevented.
 **Fix:** same `catchTag` + `isNotFound` treatment as the `stat` two lines up.
 `Template` inherits the fix for free through `makeFileReconciler`.
 
+### 0.6 A prop is interpolated raw into a shell command — *verified*
+
+`packages/git/src/Identity.ts:149`:
+
+```ts
+command: `gh auth switch --user ${ghAccount} >/dev/null 2>&1`
+```
+
+`ghAccount` is a caller-supplied prop, interpolated without `Sh.quote`. This
+contradicts the repo's own rule that shell commands go through `Sh`, and it is
+worse than a normal injection site because the result is **written into a shell
+rc file** and re-executed on every directory change — a value containing `;` or
+a space becomes a permanent hazard in the operator's own `.zshrc`, not a
+one-shot failure.
+
+The blast radius is limited: it is the operator's own recipe, so this is
+self-inflicted rather than a remote attack. It is still a bug, and it is exactly
+the bug a type could have prevented — see 2.5.
+
+**Fix:** `Sh.sh("gh", "auth", "switch", "--user", ghAccount)` plus the
+redirection appended as a literal.
+
 ### 0.5 The pattern behind 0.1–0.4
 
 These are one architectural problem wearing four faces: **the repo has a house
@@ -266,6 +288,24 @@ never needed.
 **Fix:** delete `ProviderOverrides` and the third parameter. Anything genuinely
 needing `version`/`stables`/`precreate` can call `Provider.effect` directly,
 which the doc comment already says.
+
+
+### 2.5 `Sh` returns `string`, so quoting is a convention rather than a type
+
+`Sh.sh()` and `Sh.pwsh()` exist to make shell interpolation safe, and return a
+bare `string` — indistinguishable from an unquoted one. Nothing stops
+`command: \`...${x}...\``, and 0.6 is that gap being taken.
+
+Of 190 `command:` sites, 107 go through `Sh`. Most of the rest are legitimate:
+`Machine.Exec` runs arbitrary shell *by design*, and `Ai.McpServer` launches a
+user-named binary. The problem is that the deliberate escape hatches and the
+accidental one look identical.
+
+**Fix:** brand the return of `Sh.sh`/`Sh.pwsh` (`ShellCommand`), require it at
+`exec({ command })`, and give the escape hatches an explicit
+`Sh.unsafeRaw(reason)`. Raw interpolation then stops compiling, and every
+remaining unsafe site has to say so out loud. The 107 compliant sites migrate for
+free; the ~20 that do not are precisely the list worth reviewing.
 
 ### 2.2 One directory, two mechanisms — and it is spreading
 
