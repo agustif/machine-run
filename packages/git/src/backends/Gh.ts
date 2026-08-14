@@ -1,4 +1,4 @@
-import type { CredentialHelperBackend } from "./Backend.ts";
+import type { CredentialHelperBackend } from "../Backend.ts";
 
 /**
  * The GitHub CLI's own credential helper, `gh auth git-credential`.

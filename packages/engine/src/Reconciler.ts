@@ -132,6 +132,24 @@ export interface Reconciler<Props, State, E = never, R = never> {
   ) => Effect.Effect<State, E, R>;
 
   /**
+   * Enumerate every instance of this resource actually present on the
+   * machine, in the same shape {@link observe} reports for one. Alchemy's
+   * `list` capability — real inventory, not adoption of one already-named
+   * address.
+   *
+   * Optional, and expected to stay unset for most resources today: nothing in
+   * this repo implements it yet — see `system-packages/TASKS.md`'s open
+   * "Implement `list`" task, which this makes reachable without committing
+   * any particular resource to doing it. Leaving it unset and implementing it
+   * to return `[]` are different claims: unset says "this reconciler hasn't
+   * been taught to enumerate"; an explicit `[]` says "there is provably
+   * nothing to enumerate" (an account-wide singleton, a sub-resource keyed
+   * entirely by a parent). `toProvider` preserves that distinction — see its
+   * doc comment on `list`.
+   */
+  readonly list?: (ctx: ObserveContext) => Effect.Effect<State[], E, R>;
+
+  /**
    * Preserve pre-existing content at {@link address} before the first apply
    * that could destroy it.
    *

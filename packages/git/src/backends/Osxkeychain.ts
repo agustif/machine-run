@@ -1,4 +1,4 @@
-import type { CredentialHelperBackend } from "./Backend.ts";
+import type { CredentialHelperBackend } from "../Backend.ts";
 
 /**
  * The macOS login keychain.

@@ -10,36 +10,6 @@ import * as Option from "effect/Option";
 import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
 
 /**
- * The parts of Alchemy's provider contract a {@link Reconciler} does not
- * model, for the resources that genuinely need one.
- *
- * Named rather than an open bag, so what can be overridden is discoverable and
- * a typo is a compile error. A resource needing substantially more than this
- * should call `Provider.effect` directly instead of stretching this shape.
- */
-export interface ProviderOverrides<Res extends ResourceLike> {
-  /** Provider version, for state migrations. */
-  readonly version?: number;
-  /**
-   * Attributes guaranteed not to change across an update.
-   *
-   * Keyed on the resource's declared `Attributes` rather than on the
-   * reconciler's `State`. `State` is constrained to extend `Attributes`, so it
-   * may carry extra fields — but a key Alchemy has never been told about
-   * cannot be one it holds stable.
-   */
-  readonly stables?: Extract<keyof Res["Attributes"], string>[];
-  /** Runs before creation, for resources whose identity must exist first. */
-  readonly precreate?: (input: {
-    id: string;
-    fqn: string;
-    news: Res["Props"];
-    instanceId: string;
-    session: ScopedPlanStatusSession;
-  }) => Effect.Effect<Res["Attributes"], never, never>;
-}
-
-/**
  * Builds the Alchemy provider for a {@link Reconciler}.
  *
  * Everything that is uniform across machine resources is decided here, once:
@@ -127,11 +97,11 @@ export interface ProviderOverrides<Res extends ResourceLike> {
  *
  * A {@link Reconciler} deliberately cannot express everything a provider can:
  * there is no `replace`, no `stables`, no `precreate`, and `delete` only ever
- * calls {@link Reconciler.unapply}. Those are modelled through {@link
- * overrides} when a resource needs one, and a resource that needs
- * substantially more should call `Provider.effect` directly rather than bend
- * this shape. Both kinds compose in the same stack, because both are just
- * providers.
+ * calls {@link Reconciler.unapply}. A resource that genuinely needs one of
+ * those should call `Provider.effect` directly instead of stretching this
+ * shape — this is the same call `toProvider` itself makes below, just without
+ * the parts every machine resource shares. Both kinds compose in the same
+ * stack, because both are just providers.
  */
 export const toProvider = <Res extends ResourceLike, E, R>(
   cls: ResourceClassLike<Res>,
@@ -141,20 +111,6 @@ export const toProvider = <Res extends ResourceLike, E, R>(
    * rather than per reconcile.
    */
   make: Effect.Effect<Reconciler<Res["Props"], Res["Attributes"], E>, never, R>,
-  /**
-   * Provider members merged over the generated ones.
-   *
-   * The escape hatch for the parts of Alchemy's provider contract a
-   * reconciler does not model — `stables`, `version`, `precreate`. Notably
-   * absent: `delete`. A resource whose `delete` needs to undo something
-   * implements {@link Reconciler.unapply} instead, so it stays inside the
-   * generated `delete`'s `RemovalPolicy` gate rather than bypassing it; a
-   * resource that needs delete behaviour genuinely outside that model calls
-   * `Provider.effect` directly instead of stretching this shape. Anything
-   * passed here wins, so a resource can keep the generated `diff`/`reconcile`
-   * while replacing one member.
-   */
-  overrides?: ProviderOverrides<Res>,
 ) =>
   Provider.effect(
     cls,
@@ -173,10 +129,18 @@ export const toProvider = <Res extends ResourceLike, E, R>(
         snapshot: (path) => backups.snapshot(path),
       });
 
+      const list = reconciler.list;
+
       return {
-        // Machine state is addressed, not enumerated: there is no registry to
-        // ask "what files does this tool manage". Adoption goes through `read`.
-        list: () => Effect.succeed([]),
+        // A reconciler that hasn't been taught to enumerate leaves this key
+        // out entirely, rather than this adapter asserting `[]` on its
+        // behalf: `Provider.effect`'s own constructor already treats a
+        // missing `list` as `() => Effect.succeed([])` (see its doc comment
+        // on `ProviderServiceInput`), so the runtime result is identical —
+        // what changes is which party is making the claim "nothing here".
+        // A reconciler that does implement `list` (none does yet) has its
+        // result passed straight through.
+        ...(list ? { list: () => list(observeCtx) } : {}),
 
         read: Effect.fn(function* ({ olds }: { olds: Res["Props"] }) {
           return yield* reconciler.observe(olds, observeCtx);
@@ -275,8 +239,6 @@ export const toProvider = <Res extends ResourceLike, E, R>(
             }),
           );
         }),
-
-        ...overrides,
       } satisfies Provider.ProviderServiceInput<Res>;
     }),
   );

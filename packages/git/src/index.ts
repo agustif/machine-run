@@ -1,6 +1,6 @@
 export * from "./Alias.ts";
 export * from "./Attributes.ts";
-export * from "./backends/Backend.ts";
+export * from "./Backend.ts";
 export * from "./ConfigFile.ts";
 export * from "./Config.ts";
 export * from "./CredentialHelper.ts";
