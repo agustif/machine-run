@@ -1,10 +1,17 @@
 import { MachinePaths } from "@machine-run/core";
-import { type ObserveContext, type Reconciler, toProvider } from "@machine-run/engine";
+import {
+  type ApplyContext,
+  type Exec,
+  type ObserveContext,
+  type Reconciler,
+  toProvider,
+} from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Config from "effect/Config";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -13,10 +20,14 @@ import { makeMiseBackend } from "./backends/Mise.ts";
 import { makeRustupBackend } from "./backends/Rustup.ts";
 import { makeUvBackend } from "./backends/Uv.ts";
 import {
+  type AsdfToolIdentity,
   type BackendError,
-  type RuntimeBackend,
+  type MiseToolIdentity,
+  type RuntimeObservation,
   RuntimeManagerId,
   RuntimeScope,
+  type RustupToolIdentity,
+  type UvToolIdentity,
 } from "./Backend.ts";
 import { versionSatisfies } from "./version.ts";
 
@@ -39,18 +50,43 @@ import { versionSatisfies } from "./version.ts";
  * facts apart in both {@link RuntimeToolState} and in `matches`, rather than
  * quietly picking one.
  *
+ * ## One case per manager, not `{ manager, tool }`
+ *
+ * The previous shape was `{ manager: RuntimeManagerId, tool: Schema.String,
+ * version: Schema.String }` — a manager selector plus a `tool` name the type
+ * system let be *anything*, even though rustup only ever manages `"rust"` and
+ * uv only ever manages `"python"`. That combination was never actually legal;
+ * it was only ever checked, at runtime, by a dedicated `RuntimeToolMismatch`
+ * error every `observe`/`apply` call had to raise off `RuntimeBackend`'s
+ * `fixedTool`. A runtime error whose entire job is policing a prop
+ * combination the type system permits is evidence the props were under-typed,
+ * not evidence the check was doing useful work — so this is a `Schema.
+ * TaggedUnion`, one case per manager, and `RuntimeToolMismatch` no longer
+ * exists: `Rustup`'s case has no `tool` field for a caller to get wrong, and
+ * `Uv`'s has none either. Only `Mise` and `Asdf` have a `tool` field at all,
+ * because only they manage more than one fixed thing. `Rustup`'s identifying
+ * field is `channel`, not `version` — rustup's own vocabulary (`rustup
+ * toolchain install`, `rustup default`, `rustup override set`) takes a
+ * *channel* (`stable`, `beta`, `nightly`) or a pinned version like `1.79`,
+ * a different concept from mise/asdf/uv's `version`, which is why it gets a
+ * different field name rather than reusing `version` for something that
+ * isn't one. See `Backend.ts`'s `MiseToolIdentity`/`AsdfToolIdentity`/
+ * `RustupToolIdentity`/`UvToolIdentity` for the identity shape each backend
+ * actually receives — never a bare `tool: Schema.String` a caller could hand
+ * to the wrong manager.
+ *
  * ## Versions are requests, not names
  *
- * `tool` is looked up by membership, the same way `System.Package.name` is —
- * whatever string the backend's own namespace uses (`"node"` for mise,
- * `"nodejs"` for asdf; there is deliberately no cross-manager name mapping,
- * for the same reason `PackageManagerBackend` has none). `version` is
- * different: it is a request, not a name, and `matches` resolves it with
- * {@link versionSatisfies} — a dotted-prefix rule, not equality — because
- * every backend already resolves the identical shorthand itself (`mise use
- * node@22`, `asdf install nodejs 22`, `uv python pin 3.12`). See
- * `version.ts` for the exact rule and why it stops short of full semver
- * ranges.
+ * `tool` (on `Mise`/`Asdf`) is looked up by membership, the same way
+ * `System.Package.name` is — whatever string the backend's own namespace
+ * uses (`"node"` for mise, `"nodejs"` for asdf; there is deliberately no
+ * cross-manager name mapping, for the same reason `PackageManagerBackend`
+ * has none). `version`/`channel` are different: they are a request, not a
+ * name, and `matches` resolves them with {@link versionSatisfies} — a
+ * dotted-prefix rule, not equality — because every backend already resolves
+ * the identical shorthand itself (`mise use node@22`, `asdf install nodejs
+ * 22`, `uv python pin 3.12`). See `version.ts` for the exact rule and why it
+ * stops short of full semver ranges.
  *
  * ## `scope` and the shared-file lock
  *
@@ -72,28 +108,76 @@ import { versionSatisfies } from "./version.ts";
  * rustup `Runtime.Tool` shares one lock. The address is a fact about the
  * manager's own file layout, not a policy this resource imposes uniformly.
  */
-export const RuntimeToolProps = Schema.Struct({
-  manager: RuntimeManagerId,
-  /** The tool's name in that manager's own namespace, e.g. `"node"` (mise), `"nodejs"` (asdf). Ignored by rustup/uv, which each manage exactly one fixed tool — see {@link RuntimeToolMismatch}. */
-  tool: Schema.String,
-  /** A version request: `"22"`, `"22.11"`, `"22.11.0"`, or a rustup channel like `"stable"`. See {@link versionSatisfies}. */
-  version: Schema.String,
+const scopeAndActiveFields = {
   /** Where this is activated. Defaults to {@link RuntimeScope}'s `Global` case. */
   scope: Schema.optionalKey(RuntimeScope),
   /** Whether this version must also be the *active* one at `scope`, versus merely installed. Defaults to `true`. */
   active: Schema.optionalKey(Schema.Boolean),
+};
+
+export const RuntimeToolProps = Schema.TaggedUnion({
+  Mise: {
+    /** The tool's name in mise's own namespace, e.g. `"node"`. */
+    tool: Schema.String,
+    /** A version request: `"22"`, `"22.11"`, or `"22.11.0"`. See {@link versionSatisfies}. */
+    version: Schema.String,
+    ...scopeAndActiveFields,
+  },
+  Asdf: {
+    /** The tool's name in asdf's own namespace, e.g. `"nodejs"` (not `"node"`). */
+    tool: Schema.String,
+    /** A version request: `"22"`, `"22.11"`, or `"22.11.0"`. See {@link versionSatisfies}. */
+    version: Schema.String,
+    ...scopeAndActiveFields,
+  },
+  Rustup: {
+    /** A channel request: `"stable"`, `"beta"`, `"nightly"`, or a pinned version like `"1.79"`. Not a `version` — see this module's doc comment. */
+    channel: Schema.String,
+    ...scopeAndActiveFields,
+  },
+  Uv: {
+    /** A Python version request: `"3.12"`, `"3.12.1"`. */
+    version: Schema.String,
+    ...scopeAndActiveFields,
+  },
 });
 export type RuntimeToolProps = typeof RuntimeToolProps.Type;
 
 /**
- * `version` is always the concrete, resolved version a backend reported —
- * never the fuzzy request `props.version` may have been. `installed` and
- * `active` are kept apart rather than folded into one boolean; see this
- * module's doc comment for why both independently matter.
+ * `version` is always the concrete, resolved version (or, for `Rustup`, the
+ * resolved toolchain name) a backend reported — never the fuzzy request
+ * `props.version`/`props.channel` may have been. `installed` and `active` are
+ * kept apart rather than folded into one boolean; see this module's doc
+ * comment for why both independently matter.
+ *
+ * Unlike {@link RuntimeToolProps}, this stays one flat `Schema.Struct` rather
+ * than a matching `Schema.TaggedUnion` — tried directly and reverted, not a
+ * stylistic choice. Alchemy's `Resource<Type, Props, Attributes>` maps every
+ * `Attributes` key through `{ [attr in keyof Attributes]-?: AttrOutput<...> }`
+ * (`alchemy/src/Resource.ts`), and that mapped type does not resolve to a
+ * plain object when `Attributes` is a union — TypeScript then refuses to let
+ * `RuntimeTool` extend `Resource<...>` at all ("An interface can only extend
+ * an object type ... with statically known members"), independent of whether
+ * the union's members share every key. Verified directly against this
+ * project's actual `alchemy` version, not assumed from the error text: a
+ * throwaway `Resource<"X", Struct, TaggedUnion>` reproduces the identical
+ * failure even when every case of the union shares the same fields. `Props`
+ * has no such mapped type (`ResourceLike.Props` is a plain field), which is
+ * why *it* could become a `TaggedUnion` and this could not — see rule 1 in
+ * `AGENTS.md`: alchemy is a dependency to work within, not to fork.
+ *
+ * `manager` (not `_tag`) carries which case this is, spelled with
+ * {@link RuntimeManagerId} — the same four names `RuntimeToolProps`'s cases
+ * use, so `manager` and `tool` here always describe a state the reconciler
+ * itself produced (never a recipe-authored value), which is what makes a
+ * plain optional `tool` acceptable here even though the identical shape was
+ * the smoking gun on `RuntimeToolProps`: nothing outside this module ever
+ * constructs a `RuntimeToolState` by hand.
  */
 export const RuntimeToolState = Schema.Struct({
   manager: RuntimeManagerId,
-  tool: Schema.String,
+  /** Only set for `manager: "Mise"`/`"Asdf"` — `"Rustup"`/`"Uv"` have no tool dimension, see `RuntimeToolProps`. */
+  tool: Schema.optionalKey(Schema.String),
   scope: RuntimeScope,
   version: Schema.String,
   installed: Schema.Boolean,
@@ -106,38 +190,32 @@ export interface RuntimeTool extends Resource<"Runtime.Tool", RuntimeToolProps, 
 export const RuntimeTool = Resource<RuntimeTool>("Runtime.Tool");
 
 /**
- * Raised when `props.tool` names anything other than what a single-tool
- * manager fixes it to — rustup only ever manages `"rust"`, uv only ever
- * manages `"python"`. Caught here, generically, off {@link
- * RuntimeBackend.fixedTool}, rather than each backend rejecting its own
- * mismatch — see rule 3 in `AGENTS.md`: no special case for a specific
- * backend inside the generic resource.
- */
-export class RuntimeToolMismatch extends Data.TaggedError("RuntimeToolMismatch")<{
-  manager: RuntimeManagerId;
-  tool: string;
-  expected: string;
-}> {
-  override get message() {
-    return `"${this.manager}" only manages "${this.expected}", not "${this.tool}". Set \`tool: "${this.expected}"\`, or pick a different manager for this tool.`;
-  }
-}
-
-/**
  * Raised when `install` and (if requested) `activate` both ran without error,
  * yet a fresh observation still finds nothing satisfying the request. This
  * should not happen against a well-behaved backend — it means the manager
  * reported success while leaving the machine in a state its own listing
  * command doesn't recognize — and is surfaced rather than silently retried or
  * guessed past, per rule 11 in `AGENTS.md`.
+ *
+ * Carries the whole `props` (rather than separate `manager`/`tool`/`version`
+ * fields, the previous shape) because the identifying field differs by
+ * case — `Rustup` has `channel`, not `tool`/`version` — and `Match.
+ * tagsExhaustive` below is what makes a future fifth manager a compile error
+ * here rather than a silently-wrong message.
  */
 export class RuntimeNotConverged extends Data.TaggedError("RuntimeNotConverged")<{
-  manager: RuntimeManagerId;
-  tool: string;
-  version: string;
+  props: RuntimeToolProps;
 }> {
   override get message() {
-    return `${this.manager} reported "${this.tool}@${this.version}" installed, but a fresh observation still can't find a version satisfying that request. The manager's own listing command disagrees with its install/activate commands.`;
+    const describe = Match.value(this.props).pipe(
+      Match.tagsExhaustive({
+        Mise: (p) => `mise reported "${p.tool}@${p.version}" installed`,
+        Asdf: (p) => `asdf reported "${p.tool}@${p.version}" installed`,
+        Rustup: (p) => `rustup reported "${p.channel}" installed`,
+        Uv: (p) => `uv reported Python "${p.version}" installed`,
+      }),
+    );
+    return `${describe}, but a fresh observation still can't find a version satisfying that request. The manager's own listing command disagrees with its install/activate commands.`;
   }
 }
 
@@ -170,12 +248,47 @@ const scopeEquals = (a: RuntimeScope, b: RuntimeScope): boolean => {
   return a._tag === "Directory" && b._tag === "Directory" ? a.path === b.path : true;
 };
 
+/**
+ * Whether anything a backend reported satisfies `requested`, and if so,
+ * which concrete string to report as `version` — the active one winning over
+ * a merely-installed one when both would do, so reporting a different
+ * (older or newer) installed version here never makes `matches` reject an
+ * already-satisfied request and force a pointless reactivation. Manager-
+ * agnostic: every backend's {@link RuntimeObservation} already reduces to the
+ * same two facts, whether the underlying concept is a version or a channel.
+ */
+const resolveVersion = (requested: string, observation: RuntimeObservation): string | undefined => {
+  const activeSatisfies =
+    observation.active !== undefined && versionSatisfies(requested, observation.active);
+  const matchingInstalled = observation.installed.find((candidate) =>
+    versionSatisfies(requested, candidate),
+  );
+  if (!activeSatisfies && matchingInstalled === undefined) return undefined;
+  return activeSatisfies ? (observation.active as string) : (matchingInstalled as string);
+};
+
+/**
+ * Everything the shared `observe`/`desired`/`apply` logic below needs from
+ * one manager's case of {@link RuntimeToolProps}, built once per call by
+ * {@link planFor}'s `Match.tagsExhaustive`. Factoring this out is what keeps
+ * `observe`/`apply` themselves manager-agnostic — written once, not once per
+ * case — while every manager-specific detail (which backend, which identity
+ * shape, which field names the state case carries) stays behind a closure
+ * built in exactly one place.
+ */
+interface ToolPlan {
+  readonly requestedVersion: string;
+  readonly desiredState: RuntimeToolState;
+  readonly observe: (exec: Exec) => Effect.Effect<RuntimeObservation, BackendError>;
+  readonly install: (exec: Exec) => Effect.Effect<void, BackendError>;
+  readonly activate: (exec: Exec) => Effect.Effect<void, BackendError>;
+  readonly toObservedState: (version: string, observation: RuntimeObservation) => RuntimeToolState;
+  /** Whether `state` names the same tool this plan is for — same `manager`, and same `tool` on `Mise`/`Asdf`. */
+  readonly sameIdentity: (state: RuntimeToolState) => boolean;
+}
+
 export const makeRuntimeToolReconciler: Effect.Effect<
-  Reconciler<
-    RuntimeToolProps,
-    RuntimeToolState,
-    BackendError | RuntimeToolMismatch | RuntimeNotConverged
-  >,
+  Reconciler<RuntimeToolProps, RuntimeToolState, BackendError | RuntimeNotConverged>,
   never,
   MachinePaths | FileSystem.FileSystem | Path.Path
 > = Effect.gen(function* () {
@@ -197,64 +310,148 @@ export const makeRuntimeToolReconciler: Effect.Effect<
     asdf: makeAsdfBackend({ home: paths.home, path, filenameOverride: asdfFilenameOverride }),
     rustup: makeRustupBackend({ home: paths.home, path, rustupHomeOverride }),
     uv: makeUvBackend({ home: paths.home, path, fs, configDirOverride: uvConfigDirOverride }),
-  } satisfies Record<RuntimeManagerId, RuntimeBackend>;
-
-  const checkTool = (manager: RuntimeManagerId, tool: string) => {
-    const expected = backends[manager].fixedTool;
-    return expected !== undefined && expected !== tool
-      ? Effect.fail(new RuntimeToolMismatch({ manager, tool, expected }))
-      : Effect.void;
   };
 
-  const observe = (props: RuntimeToolProps, ctx: ObserveContext) =>
+  const planFor = (props: RuntimeToolProps): ToolPlan =>
+    Match.value(props).pipe(
+      Match.tagsExhaustive({
+        Mise: (p): ToolPlan => {
+          const scope = resolveScope(p);
+          const identity: MiseToolIdentity = { tool: p.tool, version: p.version };
+          return {
+            requestedVersion: p.version,
+            desiredState: {
+              manager: "Mise",
+              tool: p.tool,
+              version: p.version,
+              scope,
+              installed: true,
+              active: p.active ?? true,
+            },
+            observe: (exec) => backends.mise.observe(identity, scope, exec),
+            install: (exec) => backends.mise.install(identity, exec),
+            activate: (exec) => backends.mise.activate(identity, scope, exec),
+            toObservedState: (version, observation) => ({
+              manager: "Mise",
+              tool: p.tool,
+              version,
+              scope,
+              installed: observation.installed.includes(version),
+              active: observation.active === version,
+            }),
+            sameIdentity: (state) => state.manager === "Mise" && state.tool === p.tool,
+          };
+        },
+        Asdf: (p): ToolPlan => {
+          const scope = resolveScope(p);
+          const identity: AsdfToolIdentity = { tool: p.tool, version: p.version };
+          return {
+            requestedVersion: p.version,
+            desiredState: {
+              manager: "Asdf",
+              tool: p.tool,
+              version: p.version,
+              scope,
+              installed: true,
+              active: p.active ?? true,
+            },
+            observe: (exec) => backends.asdf.observe(identity, scope, exec),
+            install: (exec) => backends.asdf.install(identity, exec),
+            activate: (exec) => backends.asdf.activate(identity, scope, exec),
+            toObservedState: (version, observation) => ({
+              manager: "Asdf",
+              tool: p.tool,
+              version,
+              scope,
+              installed: observation.installed.includes(version),
+              active: observation.active === version,
+            }),
+            sameIdentity: (state) => state.manager === "Asdf" && state.tool === p.tool,
+          };
+        },
+        Rustup: (p): ToolPlan => {
+          const scope = resolveScope(p);
+          const identity: RustupToolIdentity = { channel: p.channel };
+          return {
+            requestedVersion: p.channel,
+            desiredState: {
+              manager: "Rustup",
+              version: p.channel,
+              scope,
+              installed: true,
+              active: p.active ?? true,
+            },
+            observe: (exec) => backends.rustup.observe(identity, scope, exec),
+            install: (exec) => backends.rustup.install(identity, exec),
+            activate: (exec) => backends.rustup.activate(identity, scope, exec),
+            toObservedState: (version, observation) => ({
+              manager: "Rustup",
+              version,
+              scope,
+              installed: observation.installed.includes(version),
+              active: observation.active === version,
+            }),
+            sameIdentity: (state) => state.manager === "Rustup",
+          };
+        },
+        Uv: (p): ToolPlan => {
+          const scope = resolveScope(p);
+          const identity: UvToolIdentity = { version: p.version };
+          return {
+            requestedVersion: p.version,
+            desiredState: {
+              manager: "Uv",
+              version: p.version,
+              scope,
+              installed: true,
+              active: p.active ?? true,
+            },
+            observe: (exec) => backends.uv.observe(identity, scope, exec),
+            install: (exec) => backends.uv.install(identity, exec),
+            activate: (exec) => backends.uv.activate(identity, scope, exec),
+            toObservedState: (version, observation) => ({
+              manager: "Uv",
+              version,
+              scope,
+              installed: observation.installed.includes(version),
+              active: observation.active === version,
+            }),
+            sameIdentity: (state) => state.manager === "Uv",
+          };
+        },
+      }),
+    );
+
+  const observeState = (
+    props: RuntimeToolProps,
+    exec: Exec,
+  ): Effect.Effect<RuntimeToolState | undefined, BackendError> =>
     Effect.gen(function* () {
-      yield* checkTool(props.manager, props.tool);
-      const backend = backends[props.manager];
-      const scope = resolveScope(props);
-      const observation = yield* backend.observe(props.tool, scope, ctx.exec);
-
-      const activeSatisfies =
-        observation.active !== undefined && versionSatisfies(props.version, observation.active);
-      const matchingInstalled = observation.installed.find((candidate) =>
-        versionSatisfies(props.version, candidate),
-      );
-
-      // Neither the active version nor anything installed satisfies the
-      // request: there is genuinely nothing here yet.
-      if (!activeSatisfies && matchingInstalled === undefined) return undefined;
-
-      // The active version wins over a merely-installed one when both would
-      // do — reporting a different (older or newer) installed version here
-      // would make `matches` reject an already-satisfied request and force a
-      // pointless reactivation.
-      const version = activeSatisfies
-        ? (observation.active as string)
-        : (matchingInstalled as string);
-
-      return {
-        manager: props.manager,
-        tool: props.tool,
-        scope,
-        version,
-        installed: observation.installed.includes(version),
-        active: observation.active === version,
-      };
+      const plan = planFor(props);
+      const observation = yield* plan.observe(exec);
+      const version = resolveVersion(plan.requestedVersion, observation);
+      return version === undefined ? undefined : plan.toObservedState(version, observation);
     });
 
+  const observe = (
+    props: RuntimeToolProps,
+    ctx: ObserveContext,
+  ): Effect.Effect<RuntimeToolState | undefined, BackendError> => observeState(props, ctx.exec);
+
   return {
-    address: (props) => backends[props.manager].configPath(resolveScope(props)),
+    address: (props) =>
+      Match.value(props).pipe(
+        Match.tagsExhaustive({
+          Mise: (p) => backends.mise.configPath(resolveScope(p)),
+          Asdf: (p) => backends.asdf.configPath(resolveScope(p)),
+          Rustup: (p) => backends.rustup.configPath(resolveScope(p)),
+          Uv: (p) => backends.uv.configPath(resolveScope(p)),
+        }),
+      ),
 
     observe,
 
-    desired: (props) =>
-      Effect.succeed({
-        manager: props.manager,
-        tool: props.tool,
-        scope: resolveScope(props),
-        version: props.version,
-        installed: true,
-        active: props.active ?? true,
-      }),
+    desired: (props) => Effect.succeed(planFor(props).desiredState),
 
     // Not equality: `version` is compared with `versionSatisfies`, not `===`,
     // because `desired.version` can still be the recipe's fuzzy request while
@@ -262,6 +459,10 @@ export const makeRuntimeToolReconciler: Effect.Effect<
     // one genuinely optional constraint — a recipe with `active: false` is
     // satisfied by any installed version regardless of what else is active,
     // the same "unconstrained field" shape `Machine.File`'s `mode` uses.
+    // `tool` is `undefined` on both sides for `Rustup`/`Uv`, so `===` is
+    // still the right comparison there too — nothing case-specific is needed
+    // since `RuntimeToolState` is one flat shape, not a union (see its doc
+    // comment for why).
     matches: (observed, desired) =>
       observed.manager === desired.manager &&
       observed.tool === desired.tool &&
@@ -270,21 +471,21 @@ export const makeRuntimeToolReconciler: Effect.Effect<
       observed.installed &&
       (desired.active ? observed.active : true),
 
-    apply: ({ props, observed, desired }, ctx) =>
+    apply: ({ props, observed, desired }, ctx: ApplyContext) =>
       Effect.gen(function* () {
-        yield* checkTool(props.manager, props.tool);
-        const backend = backends[props.manager];
+        const plan = planFor(props);
 
         const alreadyInstalled =
           observed !== undefined &&
           observed.installed &&
-          versionSatisfies(props.version, observed.version);
+          plan.sameIdentity(observed) &&
+          versionSatisfies(plan.requestedVersion, observed.version);
 
         if (!alreadyInstalled) {
-          yield* backend.install(props.tool, props.version, ctx.exec);
+          yield* plan.install(ctx.exec);
         }
         if (desired.active) {
-          yield* backend.activate(props.tool, props.version, desired.scope, ctx.exec);
+          yield* plan.activate(ctx.exec);
         }
 
         // Re-observed rather than assembled from the calls above, the same
@@ -293,13 +494,7 @@ export const makeRuntimeToolReconciler: Effect.Effect<
         // concrete version than a naive echo of `props.version` would claim.
         const reobserved = yield* observe(props, ctx);
         if (reobserved === undefined) {
-          return yield* Effect.fail(
-            new RuntimeNotConverged({
-              manager: props.manager,
-              tool: props.tool,
-              version: props.version,
-            }),
-          );
+          return yield* Effect.fail(new RuntimeNotConverged({ props }));
         }
         return reobserved;
       }),

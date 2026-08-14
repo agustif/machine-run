@@ -1,22 +1,19 @@
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
-import { SettingsBackendId, type SettingsError } from "./Backend.ts";
-import { settingsBackend } from "./Store.ts";
+import {
+  type DconfIdentity,
+  type GsettingsIdentity,
+  type GsettingsRelocatableIdentity,
+  type SettingsBackendId,
+  type SettingsError,
+} from "./Backend.ts";
+import { settingsBackends } from "./Store.ts";
 
-export const SettingProps = Schema.Struct({
-  /** Which store to read from and write to. */
-  backend: SettingsBackendId,
-  /**
-   * The key, in the backend's own addressing scheme:
-   * - `gsettings` — `"schema-id:key-name"`, e.g.
-   *   `"org.gnome.desktop.interface:clock-format"`.
-   * - `dconf` — an absolute dconf path, e.g.
-   *   `"/org/gnome/desktop/interface/clock-format"`.
-   */
-  key: Schema.String,
+const valueField = {
   /**
    * The desired value, as GVariant text — the exact form `gsettings get`/
    * `dconf read` print for it, quotes included for a string:
@@ -34,23 +31,109 @@ export const SettingProps = Schema.Struct({
    * want, not to hand-write it from memory.
    */
   value: Schema.String,
-});
+};
 
+/**
+ * A key in one Linux settings store, addressed with the fields that store's
+ * own CLI actually takes — never a single combined string this module has to
+ * re-parse and validate.
+ *
+ * ## Why three cases, not `{ backend, key, value }`
+ *
+ * The previous shape spelled every store's key as one opaque
+ * `Schema.String`, split apart at runtime by each backend's own regex:
+ * `"schema-id:key-name"` for `gsettings`, an absolute path for `dconf`. That
+ * meant a caller could hand `dconf`'s backend a `gsettings`-shaped string (or
+ * vice versa) and the mismatch surfaced only as a `SettingKeyInvalid` at
+ * `observe`/`apply` time — the identical "runtime check policing an illegal
+ * combination the type system allowed" shape `Runtime.Tool`'s
+ * `RuntimeToolMismatch` had (see `@machine-run/runtimes`' `Tool.ts`). Here,
+ * `Gsettings`/`GsettingsRelocatable`/`Dconf` each carry exactly the fields
+ * their CLI invocation needs, so a `dconf`-shaped `path` can no longer be
+ * handed to `gsettings`'s `schema`/`key` fields, or the reverse: there is no
+ * shared string for the two grammars to collide over.
+ *
+ * - **`Gsettings`** — an ordinary (non-relocatable) key: `schema` (a
+ *   reverse-DNS-style dotted id, e.g. `"org.gnome.desktop.interface"`) and
+ *   `key` (hyphenated, e.g. `"clock-format"`), passed to `gsettings
+ *   get/set/reset` as two separate arguments.
+ * - **`GsettingsRelocatable`** — a key in a *relocatable* schema (one with no
+ *   fixed dconf path built in — per-profile terminal settings are the common
+ *   real example), which additionally needs `path`: a dconf-style path that
+ *   must both begin and end with `/`. `gsettings` addresses this as one
+ *   combined `schema:path` argument (verified directly against a real
+ *   relocatable schema in an `ubuntu:24.04` container — see
+ *   `Backend.ts`'s `GsettingsRelocatableIdentity` doc comment for the exact
+ *   commands and errors). This is the gap the previous `SettingProps.key`
+ *   could not express at all — flagged in `TASKS.md` — and is now a real
+ *   case, not a follow-up.
+ * - **`Dconf`** — a raw `dconf` path (e.g.
+ *   `"/org/gnome/desktop/interface/clock-format"`), which must begin *but not
+ *   end* with `/` — the opposite trailing-slash rule from
+ *   `GsettingsRelocatable`'s `path`, because a dconf *key* path names one
+ *   value while a gsettings relocatable *schema* path names a directory
+ *   prefix a whole schema's keys live under.
+ */
+export const SettingProps = Schema.TaggedUnion({
+  Gsettings: {
+    schema: Schema.String,
+    key: Schema.String,
+    ...valueField,
+  },
+  GsettingsRelocatable: {
+    schema: Schema.String,
+    path: Schema.String,
+    key: Schema.String,
+    ...valueField,
+  },
+  Dconf: {
+    path: Schema.String,
+    ...valueField,
+  },
+});
 export type SettingProps = typeof SettingProps.Type;
 
-export const SettingState = Schema.Struct({
-  backend: SettingsBackendId,
-  key: Schema.String,
-  value: Schema.String,
-});
+const SettingVariantId = Schema.Literals(["Gsettings", "GsettingsRelocatable", "Dconf"]);
+type SettingVariantId = typeof SettingVariantId.Type;
 
+/**
+ * Unlike {@link SettingProps}, this stays one flat `Schema.Struct` rather
+ * than a matching `Schema.TaggedUnion` — tried directly and reverted, not a
+ * stylistic choice. Alchemy's `Resource<Type, Props, Attributes>` maps every
+ * `Attributes` key through `{ [attr in keyof Attributes]-?: AttrOutput<...> }`
+ * (`alchemy/src/Resource.ts`), and that mapped type does not resolve to a
+ * plain object when `Attributes` is a union — TypeScript then refuses to let
+ * `Setting` extend `Resource<...>` at all ("An interface can only extend an
+ * object type ... with statically known members"), independent of whether
+ * the union's members share every key. Verified directly against this
+ * project's actual `alchemy` version (see `@machine-run/runtimes`' `Tool.ts`
+ * for the same finding and a standalone repro), not assumed from the error
+ * text. `Props` has no such mapped type (`ResourceLike.Props` is a plain
+ * field), which is why *it* could become a `TaggedUnion` and this could not.
+ *
+ * `variant` (not `_tag`) carries which case this is, so `schema`/`path`/`key`
+ * here always describe a state the reconciler itself produced (never a
+ * recipe-authored value) — the same reasoning `RuntimeToolState`'s optional
+ * `tool` field rests on in `@machine-run/runtimes`.
+ */
+export const SettingState = Schema.Struct({
+  variant: SettingVariantId,
+  /** Set for `variant: "Gsettings"`/`"GsettingsRelocatable"`. */
+  schema: Schema.optionalKey(Schema.String),
+  /** Set for `variant: "GsettingsRelocatable"`/`"Dconf"`. */
+  path: Schema.optionalKey(Schema.String),
+  /** Set for `variant: "Gsettings"`/`"GsettingsRelocatable"`. */
+  key: Schema.optionalKey(Schema.String),
+  ...valueField,
+});
 export type SettingState = typeof SettingState.Type;
 
 /**
- * One key in one Linux settings store — `gsettings`' schema-typed keys, or a
- * raw `dconf` path. The generalisation of `MacOS.Default` this task set out
- * to build, minus macOS itself: see `docs/settings-notes.md` for why that
- * side stays a separate resource for now rather than a third backend id.
+ * One key in one Linux settings store — `gsettings`' schema-typed keys
+ * (ordinary or relocatable), or a raw `dconf` path. The generalisation of
+ * `MacOS.Default` this task set out to build, minus macOS itself: see
+ * `docs/settings-notes.md` for why that side stays a separate resource for
+ * now rather than a third backend id.
  *
  * The value is always written explicitly, never only when it differs from
  * whatever the store already holds, so the result is reproducible rather
@@ -88,6 +171,34 @@ export interface Setting extends Resource<"System.Setting", SettingProps, Settin
 
 export const Setting = Resource<Setting>("System.Setting");
 
+/** Which CLI a `SettingProps` case is read/written through — `Gsettings` and `GsettingsRelocatable` both go through `gsettings`. */
+const backendIdFor = (props: SettingProps): SettingsBackendId =>
+  Match.value(props).pipe(
+    Match.tagsExhaustive({
+      Gsettings: () => "gsettings" as const,
+      GsettingsRelocatable: () => "gsettings" as const,
+      Dconf: () => "dconf" as const,
+    }),
+  );
+
+/** A human-readable address for a `SettingProps` case, in the shape its own CLI takes it — used only in error messages, never for dispatch. */
+const describe = (props: SettingProps): string =>
+  Match.value(props).pipe(
+    Match.tagsExhaustive({
+      Gsettings: (p) => `${p.schema} ${p.key}`,
+      GsettingsRelocatable: (p) => `${p.schema}:${p.path} ${p.key}`,
+      Dconf: (p) => p.path,
+    }),
+  );
+
+const adviceFor = (backend: SettingsBackendId, subject: string): string =>
+  backend === "gsettings"
+    ? `gsettings can report success while doing nothing when there is no reachable session D-Bus ` +
+      `(no desktop session, no DBUS_SESSION_BUS_ADDRESS). Run this against a real login session, ` +
+      `or use the "dconf" backend, which fails loudly in the same situation instead of silently no-op'ing.`
+    : `Check that the ${backend} CLI is actually installed and reachable, and that "${subject}" ` +
+      `is spelled the way this backend expects.`;
+
 /**
  * A write reported success, but reading the key back immediately afterwards
  * still shows the old value.
@@ -100,23 +211,25 @@ export const Setting = Resource<Setting>("System.Setting");
  * reconciler in). See `backends/Gsettings.ts`'s doc comment for the exact
  * container output. Trusting the write's own exit code would let that
  * silent no-op look like a converged, correct apply.
+ *
+ * Carries the whole `props` (rather than the previous flat `backend`/`key`)
+ * because the identifying fields differ by case — `GsettingsRelocatable` has
+ * a `path` `Gsettings` doesn't — and `describe`'s `Match.tagsExhaustive`
+ * above is what makes a future fourth case a compile error here rather than
+ * a silently-wrong message.
  */
 export class SettingWriteNotObserved extends Data.TaggedError("SettingWriteNotObserved")<{
-  backend: SettingsBackendId;
-  key: string;
+  props: SettingProps;
   expected: string;
   actual: string | undefined;
 }> {
   override get message() {
+    const backend = backendIdFor(this.props);
+    const subject = describe(this.props);
     return (
-      `Wrote "${this.key}" via ${this.backend}, but reading it back returned ` +
+      `Wrote "${subject}" via ${backend}, but reading it back returned ` +
       `${this.actual === undefined ? "nothing" : `"${this.actual}"`} instead of "${this.expected}". ` +
-      (this.backend === "gsettings"
-        ? `gsettings can report success while doing nothing when there is no reachable session D-Bus ` +
-          `(no desktop session, no DBUS_SESSION_BUS_ADDRESS). Run this against a real login session, ` +
-          `or use the "dconf" backend, which fails loudly in the same situation instead of silently no-op'ing.`
-        : `Check that the ${this.backend} CLI is actually installed and reachable, and that "${this.key}" ` +
-          `is spelled the way this backend expects.`)
+      adviceFor(backend, subject)
     );
   }
 }
@@ -133,24 +246,94 @@ export class SettingWriteNotObserved extends Data.TaggedError("SettingWriteNotOb
  * hazard `SettingWriteNotObserved` exists to catch on the way in.
  */
 export class SettingResetNotObserved extends Data.TaggedError("SettingResetNotObserved")<{
-  backend: SettingsBackendId;
-  key: string;
+  props: SettingProps;
   unwanted: string;
 }> {
   override get message() {
+    const backend = backendIdFor(this.props);
+    const subject = describe(this.props);
     return (
-      `Reset "${this.key}" via ${this.backend}, but reading it back still returned ` +
+      `Reset "${subject}" via ${backend}, but reading it back still returned ` +
       `"${this.unwanted}" — the value this resource itself wrote, unchanged. ` +
-      (this.backend === "gsettings"
-        ? `gsettings can report a successful reset while doing nothing when there is no reachable ` +
-          `session D-Bus (no desktop session, no DBUS_SESSION_BUS_ADDRESS). Run this against a real ` +
-          `login session, or use the "dconf" backend, which fails loudly in the same situation instead ` +
-          `of silently no-op'ing.`
-        : `Check that the ${this.backend} CLI is actually installed and reachable, and that "${this.key}" ` +
-          `is spelled the way this backend expects.`)
+      adviceFor(backend, subject)
     );
   }
 }
+
+/**
+ * Everything the shared `observe`/`desired`/`apply`/`unapply` logic below
+ * needs from one case of {@link SettingProps}, built once per call by
+ * {@link planFor}'s `Match.tagsExhaustive`. Factoring this out is what keeps
+ * `observe`/`apply` themselves case-agnostic — written once, not once per
+ * case — while every case-specific detail (which backend, which identity
+ * shape, which fields the state case carries) stays behind a closure built
+ * in exactly one place. Mirrors `@machine-run/runtimes`' `Tool.ts`'s
+ * `ToolPlan`.
+ */
+interface SettingPlan {
+  readonly address: string;
+  readonly desiredState: SettingState;
+  readonly withValue: (value: string) => SettingState;
+  readonly read: (exec: Exec) => Effect.Effect<string | undefined, SettingsError>;
+  readonly write: (value: string, exec: Exec) => Effect.Effect<void, SettingsError>;
+  readonly reset: (exec: Exec) => Effect.Effect<void, SettingsError>;
+}
+
+const planFor = (props: SettingProps): SettingPlan =>
+  Match.value(props).pipe(
+    Match.tagsExhaustive({
+      Gsettings: (p): SettingPlan => {
+        const identity: GsettingsIdentity = { _tag: "Gsettings", schema: p.schema, key: p.key };
+        return {
+          address: `gsettings:${p.schema}:${p.key}`,
+          desiredState: { variant: "Gsettings", schema: p.schema, key: p.key, value: p.value },
+          withValue: (value) => ({ variant: "Gsettings", schema: p.schema, key: p.key, value }),
+          read: (exec) => settingsBackends.gsettings.read(identity, exec),
+          write: (value, exec) => settingsBackends.gsettings.write(identity, value, exec),
+          reset: (exec) => settingsBackends.gsettings.reset(identity, exec),
+        };
+      },
+      GsettingsRelocatable: (p): SettingPlan => {
+        const identity: GsettingsRelocatableIdentity = {
+          _tag: "GsettingsRelocatable",
+          schema: p.schema,
+          path: p.path,
+          key: p.key,
+        };
+        return {
+          address: `gsettings:${p.schema}:${p.path}:${p.key}`,
+          desiredState: {
+            variant: "GsettingsRelocatable",
+            schema: p.schema,
+            path: p.path,
+            key: p.key,
+            value: p.value,
+          },
+          withValue: (value) => ({
+            variant: "GsettingsRelocatable",
+            schema: p.schema,
+            path: p.path,
+            key: p.key,
+            value,
+          }),
+          read: (exec) => settingsBackends.gsettings.read(identity, exec),
+          write: (value, exec) => settingsBackends.gsettings.write(identity, value, exec),
+          reset: (exec) => settingsBackends.gsettings.reset(identity, exec),
+        };
+      },
+      Dconf: (p): SettingPlan => {
+        const identity: DconfIdentity = { path: p.path };
+        return {
+          address: `dconf:${p.path}`,
+          desiredState: { variant: "Dconf", path: p.path, value: p.value },
+          withValue: (value) => ({ variant: "Dconf", path: p.path, value }),
+          read: (exec) => settingsBackends.dconf.read(identity, exec),
+          write: (value, exec) => settingsBackends.dconf.write(identity, value, exec),
+          reset: (exec) => settingsBackends.dconf.reset(identity, exec),
+        };
+      },
+    }),
+  );
 
 /**
  * The provider body, exported separately from `SettingProvider` so a test
@@ -173,42 +356,36 @@ export const makeSettingReconciler: Effect.Effect<
   // address is the key itself: two `System.Setting`s that happen to name the
   // same key still serialise against each other, but two different keys
   // (even under the same schema) reconcile in parallel.
-  address: (props) => `${props.backend}:${props.key}`,
+  address: (props) => planFor(props).address,
 
-  observe: (props, ctx) =>
-    settingsBackend(props.backend)
-      .read(props.key, ctx.exec)
-      .pipe(
-        Effect.map((value) =>
-          value === undefined ? undefined : { backend: props.backend, key: props.key, value },
-        ),
-      ),
+  observe: (props, ctx) => {
+    const plan = planFor(props);
+    return plan
+      .read(ctx.exec)
+      .pipe(Effect.map((value) => (value === undefined ? undefined : plan.withValue(value))));
+  },
 
-  desired: (props) =>
-    Effect.succeed({ backend: props.backend, key: props.key, value: props.value }),
+  desired: (props) => Effect.succeed(planFor(props).desiredState),
 
   matches: (observed, desired) =>
-    observed.backend === desired.backend &&
+    observed.variant === desired.variant &&
+    observed.schema === desired.schema &&
+    observed.path === desired.path &&
     observed.key === desired.key &&
     observed.value === desired.value,
 
   apply: ({ props, desired }, ctx) =>
     Effect.gen(function* () {
-      const backend = settingsBackend(props.backend);
-      yield* backend.write(props.key, props.value, ctx.exec);
+      const plan = planFor(props);
+      yield* plan.write(props.value, ctx.exec);
 
       // Re-read rather than trust the write's exit code — see
       // `SettingWriteNotObserved`'s doc comment for the container-verified
       // silent-failure mode this catches.
-      const confirmed = yield* backend.read(props.key, ctx.exec);
+      const confirmed = yield* plan.read(ctx.exec);
       if (confirmed !== props.value) {
         return yield* Effect.fail(
-          new SettingWriteNotObserved({
-            backend: props.backend,
-            key: props.key,
-            expected: props.value,
-            actual: confirmed,
-          }),
+          new SettingWriteNotObserved({ props, expected: props.value, actual: confirmed }),
         );
       }
 
@@ -233,18 +410,12 @@ export const makeSettingReconciler: Effect.Effect<
    */
   unapply: ({ props, recorded }, ctx) =>
     Effect.gen(function* () {
-      const backend = settingsBackend(props.backend);
-      yield* backend.reset(props.key, ctx.exec);
+      const plan = planFor(props);
+      yield* plan.reset(ctx.exec);
 
-      const confirmed = yield* backend.read(props.key, ctx.exec);
+      const confirmed = yield* plan.read(ctx.exec);
       if (confirmed === recorded.value) {
-        return yield* Effect.fail(
-          new SettingResetNotObserved({
-            backend: props.backend,
-            key: props.key,
-            unwanted: recorded.value,
-          }),
-        );
+        return yield* Effect.fail(new SettingResetNotObserved({ props, unwanted: recorded.value }));
       }
     }),
 });

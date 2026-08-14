@@ -4,11 +4,7 @@ import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import {
-  makeRuntimeToolReconciler,
-  RuntimeToolMismatch,
-  type RuntimeToolProps,
-} from "../src/Tool.ts";
+import { makeRuntimeToolReconciler, type RuntimeToolProps } from "../src/Tool.ts";
 
 const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
 
@@ -41,8 +37,10 @@ const applyCtx = (exec: Exec): ApplyContext => ({
 const miseEntry = (version: string, installed: boolean, active: boolean) =>
   JSON.stringify([{ version, installed, active }]);
 
-const props = (overrides: Partial<RuntimeToolProps> = {}): RuntimeToolProps => ({
-  manager: "mise",
+const props = (
+  overrides: Partial<Extract<RuntimeToolProps, { _tag: "Mise" }>> = {},
+): RuntimeToolProps => ({
+  _tag: "Mise",
   tool: "node",
   version: "22",
   ...overrides,
@@ -66,7 +64,7 @@ it.effect(
         observeCtx(queuedExec([miseEntry("22.11.0", true, true)])),
       );
       expect(observed).toEqual({
-        manager: "mise",
+        manager: "Mise",
         tool: "node",
         scope: { _tag: "Global" },
         version: "22.11.0",
@@ -86,7 +84,7 @@ it.effect(
         observeCtx(queuedExec([miseEntry("22.11.0", true, false)])),
       );
       expect(observed).toEqual({
-        manager: "mise",
+        manager: "Mise",
         tool: "node",
         scope: { _tag: "Global" },
         version: "22.11.0",
@@ -105,7 +103,7 @@ it.effect(
       expect(
         reconciler.matches(
           {
-            manager: "mise",
+            manager: "Mise",
             tool: "node",
             scope: { _tag: "Global" },
             version: "22.11.0",
@@ -118,7 +116,7 @@ it.effect(
       expect(
         reconciler.matches(
           {
-            manager: "mise",
+            manager: "Mise",
             tool: "node",
             scope: { _tag: "Global" },
             version: "20.11.0",
@@ -140,7 +138,7 @@ it.effect(
       expect(
         reconciler.matches(
           {
-            manager: "mise",
+            manager: "Mise",
             tool: "node",
             scope: { _tag: "Global" },
             version: "22.11.0",
@@ -164,7 +162,7 @@ it.effect(
       expect(
         reconciler.matches(
           {
-            manager: "mise",
+            manager: "Mise",
             tool: "node",
             scope: { _tag: "Global" },
             version: "22.11.0",
@@ -173,6 +171,30 @@ it.effect(
           },
           desired,
         ),
+      ).toBe(false);
+    }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "matches: a different manager, or a different tool on the same manager, never matches",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const desired = yield* reconciler.desired(props({ tool: "node", version: "22" }));
+      const observedBase = {
+        scope: { _tag: "Global" as const },
+        version: "22.11.0",
+        installed: true,
+        active: true,
+      };
+      // Same manager, different tool.
+      expect(
+        reconciler.matches({ manager: "Mise", tool: "python", ...observedBase }, desired),
+      ).toBe(false);
+      // Same tool name, different manager (asdf spells node "nodejs", so this
+      // also covers the case of a same-named tool under the wrong manager).
+      expect(
+        reconciler.matches({ manager: "Asdf", tool: "node", ...observedBase }, desired),
       ).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
@@ -193,7 +215,7 @@ it.effect("apply: installs and activates when nothing was observed", () =>
     );
 
     expect(result).toEqual({
-      manager: "mise",
+      manager: "Mise",
       tool: "node",
       scope: { _tag: "Global" },
       version: "22.11.0",
@@ -215,7 +237,7 @@ it.effect("apply: an already-installed version is only activated, never reinstal
     const p = props({ version: "22" });
     const desired = yield* reconciler.desired(p);
     const observed = {
-      manager: "mise" as const,
+      manager: "Mise" as const,
       tool: "node",
       scope: { _tag: "Global" as const },
       version: "22.11.0",
@@ -231,6 +253,37 @@ it.effect("apply: an already-installed version is only activated, never reinstal
       "mise ls node --json",
     ]);
   }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "apply: an installed version under a different tool/manager is not mistaken for the same one",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeRuntimeToolReconciler;
+      const calls: Array<{ command: string; cwd: string | undefined }> = [];
+      const p = props({ tool: "node", version: "22" });
+      const desired = yield* reconciler.desired(p);
+      // Same manager, satisfies the version request, but names a different
+      // tool — `sameIdentity` must reject this, or `apply` would skip
+      // `install` for a tool it never actually installed.
+      const observed = {
+        manager: "Mise" as const,
+        tool: "python",
+        scope: { _tag: "Global" as const },
+        version: "22.11.0",
+        installed: true,
+        active: true,
+      };
+
+      const exec = capturingExec(miseEntry("22.11.0", true, true), calls);
+      yield* reconciler.apply({ props: p, observed, desired }, applyCtx(exec));
+
+      expect(calls.map((c) => c.command)).toEqual([
+        "mise install node@22",
+        "mise use --global --pin -y node@22",
+        "mise ls node --json",
+      ]);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("apply: `active: false` installs but never calls activate", () =>
@@ -263,15 +316,35 @@ it.effect("address: is the manager's shared config file, not the manager id alon
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("rustup/uv reject a `tool` other than the one they fix", () =>
+it.effect("rustup has no `tool` field to get wrong, and a `channel` request works end to end", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeRuntimeToolReconciler;
-    const error = yield* reconciler
-      .observe(
-        props({ manager: "rustup", tool: "node", version: "1.75.0" }),
-        observeCtx(queuedExec([""])),
-      )
-      .pipe(Effect.flip);
-    expect(error).toBeInstanceOf(RuntimeToolMismatch);
+    // Real captured `rustup show` shape (see `test/backends.test.ts`), abridged
+    // to just enough to satisfy a "stable" request.
+    const rustupShow = `Default host: aarch64-apple-darwin
+rustup home:  /Users/a/.rustup
+
+installed toolchains
+--------------------
+stable-aarch64-apple-darwin (active, default)
+
+active toolchain
+----------------
+name: stable-aarch64-apple-darwin
+active because: it's the default toolchain
+installed targets:
+  aarch64-apple-darwin
+`;
+    const observed = yield* reconciler.observe(
+      { _tag: "Rustup", channel: "stable" },
+      observeCtx(queuedExec([rustupShow])),
+    );
+    expect(observed).toEqual({
+      manager: "Rustup",
+      scope: { _tag: "Global" },
+      version: "stable",
+      installed: true,
+      active: true,
+    });
   }).pipe(Effect.provide(layer)),
 );

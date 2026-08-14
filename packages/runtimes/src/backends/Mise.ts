@@ -2,7 +2,12 @@ import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { BackendParseError, type RuntimeBackend, type RuntimeScope } from "../Backend.ts";
+import {
+  BackendParseError,
+  type MiseToolIdentity,
+  type RuntimeBackend,
+  type RuntimeScope,
+} from "../Backend.ts";
 
 /**
  * `mise ls <tool> --json` prints an array — one entry per installed version
@@ -63,7 +68,7 @@ export const makeMiseBackend = (deps: {
    * and this factory just closes over the already-resolved value.
    */
   globalConfigOverride: string | undefined;
-}): RuntimeBackend => {
+}): RuntimeBackend<MiseToolIdentity> => {
   const { home, path, globalConfigOverride } = deps;
 
   const globalConfigPath =
@@ -72,7 +77,7 @@ export const makeMiseBackend = (deps: {
   const configPath = (scope: RuntimeScope): string =>
     scope._tag === "Global" ? globalConfigPath : path.join(scope.path, "mise.toml");
 
-  const observe: RuntimeBackend["observe"] = (tool, scope, exec) =>
+  const observe: RuntimeBackend<MiseToolIdentity>["observe"] = ({ tool }, scope, exec) =>
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
       const result = yield* exec({
@@ -90,14 +95,18 @@ export const makeMiseBackend = (deps: {
       };
     });
 
-  const install: RuntimeBackend["install"] = (tool, version, exec) =>
+  const install: RuntimeBackend<MiseToolIdentity>["install"] = ({ tool, version }, exec) =>
     exec({
       command: Sh.sh("mise", "install", `${tool}@${version}`),
       shell: true,
       timeout: "15 minutes",
     }).pipe(Effect.asVoid);
 
-  const activate: RuntimeBackend["activate"] = (tool, version, scope, exec) => {
+  const activate: RuntimeBackend<MiseToolIdentity>["activate"] = (
+    { tool, version },
+    scope,
+    exec,
+  ) => {
     const spec = `${tool}@${version}`;
     // `--pin` records the exact resolved version in the config file rather
     // than the fuzzy request, so a later `observe` reads back a concrete
@@ -118,5 +127,5 @@ export const makeMiseBackend = (deps: {
         }).pipe(Effect.asVoid);
   };
 
-  return { id: "mise", configPath, observe, install, activate };
+  return { id: "Mise", configPath, observe, install, activate };
 };

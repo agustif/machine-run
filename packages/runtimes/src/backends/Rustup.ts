@@ -1,7 +1,12 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
-import { BackendParseError, type RuntimeBackend, type RuntimeObservation } from "../Backend.ts";
+import {
+  BackendParseError,
+  type RuntimeBackend,
+  type RuntimeObservation,
+  type RustupToolIdentity,
+} from "../Backend.ts";
 
 /**
  * `rustup show` in one call gives everything {@link RuntimeObservation}
@@ -85,7 +90,7 @@ export const makeRustupBackend = (deps: {
    * synchronous.
    */
   rustupHomeOverride: string | undefined;
-}): RuntimeBackend => {
+}): RuntimeBackend<RustupToolIdentity> => {
   const { home, path, rustupHomeOverride } = deps;
 
   const rustupHome = rustupHomeOverride ?? path.join(home, ".rustup");
@@ -98,7 +103,7 @@ export const makeRustupBackend = (deps: {
   // targeting rustup, at any scope, serialises on the same address.
   const settingsPath = path.join(rustupHome, "settings.toml");
 
-  const observe: RuntimeBackend["observe"] = (_tool, scope, exec) =>
+  const observe: RuntimeBackend<RustupToolIdentity>["observe"] = (_identity, scope, exec) =>
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
       const result = yield* exec({ command: "rustup show", cwd });
@@ -114,38 +119,38 @@ export const makeRustupBackend = (deps: {
       return parsed satisfies RuntimeObservation;
     });
 
-  const install: RuntimeBackend["install"] = (_tool, version, exec) =>
+  const install: RuntimeBackend<RustupToolIdentity>["install"] = ({ channel }, exec) =>
     // No `--profile` flag: rustup applies whatever profile this machine is
     // already configured with (`minimal`/`default`/`complete`, set once via
     // `rustup-init` or `rustup set profile`) rather than machine-run
     // inventing an opinion about which components a recipe wants.
     exec({
-      command: Sh.sh("rustup", "toolchain", "install", version),
+      command: Sh.sh("rustup", "toolchain", "install", channel),
       shell: true,
       timeout: "15 minutes",
     }).pipe(Effect.asVoid);
 
-  const activate: RuntimeBackend["activate"] = (_tool, version, scope, exec) =>
+  const activate: RuntimeBackend<RustupToolIdentity>["activate"] = ({ channel }, scope, exec) =>
     scope._tag === "Global"
       ? exec({
-          command: Sh.sh("rustup", "default", version),
+          command: Sh.sh("rustup", "default", channel),
           shell: true,
           timeout: "15 minutes",
         }).pipe(Effect.asVoid)
       : exec({
-          command: Sh.sh("rustup", "override", "set", version),
+          command: Sh.sh("rustup", "override", "set", channel),
           shell: true,
           cwd: scope.path,
           timeout: "15 minutes",
         }).pipe(Effect.asVoid);
 
   return {
-    id: "rustup",
+    id: "Rustup",
     // rustup has no "tool" dimension — it manages exactly one thing, the
-    // Rust toolchain. `Tool.ts` checks every prop's `tool` against this and
-    // fails loudly on a mismatch, rather than silently ignoring whatever a
-    // recipe passed.
-    fixedTool: "rust",
+    // Rust toolchain. `RustupToolIdentity` (`Backend.ts`) has no `tool`
+    // field at all, so there is nothing here to validate against a fixed
+    // name any more: the illegal combination `Tool.ts` used to check for at
+    // runtime (`RuntimeToolMismatch`) is now unrepresentable in the type.
     configPath: () => settingsPath,
     observe,
     install,

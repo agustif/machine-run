@@ -36,7 +36,7 @@ const capturingExec =
   };
 
 // ---------------------------------------------------------------------------
-// Gsettings.ts
+// Gsettings.ts — ordinary (non-relocatable) schema
 // ---------------------------------------------------------------------------
 
 it.effect("gsettings backend reads a key's live value verbatim, GVariant quoting included", () =>
@@ -44,7 +44,7 @@ it.effect("gsettings backend reads a key's live value verbatim, GVariant quoting
     // `gsettings get org.gnome.desktop.interface clock-format` against a
     // container with `gsettings-desktop-schemas` installed.
     const value = yield* GsettingsBackend.read(
-      "org.gnome.desktop.interface:clock-format",
+      { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
       fakeExec("'24h'\n"),
     );
     expect(value).toBe("'24h'");
@@ -56,7 +56,7 @@ it.effect("gsettings backend treats a non-existent key as absent, not a failure"
     // `gsettings get org.gnome.desktop.interface not-a-real-key` really
     // exits 1 with "No such key ?not-a-real-key?" on stderr.
     const value = yield* GsettingsBackend.read(
-      "org.gnome.desktop.interface:not-a-real-key",
+      { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "not-a-real-key" },
       failingExec("No such key ?not-a-real-key?\n"),
     );
     expect(value).toBeUndefined();
@@ -68,7 +68,7 @@ it.effect("gsettings backend treats a non-existent schema as absent, not a failu
     // `gsettings get org.gnome.does.not.exist somekey` really exits 1 with
     // "No such schema ?org.gnome.does.not.exist?" on stderr.
     const value = yield* GsettingsBackend.read(
-      "org.gnome.does.not.exist:somekey",
+      { _tag: "Gsettings", schema: "org.gnome.does.not.exist", key: "somekey" },
       failingExec("No such schema ?org.gnome.does.not.exist?\n"),
     );
     expect(value).toBeUndefined();
@@ -79,7 +79,7 @@ it.effect("gsettings backend write shells out to `gsettings set <schema> <key> <
   Effect.gen(function* () {
     const calls: string[] = [];
     yield* GsettingsBackend.write(
-      "org.gnome.desktop.interface:clock-format",
+      { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
       "'24h'",
       capturingExec("", calls),
     );
@@ -89,14 +89,33 @@ it.effect("gsettings backend write shells out to `gsettings set <schema> <key> <
   }),
 );
 
-it.effect("gsettings backend rejects a key with no schema:key shape before running anything", () =>
+it.effect("gsettings backend rejects a malformed schema before running anything", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const result = yield* Effect.flip(
-      GsettingsBackend.read("not-a-valid-key", capturingExec("", calls)),
+      GsettingsBackend.read(
+        { _tag: "Gsettings", schema: "not-a-valid-schema", key: "clock-format" },
+        capturingExec("", calls),
+      ),
     );
     expect(result._tag).toBe("SettingKeyInvalid");
+    expect(result).toMatchObject({ backend: "gsettings", field: "schema" });
     // Rejected before any command ran.
+    expect(calls).toEqual([]);
+  }),
+);
+
+it.effect("gsettings backend rejects a malformed key name before running anything", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const result = yield* Effect.flip(
+      GsettingsBackend.read(
+        { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "not:a:valid:key" },
+        capturingExec("", calls),
+      ),
+    );
+    expect(result._tag).toBe("SettingKeyInvalid");
+    expect(result).toMatchObject({ backend: "gsettings", field: "key" });
     expect(calls).toEqual([]);
   }),
 );
@@ -105,22 +124,104 @@ it.effect("gsettings backend reset shells out to `gsettings reset <schema> <key>
   Effect.gen(function* () {
     const calls: string[] = [];
     yield* GsettingsBackend.reset(
-      "org.gnome.desktop.interface:clock-format",
+      { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
       capturingExec("", calls),
     );
     expect(calls).toEqual(["gsettings reset org.gnome.desktop.interface clock-format"]);
   }),
 );
 
+it.effect("gsettings backend reset rejects a malformed schema before running anything", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const result = yield* Effect.flip(
+      GsettingsBackend.reset(
+        { _tag: "Gsettings", schema: "not-a-valid-schema", key: "clock-format" },
+        capturingExec("", calls),
+      ),
+    );
+    expect(result._tag).toBe("SettingKeyInvalid");
+    expect(calls).toEqual([]);
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Gsettings.ts — relocatable schema
+// ---------------------------------------------------------------------------
+
 it.effect(
-  "gsettings backend reset rejects a key with no schema:key shape before running anything",
+  "gsettings backend addresses a relocatable schema as one combined `schema:path` argument",
+  () =>
+    Effect.gen(function* () {
+      // Verified directly against a real relocatable schema in an
+      // `ubuntu:24.04` container: `gsettings get SCHEMA:PATH KEY` — see
+      // `Backend.ts`'s `GsettingsRelocatableIdentity` doc comment.
+      const value = yield* GsettingsBackend.read(
+        {
+          _tag: "GsettingsRelocatable",
+          schema: "org.example.relocatable",
+          path: "/org/example/testpath1/",
+          key: "greeting",
+        },
+        fakeExec("'hello'\n"),
+      );
+      expect(value).toBe("'hello'");
+    }),
+);
+
+it.effect("gsettings backend write/reset also address a relocatable schema as `schema:path`", () =>
+  Effect.gen(function* () {
+    const identity = {
+      _tag: "GsettingsRelocatable" as const,
+      schema: "org.example.relocatable",
+      path: "/org/example/testpath1/",
+      key: "greeting",
+    };
+    const calls: string[] = [];
+    yield* GsettingsBackend.write(identity, "'hi'", capturingExec("", calls));
+    yield* GsettingsBackend.reset(identity, capturingExec("", calls));
+    expect(calls).toEqual([
+      "gsettings set org.example.relocatable:/org/example/testpath1/ greeting ''\\''hi'\\'''",
+      "gsettings reset org.example.relocatable:/org/example/testpath1/ greeting",
+    ]);
+  }),
+);
+
+it.effect(
+  "gsettings backend rejects a relocatable path missing its leading or trailing slash",
   () =>
     Effect.gen(function* () {
       const calls: string[] = [];
-      const result = yield* Effect.flip(
-        GsettingsBackend.reset("not-a-valid-key", capturingExec("", calls)),
+      // Real container errors: "Path must begin with a slash (/)" /
+      // "Path must end with a slash (/)" — both client-side, exit 1, before
+      // ever reaching D-Bus.
+      const missingLeading = yield* Effect.flip(
+        GsettingsBackend.read(
+          {
+            _tag: "GsettingsRelocatable",
+            schema: "org.example.relocatable",
+            path: "org/example/testpath1/",
+            key: "greeting",
+          },
+          capturingExec("", calls),
+        ),
       );
-      expect(result._tag).toBe("SettingKeyInvalid");
+      expect(missingLeading).toMatchObject({ _tag: "SettingKeyInvalid", field: "path" });
+
+      const missingTrailing = yield* Effect.flip(
+        GsettingsBackend.read(
+          {
+            _tag: "GsettingsRelocatable",
+            schema: "org.example.relocatable",
+            path: "/org/example/testpath1",
+            key: "greeting",
+          },
+          capturingExec("", calls),
+        ),
+      );
+      expect(missingTrailing).toMatchObject({ _tag: "SettingKeyInvalid", field: "path" });
+
+      // Neither ran a command.
       expect(calls).toEqual([]);
     }),
 );
@@ -133,7 +234,7 @@ it.effect("dconf backend reads a key's live value verbatim, GVariant quoting inc
   Effect.gen(function* () {
     // `dconf read /org/gnome/desktop/interface/clock-format`.
     const value = yield* DconfBackend.read(
-      "/org/gnome/desktop/interface/clock-format",
+      { path: "/org/gnome/desktop/interface/clock-format" },
       fakeExec("'24h'\n"),
     );
     expect(value).toBe("'24h'");
@@ -146,13 +247,13 @@ it.effect(
     Effect.gen(function* () {
       // `dconf read /test/myuint` after `dconf reset /test/myuint`: genuinely
       // empty stdout, exit 0 — nothing was ever written here.
-      const unset = yield* DconfBackend.read("/test/myuint", fakeExec(""));
+      const unset = yield* DconfBackend.read({ path: "/test/myuint" }, fakeExec(""));
       expect(unset).toBeUndefined();
 
       // `dconf write /test/mypath2 '""'` then `dconf read /test/mypath2`:
       // prints the two characters `''` — an actual empty-string *value*, not
       // an absent key.
-      const empty = yield* DconfBackend.read("/test/mypath2", fakeExec("''\n"));
+      const empty = yield* DconfBackend.read({ path: "/test/mypath2" }, fakeExec("''\n"));
       expect(empty).toBe("''");
     }),
 );
@@ -161,7 +262,7 @@ it.effect("dconf backend reads an array value's canonical GVariant text", () =>
   Effect.gen(function* () {
     // `dconf write /test/mypath '["a", "b"]'` then `dconf read /test/mypath`
     // prints back the canonical single-quoted, space-after-comma spelling.
-    const value = yield* DconfBackend.read("/test/mypath", fakeExec("['a', 'b']\n"));
+    const value = yield* DconfBackend.read({ path: "/test/mypath" }, fakeExec("['a', 'b']\n"));
     expect(value).toBe("['a', 'b']");
   }),
 );
@@ -169,7 +270,7 @@ it.effect("dconf backend reads an array value's canonical GVariant text", () =>
 it.effect("dconf backend write shells out to `dconf write <path> <value>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* DconfBackend.write("/test/mypath", "['a', 'b']", capturingExec("", calls));
+    yield* DconfBackend.write({ path: "/test/mypath" }, "['a', 'b']", capturingExec("", calls));
     expect(calls).toEqual(["dconf write /test/mypath '['\\''a'\\'', '\\''b'\\'']'"]);
   }),
 );
@@ -177,23 +278,26 @@ it.effect("dconf backend write shells out to `dconf write <path> <value>`", () =
 it.effect("dconf backend reset shells out to `dconf reset <path>`", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
-    yield* DconfBackend.reset("/test/mypath", capturingExec("", calls));
+    yield* DconfBackend.reset({ path: "/test/mypath" }, capturingExec("", calls));
     expect(calls).toEqual(["dconf reset /test/mypath"]);
   }),
 );
 
-it.effect("dconf backend rejects a key that isn't an absolute, non-trailing-slash path", () =>
+it.effect("dconf backend rejects a path that isn't absolute, or that has a trailing slash", () =>
   Effect.gen(function* () {
     const calls: string[] = [];
     const relative = yield* Effect.flip(
-      DconfBackend.read("org/gnome/desktop/interface/clock-format", capturingExec("", calls)),
+      DconfBackend.read(
+        { path: "org/gnome/desktop/interface/clock-format" },
+        capturingExec("", calls),
+      ),
     );
-    expect(relative._tag).toBe("SettingKeyInvalid");
+    expect(relative).toMatchObject({ _tag: "SettingKeyInvalid", field: "path" });
 
     const trailingSlash = yield* Effect.flip(
-      DconfBackend.read("/org/gnome/desktop/interface/", capturingExec("", calls)),
+      DconfBackend.read({ path: "/org/gnome/desktop/interface/" }, capturingExec("", calls)),
     );
-    expect(trailingSlash._tag).toBe("SettingKeyInvalid");
+    expect(trailingSlash).toMatchObject({ _tag: "SettingKeyInvalid", field: "path" });
 
     // Neither ran a command.
     expect(calls).toEqual([]);
