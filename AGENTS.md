@@ -82,6 +82,44 @@ So:
 
 ---
 
+## 0c. Discover the real interface before writing code against it
+
+Do not write a command, flag, path, or output shape from memory or from
+documentation alone. Run the tool and look. A container is cheap and this repo
+has already reached Linux, Windows, Arch, Fedora and a real systemd PID 1 that
+way; a Mac is sitting right here for anything macOS.
+
+This is not pedantry — it is the single highest-yield habit in this codebase's
+history. Everything below was believed on documentation and turned out false
+when someone ran it:
+
+- `winget list` truncates an over-long cell with an ellipsis that eats the
+  column padding, so splitting on runs of spaces merged Id and Version on 9 of
+  64 rows.
+- `gsettings set` exits 0 while doing nothing when there is no session D-Bus.
+- `asdf current` prints its answer and exits non-zero.
+- `systemctl --user is-enabled` returns exit 1 for both "disabled" and a bus
+  failure, so the exit code alone cannot tell them apart.
+- `security find-generic-password -w` returns the ASCII-hex encoding of the
+  bytes, silently, whenever the secret contains a non-printable byte — which is
+  every SSH key and every PEM certificate.
+- `op`'s unauthenticated error says "No accounts configured"; the classifier
+  looked for "authentication".
+- `git verify-commit` accepts the right key under an entirely unrelated
+  principal, so `allowed_signers` principals are metadata, not a binding.
+
+Each of those was a bug shipped on a plausible guess. None survived contact with
+the real tool.
+
+**A gap you cannot close is not a gap you get to shrug at.** If the real
+interface reveals something this repo cannot yet express, that is a finding to
+raise, not a paragraph to write explaining why nothing can be done. `go install
+pkg@latest` failing on a toolchain floor is not a Go quirk to document — it is
+`System.Package` having no way to pin a version, which makes every install
+non-reproducible. Say what is actually missing.
+
+---
+
 ## 1. Alchemy is a dependency, not a fork
 
 Do not vendor `alchemy` or `alchemy-test`. A vendored copy puts a second set of
