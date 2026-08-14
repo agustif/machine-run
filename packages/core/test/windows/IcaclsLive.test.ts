@@ -4,6 +4,7 @@ import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import { WELL_KNOWN_PRINCIPAL_ALIASES } from "../../src/windows/FilePermissions.ts";
 import { parseIcacls } from "../../src/windows/Icacls.ts";
 
 /** Reads an env-configured fixture path, or `Option.none()` when unset — never `process.env` directly. */
@@ -50,5 +51,43 @@ it.skipIf(Option.isNone(listingFile) || Option.isNone(listingPath))(
     expect(result.aces.every((ace) => ace.rights.length > 0 || ace.inheritanceFlags.length > 0)).toBe(
       true,
     );
+  },
+);
+
+const sidRoundTripFile = envPath("MACHINE_RUN_ICACLS_SID_ROUNDTRIP");
+const sidRoundTripPath = envPath("MACHINE_RUN_SID_PATH");
+
+/**
+ * The one assumption `WELL_KNOWN_PRINCIPAL_ALIASES` rests on, and the only one
+ * that cannot be checked anywhere but Windows.
+ *
+ * Our ACL *writes* use numeric SID strings (`/grant *S-1-3-4:...`) because that
+ * is what `icacls` accepts; a *read* prints friendly display names. If a SID does
+ * not come back as the name the alias table expects, every comparison silently
+ * fails to match and `matches` reports drift forever — the parser works, the
+ * plumbing works, and the resource never converges. Only `BUILTIN\Users` was
+ * independently confirmed before this, by two captured fixtures.
+ *
+ * The CI step grants with each SID form we emit, then reads the listing back.
+ * This asserts that every principal in that listing is one the alias table knows
+ * — which is the property `aclSatisfiesMode` actually depends on, rather than
+ * asserting a specific spelling that could vary by locale.
+ */
+it.skipIf(Option.isNone(sidRoundTripFile) || Option.isNone(sidRoundTripPath))(
+  "every principal our own SID grants read back as is one the alias table knows",
+  () => {
+    const stdout = Fs.readFileSync(Option.getOrThrow(sidRoundTripFile), "utf8");
+    const listing = Result.getOrThrow(
+      parseIcacls(stdout, Option.getOrThrow(sidRoundTripPath)),
+    );
+
+    const known = new Set(Object.values(WELL_KNOWN_PRINCIPAL_ALIASES).flat());
+    const unrecognised = listing.aces
+      .map((ace) => ace.principal)
+      .filter((principal) => !known.has(principal));
+
+    // Reported with the whole listing, because a bare "unrecognised principal"
+    // failure gives whoever reads it nothing to add to the alias table.
+    expect(unrecognised, `unrecognised principals in:\n${stdout}`).toEqual([]);
   },
 );

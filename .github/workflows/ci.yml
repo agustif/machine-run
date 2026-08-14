@@ -129,6 +129,26 @@ jobs:
           Add-Content -Path $env:GITHUB_ENV -Value "MACHINE_RUN_ICACLS_PATH=$target"
           icacls $target | Tee-Object -FilePath icacls-listing.txt
 
+      # The one assumption `WELL_KNOWN_PRINCIPAL_ALIASES` rests on, and the only
+      # one that cannot be checked off Windows: our ACL *writes* use numeric SID
+      # strings (`/grant *S-1-3-4:...`) because that is what `icacls` accepts,
+      # while a *read* prints friendly display names. If a SID does not come back
+      # as the name we expect, every comparison silently fails to match and
+      # `matches` reports drift forever — the parser works and the whole thing is
+      # still wrong. Only `BUILTIN\Users` was independently confirmed, by two
+      # captured fixtures; this grants with each SID form we emit and captures
+      # what the listing calls it.
+      - name: Capture how our own SID grants read back
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:RUNNER_TEMP "machine-run-sid-roundtrip.txt"
+          Set-Content -Path $target -Value "probe"
+          Add-Content -Path $env:GITHUB_ENV -Value "MACHINE_RUN_SID_PATH=$target"
+          icacls $target /inheritance:r /grant "*S-1-3-4:(R,W)" | Out-Host
+          icacls $target /grant "*S-1-5-32-545:(R)" | Out-Host
+          icacls $target /grant "*S-1-1-0:(R)" | Out-Host
+          icacls $target | Tee-Object -FilePath icacls-sid-roundtrip.txt
+
       # Asserted here rather than uploaded for a human to read later. Uploading
       # was the original design and it was the weaker one twice over: it made
       # this job depend on the account's artifact storage quota (which it then
@@ -159,6 +179,7 @@ jobs:
       - name: Assert the icacls parser against that output
         env:
           MACHINE_RUN_ICACLS_LISTING: icacls-listing.txt
+          MACHINE_RUN_ICACLS_SID_ROUNDTRIP: icacls-sid-roundtrip.txt
         run: npx vitest run packages/core/test/windows/IcaclsLive.test.ts
 
   verify-macos:

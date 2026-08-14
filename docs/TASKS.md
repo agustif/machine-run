@@ -104,11 +104,18 @@ these came out of it. None was tracked anywhere before.
       deciding; the ones below were checked and the reasoning is recorded so it
       does not have to be redone.
 
-      Still open: `Action` (no imperative one-shots), `Namespace` (no
-      multi-machine scoping), and `Artifacts.cached` as a possible replacement for
-      `PackageIndex`'s hand-rolled per-run memoisation — the fit is unclear
-      because `Artifacts` is FQN-scoped while `PackageIndex` shares one cache
-      across every `System.Package` on a manager.
+      Nothing left open. The last two:
+      - `Namespace` — `push("laptop", effect)` nests resource ids under a
+        namespace, which is exactly the multi-machine scoping this list said was
+        missing. It works on our resources unchanged (ambient context at
+        registration, same as `renamedFrom`), so this was a documentation gap, not
+        a code one — now written up in `packages/engine/README.md`.
+      - `Action` — declined. An `Action` is an imperative one-shot: `Run: (input)
+        => Effect`, no observe, no idempotence. `Machine.Exec` covers the same
+        need as a *resource*, gated on `unless`/`creates`, so it converges instead
+        of firing every deploy. For a machine reconciler an unguarded one-shot is
+        an anti-feature — it is the non-convergence this tool exists to prevent —
+        so the absence is the design, not an omission.
 
       Declined, with the reason:
       - `KeyPair` — its state is `{ privateKey: Redacted<string>, publicKey }`.
@@ -124,6 +131,14 @@ these came out of it. None was tracked anywhere before.
       - `Artifacts` for `Machine.Download` — this entry used to claim Download
         "rolls its own fetch-and-hash instead" of using it. Wrong: `Artifacts` is
         a per-FQN key/value cache, not an artifact fetcher.
+      - `Artifacts.cached` for `PackageIndex` — it is FQN-scoped
+        (`scopedArtifacts(fqn)`), one bag per resource instance, and
+        `PackageIndex` exists precisely to share one `list` shell-out across
+        *every* `System.Package` on a manager. Thirty apt packages would each get
+        their own cache and shell out thirty times. `PackageIndex` also already
+        reuses `effect/Cache` rather than a hand-rolled `Map`, for the
+        concurrent-de-duplication reason its own doc comment gives — so this was
+        reuse already, and my earlier note calling it hand-rolled was wrong.
 
 - [ ] **`renamedFrom` is undocumented, and now matters more.** Alchemy's
       `Rename` module lets a recipe rename a resource's logical id without a

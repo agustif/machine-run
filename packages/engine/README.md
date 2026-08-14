@@ -77,6 +77,24 @@ The engine migrates the row instead of planning a create plus a delete.
 `renamedFrom` comes from `alchemy/Rename` and takes a bare id (resolved in the
 ambient namespace) or `{ fqn }` for a fully-qualified one.
 
+## More than one machine in one repo
+
+Resource ids are resolved against an ambient namespace, so two machines in one
+repo do not need two recipes or hand-prefixed ids:
+
+```ts
+yield* Namespace.push("laptop", Effect.gen(function* () {
+  yield* Dotfiles.File("gitconfig", { ... });
+}));
+yield* Namespace.push("desktop", Effect.gen(function* () {
+  yield* Dotfiles.File("gitconfig", { ... });
+}));
+```
+
+Both declare `gitconfig` and neither collides — the state rows are
+`laptop/gitconfig` and `desktop/gitconfig`. From `alchemy/Namespace`; nothing in
+this package needs to know about it.
+
 ## Verification status
 
 Exercised by calling the generated provider's methods directly in tests, and
