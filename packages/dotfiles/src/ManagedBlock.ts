@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import { readIfPresent } from "./readIfPresent.ts";
 
 /** Where a new region is inserted relative to existing file content. */
 export const Position = Schema.Literals(["append", "prepend"]);
@@ -116,6 +117,25 @@ export class ManagedBlockMalformed extends Data.TaggedError("ManagedBlockMalform
 }> {
   override get message() {
     return `The machine-run region "${this.marker}" in "${this.path}" is malformed: ${this.detail}. Fix or delete the marker lines by hand — a region whose markers do not pair up will not be spliced.`;
+  }
+}
+
+/**
+ * Raised when {@link ManagedBlockProps.path} cannot be read at all — a
+ * permissions problem, an I/O error — as distinct from "the file does not
+ * exist yet", which is an ordinary state to converge from (an empty region
+ * to insert into). `ManagedBlock` exists specifically for files this tool
+ * does not own outright — `~/.zshrc`, `~/.gitconfig`, `~/.ssh/config` — so
+ * collapsing an unreadable file into "empty" would make `apply` write just
+ * the marker block over whatever hand-written content is actually there and
+ * simply could not be seen.
+ */
+export class ManagedBlockFileUnreadable extends Data.TaggedError("ManagedBlockFileUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
+  override get message() {
+    return `Could not read "${this.path}": ${this.cause.reason._tag}.`;
   }
 }
 
@@ -235,7 +255,11 @@ export const renderFile = (
 };
 
 export const makeManagedBlockReconciler: Effect.Effect<
-  Reconciler<ManagedBlockProps, ManagedBlockState, PlatformError | ManagedBlockMalformed>,
+  Reconciler<
+    ManagedBlockProps,
+    ManagedBlockState,
+    PlatformError | ManagedBlockMalformed | ManagedBlockFileUnreadable
+  >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
 > = Effect.gen(function* () {
@@ -245,7 +269,7 @@ export const makeManagedBlockReconciler: Effect.Effect<
   const sha256 = yield* makeSha256;
 
   const readFileOrEmpty = (target: string) =>
-    fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""));
+    readIfPresent(fs, target, (cause) => new ManagedBlockFileUnreadable({ path: target, cause }));
 
   return {
     address: (props) => paths.expand(props.path),

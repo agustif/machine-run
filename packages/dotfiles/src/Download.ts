@@ -1,4 +1,4 @@
-import { MachinePaths } from "@machine-run/core";
+import { isNotFound, MachinePaths } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Crypto from "effect/Crypto";
@@ -137,9 +137,6 @@ export type DownloadState = typeof DownloadState.Type;
 export interface Download extends Resource<"Machine.Download", DownloadProps, DownloadState> {}
 
 export const Download = Resource<Download>("Machine.Download");
-
-/** Effect's `PlatformError` carries a normalised reason, so this is a field read. */
-const isNotFound = (error: PlatformError) => error.reason._tag === "NotFound";
 
 export const makeDownloadReconciler: Effect.Effect<
   Reconciler<

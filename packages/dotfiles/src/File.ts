@@ -9,6 +9,7 @@ import * as Path from "effect/Path";
 import * as UndefinedOr from "effect/UndefinedOr";
 import * as Schema from "effect/Schema";
 import { PlatformError } from "effect/PlatformError";
+import { readIfPresent } from "./readIfPresent.ts";
 
 /**
  * A file this tool fully owns: its entire content is generated, and anything
@@ -101,7 +102,17 @@ export const makeFileReconciler: Effect.Effect<
             ),
           );
         if (info === undefined) return undefined;
-        const content = yield* fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""));
+        // `stat` above already confirmed something is here, so a read
+        // failure now is not "the file is empty" — it's a permission change
+        // or an I/O error in the window between the two calls. Only a
+        // genuine not-found (the file vanishing in that same window) is
+        // truly absent; anything else is the same "cannot inspect" failure
+        // `stat` raises above, applied to the read.
+        const content = yield* readIfPresent(
+          fs,
+          target,
+          (cause) => new FilePathUnreadable({ path: target, cause }),
+        );
         return {
           path: target,
           hash: yield* sha256(content),

@@ -51,6 +51,39 @@ it.effect(
       expect(failure).toBeInstanceOf(FilePathUnreadable);
     }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * The sharpest case in MUST_CLEANUP.md 0.4: `stat` above raises
+ * `FilePathUnreadable` for anything that isn't a genuine not-found, but the
+ * read that follows it used to discard that discipline with
+ * `Effect.orElseSucceed(() => "")`. `0o200` (write-only, no read) isolates
+ * exactly that gap — `stat` only needs to resolve the path, which it can do
+ * regardless of the file's own mode bits, so it still succeeds; the read
+ * that follows does not.
+ */
+it.effect(
+  "observe raises a typed error, not empty content, when the file itself cannot be read after stat succeeds",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "write-only");
+
+      yield* fs.writeFileString(target, "content nobody can read right now");
+      yield* fs.chmod(target, 0o200);
+
+      const failure = yield* reconciler
+        .observe({ path: target, content: "x" }, observeCtx)
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+        );
+
+      expect(failure).toBeInstanceOf(FilePathUnreadable);
+    }).pipe(Effect.provide(layer)),
+);
 it.effect(
   "live drift: content hand-edited after being written is detected on the next observe",
   () =>
