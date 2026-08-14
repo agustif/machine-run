@@ -1,0 +1,41 @@
+Fix: `Stack.evalStack` cannot build any stack.
+
+`evalStack` wires `Layer.provideMerge(alchemy(dev), platform)`, providing
+`platform` TO the layer that produces `AlchemyContext`. But `platform` contains
+`Logger.layer([fileLogger("out")])`, and `fileLogger` opens with
+`yield* AlchemyContext` to find the `.alchemy` directory to log into, while
+`AlchemyContextLive` needs the `FileSystem` and `Path` that `platform` supplies.
+
+The result is `Service not found: alchemy/Context` before a single resource is
+examined — reproducible with a stack that has zero resources, `Layer.empty`
+providers and no machine-run import at all.
+
+This gives the logger layer its own context, built from the platform services it
+actually needs, so nothing requiring `AlchemyContext` sits underneath the layer
+that creates it.
+
+Verified: with this applied, `Stack.evalStack` builds and planning proceeds to a
+second, separate upstream defect (`Fiber.runLoop: Not a valid effect: undefined`)
+which this patch does not address.
+
+Delete this patch when upstream fixes the ordering. See docs/V2-PLAN.md.
+
+--- a/node_modules/alchemy/src/Stack.ts
++++ b/node_modules/alchemy/src/Stack.ts
+@@ -304,7 +304,15 @@
+ const platform = Layer.mergeAll(
+   PlatformServices,
+   FetchHttpClient.layer,
+-  Logger.layer([fileLogger("out")], { mergeWithExisting: true }),
++  // `fileLogger` reads `AlchemyContext` to find `.alchemy`, so the logger layer
++  // is given its own context built from the platform services it needs. Without
++  // this, `platform` requires a service that is only created above it, and every
++  // stack dies with `Service not found: alchemy/Context` before any resource is
++  // examined.
++  Layer.provide(
++    Logger.layer([fileLogger("out")], { mergeWithExisting: true }),
++    Layer.provide(AlchemyContextLive, PlatformServices),
++  ),
+   Layer.provide(ProfileLive, PlatformServices),
+   Layer.provide(CredentialsStoreLive, PlatformServices),
+ );

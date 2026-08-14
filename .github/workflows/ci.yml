@@ -34,6 +34,12 @@ jobs:
       # `NodeInspectSymbol` type mismatch that reproduced nowhere else.
       - run: npm ci
 
+      # `npm ci` runs postinstall, which applies patches/. This asserts the
+      # result independently: a patch that stops applying must fail the build
+      # loudly rather than leaving an unpatched dependency in place.
+      - name: patches apply
+        run: npm run patches:check
+
       - name: tsc -b
         run: npm run build
 

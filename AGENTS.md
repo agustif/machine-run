@@ -50,10 +50,24 @@ hand-rolled mutual exclusion, `Clock` over `new Date()`, `Schema` over
 
 ## 1. Alchemy is a dependency, not a fork
 
-Do not vendor or patch `alchemy` or `alchemy-test`. If a resource seems
-untestable, see rule 6 — its reconciler is directly callable. If Alchemy
-genuinely has a bug, report it upstream rather than forking the engine this
-project's correctness is defined against.
+Do not vendor `alchemy` or `alchemy-test`. A vendored copy puts a second set of
+its identity-sensitive `Resource`/`Provider` classes in the tree, and a provider
+registered against one copy is invisible to a recipe importing the other — the
+dual-package hazard that has already cost this repo two debugging sessions.
+
+**Minimal patches are allowed**, in `patches/`, applied by `scripts/apply-patches.sh`
+from `postinstall`. A patch is not a fork: a few lines against a pinned version,
+kept in the open, with a header saying what it fixes and when to delete it. There
+is no auto-sync — a patch either applies to the pinned version or the install
+fails naming the file that moved, so a version bump touching patched code cannot
+pass silently.
+
+The bar for adding one: the bug must be diagnosed to a line, blocking, and
+reported upstream. Patch to unblock, not to diverge. Delete the patch the moment
+upstream ships the fix; if a patch is still applying six months from now, that is
+a signal to reconsider the dependency, not to keep patching it.
+
+If a resource seems untestable, see rule 6 — its reconciler is directly callable.
 
 Alchemy's own `AGENTS.md` (in the published package) carries the reconciler and
 typed-error doctrine. Its AWS/Cloudflare-specific sections — wave/coordinator
