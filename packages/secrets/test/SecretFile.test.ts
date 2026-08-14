@@ -31,12 +31,11 @@ const withEnv = <A, E, R>(vars: Record<string, string>, effect: Effect.Effect<A,
 
 const propsFor = (
   target: string,
-  ref: string,
+  variable: string,
   overrides: Partial<SecretFileProps> = {},
 ): SecretFileProps => ({
   path: target,
-  source: "env",
-  ref,
+  source: { _tag: "Env", variable },
   ...overrides,
 });
 

@@ -8,13 +8,16 @@ import {
   type SecretBackend,
   type SecretError,
   SecretReadFailed,
+  type SecretSource,
 } from "../Backend.ts";
+
+type OnePasswordSource = Extract<SecretSource, { _tag: "OnePassword" }>;
 
 /**
  * 1Password, via the `op` CLI.
  *
- * References are `op://<vault>/<item>/<field>` secret references — the same
- * syntax `op read` and `op inject` accept.
+ * `vault`/`item`/`field` are assembled into an `op://<vault>/<item>/<field>`
+ * secret reference — the same syntax `op read` and `op inject` accept.
  *
  * No output-shaping flags are passed: `op` is not installed on the machine
  * this was written on, and guessing at a CLI's surface is worse than an
@@ -22,12 +25,15 @@ import {
  * `Machine.SecretFile`'s `trailingNewline` decides the file's final byte.
  * See docs/TASKS.md for verifying this against a real `op`.
  */
-export const OnePasswordBackend: SecretBackend = {
-  id: "1password",
-  read: (ref, exec) =>
-    exec({ command: Sh.sh("op", "read", ref), shell: true }).pipe(
+export const OnePasswordBackend: SecretBackend<OnePasswordSource> = {
+  id: "OnePassword",
+  read: (source, exec) =>
+    exec({
+      command: Sh.sh("op", "read", `op://${source.vault}/${source.item}/${source.field}`),
+      shell: true,
+    }).pipe(
       Effect.map((result) => Redacted.make(result.stdout)),
-      Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))),
+      Effect.catchTag("CommandError", (error) => Effect.fail(classify(source, error))),
     ),
 };
 
@@ -39,11 +45,11 @@ export const OnePasswordBackend: SecretBackend = {
  * operator what to do next, with {@link SecretReadFailed} as the honest
  * fallback; control flow should not depend on the finer buckets.
  */
-const classify = (ref: string, cause: CommandError): SecretError => {
+const classify = (source: OnePasswordSource, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();
   if (message.includes("command not found") || message.includes("enoent")) {
     return new SecretCliMissing({
-      backend: "1password",
+      source,
       cli: "op",
       install: 'Install it — e.g. add the "1password-cli" cask to this machine\'s packages.',
       cause,
@@ -55,10 +61,10 @@ const classify = (ref: string, cause: CommandError): SecretError => {
     message.includes("authentication")
   ) {
     return new SecretAuthRequired({
-      backend: "1password",
+      source,
       signInCommand: "op signin",
       cause,
     });
   }
-  return new SecretReadFailed({ backend: "1password", ref, cause });
+  return new SecretReadFailed({ source, cause });
 };

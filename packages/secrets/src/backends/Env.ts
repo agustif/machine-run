@@ -1,11 +1,18 @@
 import * as Config from "effect/Config";
 import * as Effect from "effect/Effect";
-import { type SecretBackend, SecretReadFailed, SecretRefInvalid } from "../Backend.ts";
+import {
+  type SecretBackend,
+  SecretReadFailed,
+  SecretRefInvalid,
+  type SecretSource,
+} from "../Backend.ts";
+
+type EnvSource = Extract<SecretSource, { _tag: "Env" }>;
 
 /**
  * Reads a secret from the reconciler's own environment.
  *
- * References are plain environment variable names, e.g. `GITHUB_TOKEN`.
+ * `variable` is a plain environment variable name, e.g. `GITHUB_TOKEN`.
  *
  * This is the escape hatch that keeps `Machine.SecretFile` usable without any
  * particular vendor's CLI: CI runners, systemd credentials, a cloud instance's
@@ -22,25 +29,24 @@ import { type SecretBackend, SecretReadFailed, SecretRefInvalid } from "../Backe
  * lookup honours whatever `ConfigProvider` is in scope instead of hard-coding
  * one source.
  */
-export const EnvBackend: SecretBackend = {
-  id: "env",
-  read: (ref) =>
+export const EnvBackend: SecretBackend<EnvSource> = {
+  id: "Env",
+  read: (source) =>
     Effect.gen(function* () {
-      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(ref)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(source.variable)) {
         return yield* Effect.fail(
           new SecretRefInvalid({
-            backend: "env",
-            ref,
+            source,
             expected: "an environment variable name, e.g. GITHUB_TOKEN",
           }),
         );
       }
-      return yield* Config.redacted(ref).pipe(
+      return yield* Config.redacted(source.variable).pipe(
         Effect.catch(() =>
           Effect.fail(
             // No command ran, so there is no CommandError to attribute this
             // to; the variable simply is not set for this process.
-            new SecretReadFailed({ backend: "env", ref, cause: undefined }),
+            new SecretReadFailed({ source, cause: undefined }),
           ),
         ),
       );

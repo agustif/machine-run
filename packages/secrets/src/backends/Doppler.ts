@@ -8,13 +8,17 @@ import {
   type SecretBackend,
   type SecretError,
   SecretReadFailed,
-  SecretRefInvalid,
+  type SecretSource,
 } from "../Backend.ts";
+
+type DopplerSource = Extract<SecretSource, { _tag: "Doppler" }>;
 
 /**
  * Doppler, via `doppler secrets get`.
  *
- * References are `<project>/<config>/<SECRET_NAME>`, e.g. `backend/dev/API_KEY`.
+ * `project`/`config`/`name` are Doppler's own three-part addressing —
+ * `<project>/<config>/<SECRET_NAME>`, e.g. `backend/dev/API_KEY` — now
+ * separate fields instead of one string this backend had to split itself.
  *
  * Doppler also supports injecting secrets as environment variables into a
  * command (`doppler run`). That is a useful shape but it is not a store
@@ -24,55 +28,35 @@ import {
  * Verified against `doppler secrets get --help` (v3): `--plain` prints the
  * value with no table formatting, and `--project`/`--config` scope it.
  */
-export const DopplerBackend: SecretBackend = {
-  id: "doppler",
-  read: (ref, exec) =>
-    Effect.gen(function* () {
-      const parsed = parseRef(ref);
-      if (parsed === undefined) {
-        return yield* Effect.fail(
-          new SecretRefInvalid({
-            backend: "doppler",
-            ref,
-            expected: "<project>/<config>/<SECRET_NAME>, e.g. backend/dev/API_KEY",
-          }),
-        );
-      }
-
-      const result = yield* exec({
-        command: Sh.sh(
-          "doppler",
-          "secrets",
-          "get",
-          parsed.name,
-          "--plain",
-          "--project",
-          parsed.project,
-          "--config",
-          parsed.config,
-        ),
-        shell: true,
-      }).pipe(Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))));
-
+export const DopplerBackend: SecretBackend<DopplerSource> = {
+  id: "Doppler",
+  read: (source, exec) =>
+    exec({
+      command: Sh.sh(
+        "doppler",
+        "secrets",
+        "get",
+        source.name,
+        "--plain",
+        "--project",
+        source.project,
+        "--config",
+        source.config,
+      ),
+      shell: true,
+    }).pipe(
       // `--plain` still terminates with a newline that is not part of the
       // stored value.
-      return Redacted.make(result.stdout.replace(/\n$/, ""));
-    }),
+      Effect.map((result) => Redacted.make(result.stdout.replace(/\n$/, ""))),
+      Effect.catchTag("CommandError", (error) => Effect.fail(classify(source, error))),
+    ),
 };
 
-const parseRef = (ref: string): { project: string; config: string; name: string } | undefined => {
-  const parts = ref.split("/");
-  if (parts.length !== 3) return undefined;
-  const [project, config, name] = parts;
-  if (!project || !config || !name) return undefined;
-  return { project, config, name };
-};
-
-const classify = (ref: string, cause: CommandError): SecretError => {
+const classify = (source: DopplerSource, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();
   if (message.includes("command not found") || message.includes("enoent")) {
     return new SecretCliMissing({
-      backend: "doppler",
+      source,
       cli: "doppler",
       install: "Install it — e.g. `brew install dopplerhq/cli/doppler`.",
       cause,
@@ -80,10 +64,10 @@ const classify = (ref: string, cause: CommandError): SecretError => {
   }
   if (message.includes("unauthorized") || message.includes("invalid auth token")) {
     return new SecretAuthRequired({
-      backend: "doppler",
+      source,
       signInCommand: "doppler login",
       cause,
     });
   }
-  return new SecretReadFailed({ backend: "doppler", ref, cause });
+  return new SecretReadFailed({ source, cause });
 };

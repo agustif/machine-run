@@ -7,8 +7,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import { PlatformError } from "effect/PlatformError";
 import * as Redacted from "effect/Redacted";
-import { SecretBackendId, type SecretError } from "./Backend.ts";
-import { secretBackend } from "./Store.ts";
+import { SecretSource, type SecretError } from "./Backend.ts";
+import { readSecret } from "./Store.ts";
 import * as Schema from "effect/Schema";
 
 /** What the file's final byte should be. */
@@ -18,17 +18,13 @@ export type TrailingNewline = typeof TrailingNewline.Type;
 export const SecretFileProps = Schema.Struct({
   /** Path to write the secret to, e.g. `~/.ssh/id_ed25519_personal`. */
   path: Schema.String,
-  /** Which secret store to read from. */
-  source: SecretBackendId,
   /**
-   * The backend-specific reference:
-   * - `1password` — `op://Personal/GitHub SSH Key/private key`
-   * - `doppler` — `backend/dev/API_KEY`
-   * - `keychain` — `service` or `service/account`
-   * - `pass` — `work/github/token`
-   * - `env` — `GITHUB_TOKEN`
+   * Which secret store to read from, and the backend-specific reference
+   * within it — see {@link SecretSource}'s doc comment for each variant's
+   * exact fields, e.g. `{ _tag: "OnePassword", vault: "Personal", item:
+   * "GitHub SSH Key", field: "private key" }`.
    */
-  ref: Schema.String,
+  source: SecretSource,
   /** POSIX file mode. @default 0o600 */
   mode: Schema.optionalKey(Schema.Number),
   /** POSIX mode for directories created to hold it. @default 0o700 */
@@ -51,15 +47,17 @@ export type SecretFileProps = typeof SecretFileProps.Type;
  * bytes, nor a hash of them.
  *
  * Alchemy persists props *and* attributes, and `localState()` is unencrypted
- * JSON, so nothing secret-derived may enter either. `ref` is a prop and *is*
- * persisted, which is correct: a pointer to a secret is not a secret.
+ * JSON, so nothing secret-derived may enter either. `source` is a prop and
+ * *is* persisted — a tagged struct round-trips through JSON the same as any
+ * other prop — which is correct: a pointer to a secret is not a secret.
  *
  * The consequence is worth stating plainly. Rotation in the store is
- * undetectable: changing `ref` is caught because it is a prop, but a new value
- * behind an unchanged `ref` is not. The alternatives are both worse — record a
- * hash of the secret, which is forbidden, or fetch every secret on every plan,
- * which turns a read-only preview into an operation that touches the vault and
- * can prompt for biometrics. Deleting the file forces a re-fetch.
+ * undetectable: changing `source` is caught because it is a prop, but a new
+ * value behind an unchanged `source` is not. The alternatives are both worse
+ * — record a hash of the secret, which is forbidden, or fetch every secret on
+ * every plan, which turns a read-only preview into an operation that touches
+ * the vault and can prompt for biometrics. Deleting the file forces a
+ * re-fetch.
  */
 export const SecretFileState = Schema.Struct({
   path: Schema.String,
@@ -158,7 +156,7 @@ export const makeSecretFileReconciler: Effect.Effect<
           mode: props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
         });
 
-        const secret = yield* secretBackend(props.source).read(props.ref, ctx.exec);
+        const secret = yield* readSecret(props.source, ctx.exec);
         const content = applyNewline(Redacted.value(secret), props.trailingNewline);
 
         // Created with the restrictive mode rather than chmod'd afterwards, so

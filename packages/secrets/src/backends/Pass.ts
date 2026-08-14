@@ -7,12 +7,15 @@ import {
   type SecretBackend,
   type SecretError,
   SecretReadFailed,
+  type SecretSource,
 } from "../Backend.ts";
+
+type PassSource = Extract<SecretSource, { _tag: "Pass" }>;
 
 /**
  * `pass`, the standard Unix password manager (GPG-backed).
  *
- * References are store paths, e.g. `work/github/token`. `pass show <path>`
+ * `path` is a store path, e.g. `work/github/token`. `pass show <path>`
  * prints the entry; by convention the first line is the secret and any
  * following lines are metadata, so only the first line is returned.
  *
@@ -38,24 +41,24 @@ import {
  * session). This is the first backend in the `secrets` seam to read a real
  * secret from a real vault.
  */
-export const PassBackend: SecretBackend = {
-  id: "pass",
-  read: (ref, exec) =>
-    exec({ command: Sh.sh("pass", "show", ref), shell: true }).pipe(
+export const PassBackend: SecretBackend<PassSource> = {
+  id: "Pass",
+  read: (source, exec) =>
+    exec({ command: Sh.sh("pass", "show", source.path), shell: true }).pipe(
       Effect.map((result) => Redacted.make(result.stdout.split("\n")[0] ?? "")),
-      Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))),
+      Effect.catchTag("CommandError", (error) => Effect.fail(classify(source, error))),
     ),
 };
 
-const classify = (ref: string, cause: CommandError): SecretError => {
+const classify = (source: PassSource, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();
   if (message.includes("command not found") || message.includes("enoent")) {
     return new SecretCliMissing({
-      backend: "pass",
+      source,
       cli: "pass",
       install: "Install it — e.g. `brew install pass` or `apt-get install pass`.",
       cause,
     });
   }
-  return new SecretReadFailed({ backend: "pass", ref, cause });
+  return new SecretReadFailed({ source, cause });
 };

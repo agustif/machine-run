@@ -61,7 +61,7 @@ it.effect("snapshots pre-existing, hand-placed content before overwriting it", (
       id: "s",
       fqn: "s",
       instanceId: "s",
-      news: { path: target, source: "env", ref: "SSH_KEY" },
+      news: { path: target, source: { _tag: "Env", variable: "SSH_KEY" } },
       // Nothing recorded yet — the same "true first apply, and the file
       // already has real content" situation that triggers a snapshot for
       // `Machine.File` (see the sibling test in `dotfiles`).

@@ -2,34 +2,40 @@ import { Sh } from "@machine-run/core";
 import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Redacted from "effect/Redacted";
+import * as UndefinedOr from "effect/UndefinedOr";
 import {
   SecretCliMissing,
   type SecretBackend,
   type SecretError,
   SecretReadFailed,
+  type SecretSource,
 } from "../Backend.ts";
+
+type KeychainSource = Extract<SecretSource, { _tag: "Keychain" }>;
 
 /**
  * The macOS login keychain, via `security find-generic-password`.
  *
- * References are `<service>` or `<service>/<account>`, matching the `-s` and
- * `-a` flags. `-w` prints only the password to stdout.
+ * `service` and the optional `account` map directly onto the `-s` and `-a`
+ * flags. `-w` prints only the password to stdout.
  *
  * There is no separate sign-in step to classify: the keychain unlocks with the
  * login session, and a locked one produces an interactive GUI prompt rather
  * than a CLI error.
  */
-export const KeychainBackend: SecretBackend = {
-  id: "keychain",
-  read: (ref, exec) => {
-    const [service, account] = splitRef(ref);
-    return exec({
+export const KeychainBackend: SecretBackend<KeychainSource> = {
+  id: "Keychain",
+  read: (source, exec) =>
+    exec({
       command: Sh.sh(
         "security",
         "find-generic-password",
         "-s",
-        service,
-        ...(account !== undefined ? ["-a", account] : []),
+        source.service,
+        ...UndefinedOr.match(source.account, {
+          onUndefined: (): ReadonlyArray<string> => [],
+          onDefined: (account) => ["-a", account],
+        }),
         "-w",
       ),
       shell: true,
@@ -39,26 +45,19 @@ export const KeychainBackend: SecretBackend = {
       // nothing else, so a secret whose own final byte is a newline is not
       // silently truncated.
       Effect.map((result) => Redacted.make(result.stdout.replace(/\n$/, ""))),
-      Effect.catchTag("CommandError", (error) => Effect.fail(classify(ref, error))),
-    );
-  },
+      Effect.catchTag("CommandError", (error) => Effect.fail(classify(source, error))),
+    ),
 };
 
-const splitRef = (ref: string): [string, string | undefined] => {
-  const index = ref.indexOf("/");
-  if (index === -1) return [ref, undefined];
-  return [ref.slice(0, index), ref.slice(index + 1)];
-};
-
-const classify = (ref: string, cause: CommandError): SecretError => {
+const classify = (source: KeychainSource, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();
   if (message.includes("command not found") || message.includes("enoent")) {
     return new SecretCliMissing({
-      backend: "keychain",
+      source,
       cli: "security",
       install: "This ships with macOS — a missing `security` means this is not a Mac.",
       cause,
     });
   }
-  return new SecretReadFailed({ backend: "keychain", ref, cause });
+  return new SecretReadFailed({ source, cause });
 };

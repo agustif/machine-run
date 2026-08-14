@@ -3,6 +3,28 @@
 `Machine.SecretFile` over a `SecretBackend` seam. Backends are plain values
 that receive a command runner; nothing here needs a service.
 
+- [x] **`SecretFileProps.source` is a typed `SecretSource` union, not a string
+      discriminator plus an opaque `ref: Schema.String`.** `{ source:
+      "1password", ref: "GITHUB_TOKEN" }` used to type-check while being
+      nonsense — one field's grammar depended entirely on its sibling's value,
+      and nothing caught a ref shaped for the wrong store. `SecretSource` is
+      now a `Schema.TaggedUnion` (`Backend.ts`) with one properly-named-field
+      variant per store — `OnePassword { vault, item, field }`, `Doppler {
+      project, config, name }`, `Keychain { service, account? }`, `Pass {
+      path }`, `Env { variable }` — dispatched exhaustively in `Store.ts` via
+      `Match.tagsExhaustive`, and each `SecretBackend`'s `read` is narrowed to
+      the one variant it accepts, so handing a backend a reference shaped for
+      a different store is now a compile error. This is a props-and-state
+      schema break with no migration: nothing built on the old shape has ever
+      been deployed against a real machine. Doppler's `parseRef` and
+      Keychain's `splitRef` are gone entirely — their grammars are separate
+      typed fields now, not a string this package parsed itself.
+- [ ] **`packages/state`, `packages/tailscale` and `packages/ai` still import
+      the pre-refactor `SecretBackendId`/`secretBackend`/`{ source, ref }`
+      shape** (`state/src/DataKey.ts`, `tailscale/src/Connection.ts`,
+      `ai/src/McpServer.ts`) and will not build until each is moved onto
+      `SecretSource`/`readSecret`. Out of scope for this package's own
+      refactor; each needs its own pass.
 - [x] **`pass` now reads a real secret.** Verified against `docker run --rm
 debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       `pass show` reading both a single-line and a multi-line entry back
@@ -23,12 +45,12 @@ debian:stable`: a generated GPG key, `pass init`, `pass insert -m`, and
       captured stderr. `doppler` is installable in a container (no account
       needed just to observe its CLI's own error text for a bad ref); `op` and
       `bw` are not.
-- [ ] **`bitwarden` backend.** Deliberately absent from `SecretBackendId` until
-      implemented — an id that can be named but not constructed is worse than a
-      missing one.
+- [ ] **`bitwarden` backend.** Deliberately absent from `SecretSource` until
+      implemented — a variant that can be named but not constructed is worse
+      than a missing one.
 - [ ] **AWS Secrets Manager and HashiCorp Vault backends.** Both are HTTP rather
       than CLI, which the current interface has never been exercised against;
-      check whether `read(ref, exec)` still fits or whether the seam needs a
+      check whether `read(source, exec)` still fits or whether the seam needs a
       non-command shape.
 - [ ] **Rotation detection.** Currently impossible by construction (see
       V1-PLAN §5). Worth investigating whether stores expose change metadata —

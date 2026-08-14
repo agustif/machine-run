@@ -34,7 +34,10 @@ it.effect(
   "PassBackend.read returns only the first line (real `pass show`, single-line secret)",
   () =>
     Effect.gen(function* () {
-      const value = yield* PassBackend.read("work/github/token", fakeExec("sup3rsecret\n"));
+      const value = yield* PassBackend.read(
+        { _tag: "Pass", path: "work/github/token" },
+        fakeExec("sup3rsecret\n"),
+      );
       expect(Redacted.value(value)).toBe("sup3rsecret");
     }),
 );
@@ -49,7 +52,7 @@ it.effect(
       // returns — the rest is exactly the "any following lines are
       // metadata" convention the module doc comment describes.
       const value = yield* PassBackend.read(
-        "work/github/pat",
+        { _tag: "Pass", path: "work/github/pat" },
         fakeExec("ghp_abc123XYZ\nusername: agustif\nurl: https://github.com\n"),
       );
       expect(Redacted.value(value)).toBe("ghp_abc123XYZ");
@@ -61,13 +64,13 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const failure = yield* PassBackend.read(
-        "nope/does/not/exist",
+        { _tag: "Pass", path: "nope/does/not/exist" },
         failingExec(
           "pass show nope/does/not/exist",
           "Error: nope/does/not/exist is not in the password store.\n",
         ),
       ).pipe(Effect.flip);
       expect(failure).toBeInstanceOf(SecretReadFailed);
-      expect(failure).toMatchObject({ backend: "pass", ref: "nope/does/not/exist" });
+      expect(failure).toMatchObject({ source: { _tag: "Pass", path: "nope/does/not/exist" } });
     }),
 );
