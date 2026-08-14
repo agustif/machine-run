@@ -118,9 +118,43 @@ specific commands and captured output. Summary:
   on first install, and that download didn't finish inside this session's
   time/network budget across several attempts. Also: `install` takes no
   remote argument, so it only resolves when exactly one configured remote
-  (commonly Flathub) offers that app ID — there's no `System.Repo` wiring
-  for Flatpak remotes, which is a real gap (unlike pacman/AUR's absence,
-  which is a decision).
+  (commonly Flathub) offers that app ID.
+
+  **Remote (`System.Repo`) support added and verified 2026-08-14**, closing
+  the gap named above (`docker run --rm --platform linux/amd64 ubuntu:24.04`,
+  same flatpak 1.14.6). `RepoManagerId` now includes `"flatpak"`;
+  `Flatpak.ts` grew `listRepos`/`addRepo`. Real captured output committed as
+  `test/fixtures/flatpak-remotes{-empty,}.txt` and pinned by
+  `test/backends.test.ts`, following the exact `languageBackends.test.ts`
+  fixture pattern.
+
+  What running it (rather than reading `--help`) actually found:
+  - `flatpak remotes --columns=name,url` prints a real *blank line* on an
+    empty install (not zero bytes) — a subtler shape than `flatpak list`'s
+    genuinely empty stdout, and now the empty fixture, not an assumption.
+  - `flatpak remote-add NAME LOCATION` with the standard, documented
+    bootstrap URL (`https://dl.flathub.org/repo/flathub.flatpakrepo`)
+    succeeds, but `flatpak remotes` afterward reports the *resolved*
+    underlying repo URL (`https://dl.flathub.org/repo/`) — a different
+    string flatpak fetched out of the bootstrap file, which it never stores
+    the original of anywhere. This is the same "canonical form differs from
+    what you typed" hazard `system-settings`' GVariant work hit, except here
+    there is no safe canonical spelling that both matches *and* stays
+    correctly signed: adding the *resolved* URL directly instead fails GPG
+    signature verification (`Can't check signature: public key not found`,
+    exit 1) unless `--no-gpg-verify` is also passed, which is a real
+    security downgrade, not a fix. `addRepo`'s doc comment states this
+    plainly: use the bootstrap URL, `apply` will always work, `matches`
+    never will, and that's an accepted, documented trade — not a bug to
+    chase.
+  - Re-adding an already-registered remote without `--if-not-exists` exits 1
+    (`error: Remote flathub already exists`); with it, exit 0 regardless —
+    confirmed, not assumed, which is what makes `apply`'s perpetual
+    non-convergence (above) merely cosmetic rather than destructive.
+  - `props.repo` is `"<name> <location>"`, one opaque string split on the
+    first space — the same "one string, backend owns its own namespace"
+    precedent `dnf`'s COPR shorthand and `apt`'s `ppa:` prefix already set,
+    not a new pattern.
 - **`snap`** (`backends/linux/Snap.ts`) — **UNVERIFIED, same category as
   Winget/Choco below.** `snap` fundamentally needs a running `snapd`, which
   needs `systemd` and its own mount namespaces — a plain container doesn't

@@ -104,4 +104,25 @@ export interface SettingsBackend {
   readonly read: (key: string, exec: Exec) => Effect.Effect<string | undefined, SettingsError>;
   /** Writes `value` (GVariant text) to `key`. Does not itself verify the write stuck — see `Setting.ts`. */
   readonly write: (key: string, value: string, exec: Exec) => Effect.Effect<void, SettingsError>;
+  /**
+   * Reverts `key` to whatever it held before this store ever recorded an
+   * explicit value for it: `gsettings reset` restores the schema's own
+   * default (a valid gsettings key has no "unset" state — see `read`'s doc
+   * comment), `dconf reset` removes the override entirely, returning the
+   * path to "nothing was ever written here". Both are real, tool-provided
+   * reverts, which is what makes {@link Setting}'s `unapply` an honest undo
+   * rather than a fabricated one — see `@machine-run/engine`'s
+   * `Reconciler.unapply` doc comment on when a resource may implement one at
+   * all.
+   *
+   * Shares `write`'s exact no-session-D-Bus hazard, container-verified for
+   * both directions: `gsettings reset` exits 0 while leaving the key
+   * completely unchanged with no reachable session bus, identically to
+   * `gsettings set`; `dconf reset` fails loudly the same way `dconf write`
+   * does (`error: Cannot autolaunch D-Bus without X11 $DISPLAY`, exit 1).
+   * Does not itself verify the reset stuck — `Setting.ts`'s `unapply`
+   * re-reads afterward, the same discipline `apply` already applies to
+   * `write`.
+   */
+  readonly reset: (key: string, exec: Exec) => Effect.Effect<void, SettingsError>;
 }

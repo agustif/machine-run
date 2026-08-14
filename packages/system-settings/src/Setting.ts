@@ -56,6 +56,33 @@ export type SettingState = typeof SettingState.Type;
  * whatever the store already holds, so the result is reproducible rather
  * than dependent on what a machine happened to start with — same rationale
  * as `MacOS.Default`.
+ *
+ * ## Headless machines: prefer `dconf`, and why `observe` does not check for
+ * a session bus
+ *
+ * `gsettings set` silently no-ops with no reachable session D-Bus (no desktop
+ * session, no `DBUS_SESSION_BUS_ADDRESS` — an SSH session, cron, or a bare
+ * container); `dconf write` fails loudly in the identical situation. Neither
+ * `read` needs a bus at all — both back ends answered `get`/`read` correctly
+ * throughout this package's container verification with no bus reachable, so
+ * a headless `observe`/`plan` is not the problem. **Prefer the `dconf`
+ * backend on a machine that may run headless** — it is the more reliable
+ * choice specifically because it fails instead of lying, the opposite of the
+ * usual intuition that schema-validated `gsettings` is the safer default.
+ *
+ * `observe` deliberately does **not** raise a typed error when
+ * `DBUS_SESSION_BUS_ADDRESS` is absent. That was considered and rejected: the
+ * env var is neither necessary (some sessions reach a bus through
+ * `$XDG_RUNTIME_DIR/bus` autodiscovery without ever exporting it) nor
+ * sufficient (a stale or dead bus address can still be set) as a proxy for
+ * "will a write actually commit" — and `read`/`get` do not depend on the bus
+ * to begin with, so gating `observe` on it would fail plans on machines where
+ * nothing is actually wrong. `apply`'s read-back check below is a strictly
+ * stronger signal: it does not guess *why* a write might not have committed,
+ * it confirms whether it did, which is what actually closes the "successful
+ * apply, drift forever" failure mode. `unapply`'s read-back check applies the
+ * identical discipline to `reset`. See `docs/notes/settings-notes.md` for the
+ * container evidence this decision rests on.
  */
 export interface Setting extends Resource<"System.Setting", SettingProps, SettingState> {}
 
@@ -95,13 +122,48 @@ export class SettingWriteNotObserved extends Data.TaggedError("SettingWriteNotOb
 }
 
 /**
+ * A `reset` reported success, but reading the key back immediately afterwards
+ * still shows the value this resource itself wrote — the identical failure
+ * shape `SettingWriteNotObserved` catches for `apply`, applied to `unapply`.
+ *
+ * Container-verified (see `backends/Gsettings.ts`'s `reset` doc comment):
+ * `gsettings reset` shares `gsettings set`'s exact no-session-D-Bus silent
+ * no-op. Trusting `reset`'s own exit code would let `unapply` report a
+ * successful revert that changed nothing on a headless machine, the same
+ * hazard `SettingWriteNotObserved` exists to catch on the way in.
+ */
+export class SettingResetNotObserved extends Data.TaggedError("SettingResetNotObserved")<{
+  backend: SettingsBackendId;
+  key: string;
+  unwanted: string;
+}> {
+  override get message() {
+    return (
+      `Reset "${this.key}" via ${this.backend}, but reading it back still returned ` +
+      `"${this.unwanted}" — the value this resource itself wrote, unchanged. ` +
+      (this.backend === "gsettings"
+        ? `gsettings can report a successful reset while doing nothing when there is no reachable ` +
+          `session D-Bus (no desktop session, no DBUS_SESSION_BUS_ADDRESS). Run this against a real ` +
+          `login session, or use the "dconf" backend, which fails loudly in the same situation instead ` +
+          `of silently no-op'ing.`
+        : `Check that the ${this.backend} CLI is actually installed and reachable, and that "${this.key}" ` +
+          `is spelled the way this backend expects.`)
+    );
+  }
+}
+
+/**
  * The provider body, exported separately from `SettingProvider` so a test
  * can build it directly and drive `observe`/`matches`/`apply` without the
  * alchemy engine or a real `CommandExecutor` — see
  * `packages/dotfiles/src/File.ts` for the same pattern.
  */
 export const makeSettingReconciler: Effect.Effect<
-  Reconciler<SettingProps, SettingState, SettingsError | SettingWriteNotObserved>
+  Reconciler<
+    SettingProps,
+    SettingState,
+    SettingsError | SettingWriteNotObserved | SettingResetNotObserved
+  >
 > = Effect.succeed({
   // Unlike `MacOS.Default` (addressed per *domain*, because `defaults`
   // rewrites the whole domain's plist file on every write, so two keys in
@@ -151,6 +213,39 @@ export const makeSettingReconciler: Effect.Effect<
       }
 
       return desired;
+    }),
+
+  /**
+   * `gsettings reset`/`dconf reset` are real reverts the tools themselves
+   * provide — restore the schema default, or remove the override entirely —
+   * which is what makes this one of the few resources in this repo able to
+   * honestly implement `unapply` at all (see `@machine-run/engine`'s
+   * `Reconciler.unapply` doc comment, and `Shell.Login`'s `unapply` for the
+   * other worked example). Unlike `Login`, there is nothing to record at
+   * `apply` time to restore an exact prior value from: a `gsettings` key
+   * always has *some* value (its schema default), and `reset` is precisely
+   * the tool-provided way back to it, so there is no bespoke "previous value"
+   * bookkeeping to add to `SettingState`.
+   *
+   * Re-reads after resetting for the same reason `apply` re-reads after
+   * writing — see `SettingResetNotObserved`'s doc comment for the
+   * container-verified silent no-op this guards against.
+   */
+  unapply: ({ props, recorded }, ctx) =>
+    Effect.gen(function* () {
+      const backend = settingsBackend(props.backend);
+      yield* backend.reset(props.key, ctx.exec);
+
+      const confirmed = yield* backend.read(props.key, ctx.exec);
+      if (confirmed === recorded.value) {
+        return yield* Effect.fail(
+          new SettingResetNotObserved({
+            backend: props.backend,
+            key: props.key,
+            unwanted: recorded.value,
+          }),
+        );
+      }
     }),
 });
 

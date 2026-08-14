@@ -36,6 +36,24 @@ interface StatefulExec {
   readonly calls: string[];
 }
 
+/**
+ * A command runner where a `reset` genuinely changes the live value on the
+ * next read — unlike `noopWriteExec`, below. `afterReset` is exactly what a
+ * real `gsettings reset`/`dconf reset` leaves `read` returning afterward: the
+ * schema default for gsettings (there is no "unset" gsettings state), or the
+ * empty string for dconf (parsed to `undefined` by `DconfBackend.read`'s own
+ * "zero bytes means absent" collapse — see `backends/Dconf.ts`).
+ */
+const resettingExec =
+  (afterReset: string, calls: string[]): Exec =>
+  (props) => {
+    calls.push(props.command);
+    if (props.command.startsWith("gsettings reset") || props.command.startsWith("dconf reset")) {
+      return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+    }
+    return Effect.succeed({ exitCode: 0, stdout: afterReset, stderr: "" });
+  };
+
 const statefulExec = (initial: string | undefined, writtenValue: string): StatefulExec => {
   let current = initial;
   const calls: string[] = [];
@@ -180,6 +198,91 @@ it.effect(
       // Both the write and the confirmation read actually ran.
       expect(calls.length).toBe(2);
     }),
+);
+
+it.effect(
+  "Setting reconciler unapply: resets the key and confirms the value actually changed",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const calls: string[] = [];
+      const props = {
+        backend: "gsettings" as const,
+        key: "org.gnome.desktop.interface:clock-format",
+        value: "'12h'",
+      };
+      // recorded is what this resource itself wrote (the persisted `output`
+      // from the run that last applied); the fake exec answers every read
+      // with the schema default `'24h'`, exactly as a real
+      // `dbus-run-session`-backed `gsettings reset` restoring it would.
+      const recorded = { backend: "gsettings" as const, key: props.key, value: "'12h'" };
+
+      yield* reconciler.unapply!(
+        { props, observed: recorded, recorded },
+        applyCtx(resettingExec("'24h'", calls)),
+      );
+
+      expect(calls).toEqual([
+        "gsettings reset org.gnome.desktop.interface clock-format",
+        "gsettings get org.gnome.desktop.interface clock-format",
+      ]);
+    }),
+);
+
+it.effect(
+  "Setting reconciler unapply: fails loudly when a reset reports success but the value never " +
+    "changed (gsettings' container-verified silent no-op with no session D-Bus, applied to reset)",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const calls: string[] = [];
+      const props = {
+        backend: "gsettings" as const,
+        key: "org.gnome.desktop.interface:clock-format",
+        value: "'12h'",
+      };
+      const recorded = { backend: "gsettings" as const, key: props.key, value: "'12h'" };
+
+      // Every read — including the confirmation read `unapply` issues right
+      // after resetting — still returns the value this resource itself
+      // wrote, exactly as `gsettings reset` behaves with no reachable
+      // session D-Bus.
+      const result = yield* Effect.flip(
+        reconciler.unapply!(
+          { props, observed: recorded, recorded },
+          applyCtx(noopWriteExec("'12h'", calls)),
+        ),
+      );
+
+      expect(result._tag).toBe("SettingResetNotObserved");
+      expect(result).toMatchObject({
+        backend: "gsettings",
+        key: "org.gnome.desktop.interface:clock-format",
+        unwanted: "'12h'",
+      });
+      // Both the reset and the confirmation read actually ran.
+      expect(calls.length).toBe(2);
+    }),
+);
+
+it.effect("Setting reconciler unapply: dconf backend resets and confirms the key is now absent", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSettingReconciler;
+    const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
+    const recorded = { backend: "dconf" as const, key: props.key, value: "['a', 'b']" };
+
+    // A real `dconf reset` followed by `dconf read` on a path with no
+    // remaining override prints zero bytes — modelled here via
+    // `resettingExec("", ...)`, which `DconfBackend.read` collapses to
+    // `undefined` (its own "empty stdout means absent" rule).
+    const calls: string[] = [];
+    yield* reconciler.unapply!(
+      { props, observed: recorded, recorded },
+      applyCtx(resettingExec("", calls)),
+    );
+
+    expect(calls).toEqual(["dconf reset /test/mypath", "dconf read /test/mypath"]);
+  }),
 );
 
 it.effect("Setting reconciler apply: dconf backend writes and confirms an array value", () =>

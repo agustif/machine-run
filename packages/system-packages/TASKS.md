@@ -70,11 +70,26 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
 - [ ] **Version pinning.** `PackageProps` has no `version`, so "install ripgrep"
       cannot mean a particular ripgrep. This is a real gap for reproducibility
       and changes `matches` from membership to comparison.
-- [ ] **Flatpak remotes have no `System.Repo` support.** `flatpak install`
-      only resolves an app ID against an already-configured remote (commonly
-      Flathub); adding/removing a remote isn't wired up as a resource. Unlike
-      pacman/AUR, this is a real gap, not a decision — see
-      `backends/linux/Flatpak.ts`'s doc comment.
+- [x] **Flatpak remotes have no `System.Repo` support.** Implemented and
+      container-verified 2026-08-14 (`docs/notes/system-packages-notes.md`):
+      `RepoManagerId` now includes `"flatpak"`, and `Flatpak.ts` grew
+      `listRepos`/`addRepo`. `props.repo` is `"<name> <location>"` (one
+      opaque string, split on the first space — the same shape convention
+      `dnf`'s COPR shorthand already uses). Real captured `flatpak remotes`
+      output is committed as `test/fixtures/flatpak-remotes{-empty,}.txt`
+      and pinned by `test/backends.test.ts`, following the exact
+      `languageBackends.test.ts` pattern.
+
+      One real, documented limitation, not a bug: `flatpak remote-add`'s
+      standard bootstrap URL (the one every Flathub tutorial gives) resolves
+      to a *different* URL string than what `flatpak remotes` reports back
+      afterward, so a `System.Repo` written with the bootstrap form will
+      `apply` correctly every time but never `matches` — every plan reports
+      it as needing an update, forever, though harmlessly thanks to
+      `--if-not-exists`. Using the resolved URL directly instead avoids that
+      but fails GPG signature verification without `--no-gpg-verify`, a real
+      security downgrade this backend does not add a flag for. See
+      `Flatpak.ts`'s `listRepos` doc comment for the full reasoning.
 
 ## Correctness
 

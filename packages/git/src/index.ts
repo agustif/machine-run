@@ -7,6 +7,7 @@ export * from "./CredentialHelper.ts";
 export * from "./HooksPath.ts";
 export * from "./Identity.ts";
 export * from "./Ignore.ts";
+export * from "./Maintenance.ts";
 export * from "./Providers.ts";
 export * from "./Repo.ts";
 export * from "./Signing.ts";
