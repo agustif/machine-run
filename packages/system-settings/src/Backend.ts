@@ -15,33 +15,114 @@ import * as Schema from "effect/Schema";
  * why that's a follow-up rather than part of this change. The Windows
  * registry is a documented gap, not a guess — also in `docs/settings-notes.md`
  * and `docs/TASKS.md`.
+ *
+ * This is the CLI/tool identifier — `"gsettings"` covers both of
+ * `SettingProps`'s `Gsettings` and `GsettingsRelocatable` cases, since both
+ * are read and written through the same `gsettings` binary. It is a coarser
+ * grouping than `SettingProps`'s own `_tag`, kept only for what genuinely is
+ * tool-level (error messages, which binary a doc comment should name), not
+ * for dispatch — dispatch is `Match.tagsExhaustive` over `SettingProps`
+ * itself, in `Setting.ts`.
  */
 export const SettingsBackendId = Schema.Literals(["gsettings", "dconf"]);
 
 export type SettingsBackendId = typeof SettingsBackendId.Type;
 
 /**
- * A key this backend was asked to read or write is not in the shape it
- * accepts. Caught before any command runs, so it carries no `CommandError`
- * cause — mirrors `secrets`' `SecretRefInvalid`.
+ * One field of a key this backend was asked to read or write is not in the
+ * shape that field requires — an unparsable `schema`, a `path` missing its
+ * leading or trailing slash, a `key` with a character GSettings key names
+ * never carry. Caught before any command runs, so it carries no
+ * `CommandError` cause — mirrors `secrets`' `SecretRefInvalid`.
+ *
+ * Unlike the previous shape (a single `key: string`, split apart by a
+ * regex), `field`/`value` name exactly which part of an already-structured
+ * {@link GsettingsIdentity}/{@link GsettingsRelocatableIdentity}/{@link
+ * DconfIdentity} failed, because there is no longer one combined string to
+ * blame — `SettingProps`'s cases (`Setting.ts`) hand each backend already-
+ * separated fields, so this error is about a field's *content*, not its
+ * shape as a substring of something bigger.
  */
 export class SettingKeyInvalid extends Data.TaggedError("SettingKeyInvalid")<{
   backend: SettingsBackendId;
-  key: string;
+  field: string;
+  value: string;
   expected: string;
 }> {
   override get message() {
-    return `"${this.key}" is not a valid ${this.backend} key. Expected ${this.expected}.`;
+    return `"${this.value}" is not a valid ${this.backend} ${this.field}. Expected ${this.expected}.`;
   }
 }
 
 export type SettingsError = CommandError | SettingKeyInvalid;
 
 /**
+ * What identifies one ordinary (non-relocatable) GSettings key: a schema id
+ * (`"org.gnome.desktop.interface"`) and a key name within it
+ * (`"clock-format"`). `gsettings get/set/reset SCHEMA KEY` takes exactly
+ * these two, as two separate arguments — never a combined
+ * `"schema:key-name"` string a caller could hand to the wrong backend or
+ * mistype the separator on. See `backends/Gsettings.ts` for the field-shape
+ * validation (`GsettingsBackend`'s `checkSchema`/`checkKey`).
+ */
+export const GsettingsIdentity = Schema.TaggedStruct("Gsettings", {
+  schema: Schema.String,
+  key: Schema.String,
+});
+export type GsettingsIdentity = typeof GsettingsIdentity.Type;
+
+/**
+ * What identifies one key in a *relocatable* GSettings schema — one with no
+ * fixed dconf path built in (per-profile terminal settings being the common
+ * real example), which `gsettings` therefore requires a `path` for in
+ * addition to `schema`/`key`. Verified directly against a real relocatable
+ * schema in an `ubuntu:24.04` container (`docs/settings-notes.md`):
+ * `gsettings get SCHEMA:PATH KEY`, where `PATH` is a dconf-style path that
+ * must both begin and end with `/` (confirmed via the CLI's own errors,
+ * `"Path must begin with a slash (/)"` / `"Path must end with a slash (/)"`,
+ * when either is missing) — a different shape from {@link DconfIdentity}'s
+ * `path`, which must *not* end with `/`. `gsettings get SCHEMA key` (no
+ * path) against a relocatable schema fails outright
+ * (`"Schema '...' is relocatable (path must be specified)"`), which is
+ * exactly the illegal combination `SettingProps`'s separate `Gsettings`/
+ * `GsettingsRelocatable` cases (`Setting.ts`) make unrepresentable: there is
+ * no `path` field to omit-when-it-shouldn't-be, or forget-when-it-must-be,
+ * because a relocatable key is a different case with its own required field,
+ * not an optional add-on to the ordinary one.
+ */
+export const GsettingsRelocatableIdentity = Schema.TaggedStruct("GsettingsRelocatable", {
+  schema: Schema.String,
+  path: Schema.String,
+  key: Schema.String,
+});
+export type GsettingsRelocatableIdentity = typeof GsettingsRelocatableIdentity.Type;
+
+/**
+ * What identifies one `dconf` key: an absolute path
+ * (`/org/gnome/desktop/interface/clock-format`) that must *not* end with
+ * `/` — the opposite trailing-slash rule from {@link
+ * GsettingsRelocatableIdentity}'s `path`, because a dconf *key* path names
+ * one value while a gsettings relocatable *schema* path names a directory
+ * prefix under which a whole schema's keys live. `dconf read/write/reset`
+ * take this single path as their only positional argument.
+ */
+export const DconfIdentity = Schema.Struct({ path: Schema.String });
+export type DconfIdentity = typeof DconfIdentity.Type;
+
+/**
  * The shared shape every platform settings-store backend implements — one
  * key, read or written, in whichever store the id names. This is the atomic
  * seam `System.Setting` dispatches through: adding a store means writing one
  * `backends/<Name>.ts` module and one id, never touching the resource.
+ *
+ * Parametrized over `Identity` — {@link GsettingsIdentity} or {@link
+ * GsettingsRelocatableIdentity} (both handled by the one `gsettings`
+ * backend, since both go through the same CLI) or {@link DconfIdentity} —
+ * rather than a bare `key: Schema.String` a caller had to spell in a
+ * backend-specific combined-string grammar (`"schema:key-name"`, an
+ * absolute path, …) and this module had to re-parse and validate. `Setting.
+ * ts`'s `SettingProps` is a `Schema.TaggedUnion` precisely so each case can
+ * hand a backend already-structured fields instead.
  *
  * ## The value model — and why there isn't one
  *
@@ -88,11 +169,11 @@ export type SettingsError = CommandError | SettingKeyInvalid;
  * phase — never a `CommandExecutor` or a session directly, so a backend can
  * never run a command outside the reconciler's own bookkeeping.
  */
-export interface SettingsBackend {
+export interface SettingsBackend<Identity> {
   readonly id: SettingsBackendId;
   /**
-   * The live value at `key`, as GVariant text, or `undefined` if nothing is
-   * there.
+   * The live value at `identity`, as GVariant text, or `undefined` if
+   * nothing is there.
    *
    * "Nothing is there" covers a genuinely unset `dconf` path *and* a
    * `gsettings` key or schema that doesn't parse or doesn't exist — the same
@@ -101,12 +182,16 @@ export interface SettingsBackend {
    * state to converge from, not a failure. See `docs/settings-notes.md` for
    * the container output this is verified against.
    */
-  readonly read: (key: string, exec: Exec) => Effect.Effect<string | undefined, SettingsError>;
-  /** Writes `value` (GVariant text) to `key`. Does not itself verify the write stuck — see `Setting.ts`. */
-  readonly write: (key: string, value: string, exec: Exec) => Effect.Effect<void, SettingsError>;
+  readonly read: (identity: Identity, exec: Exec) => Effect.Effect<string | undefined, SettingsError>;
+  /** Writes `value` (GVariant text) to `identity`. Does not itself verify the write stuck — see `Setting.ts`. */
+  readonly write: (
+    identity: Identity,
+    value: string,
+    exec: Exec,
+  ) => Effect.Effect<void, SettingsError>;
   /**
-   * Reverts `key` to whatever it held before this store ever recorded an
-   * explicit value for it: `gsettings reset` restores the schema's own
+   * Reverts `identity` to whatever it held before this store ever recorded
+   * an explicit value for it: `gsettings reset` restores the schema's own
    * default (a valid gsettings key has no "unset" state — see `read`'s doc
    * comment), `dconf reset` removes the override entirely, returning the
    * path to "nothing was ever written here". Both are real, tool-provided
@@ -124,5 +209,5 @@ export interface SettingsBackend {
    * re-reads afterward, the same discipline `apply` already applies to
    * `write`.
    */
-  readonly reset: (key: string, exec: Exec) => Effect.Effect<void, SettingsError>;
+  readonly reset: (identity: Identity, exec: Exec) => Effect.Effect<void, SettingsError>;
 }

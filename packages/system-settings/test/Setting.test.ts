@@ -78,19 +78,29 @@ const applyCtx = (exec: Exec): ApplyContext => ({
 });
 
 it.effect(
-  "Setting reconciler address is backend:key, so two Settings on the same key contend",
+  "Setting reconciler address is backend:schema:key / backend:path, so two Settings on the same key contend",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       expect(
         reconciler.address({
-          backend: "gsettings",
-          key: "org.gnome.desktop.interface:clock-format",
+          _tag: "Gsettings",
+          schema: "org.gnome.desktop.interface",
+          key: "clock-format",
           value: "'24h'",
         }),
       ).toBe("gsettings:org.gnome.desktop.interface:clock-format");
       expect(
-        reconciler.address({ backend: "dconf", key: "/test/mypath", value: "['a', 'b']" }),
+        reconciler.address({
+          _tag: "GsettingsRelocatable",
+          schema: "org.example.relocatable",
+          path: "/org/example/testpath1/",
+          key: "greeting",
+          value: "'hi'",
+        }),
+      ).toBe("gsettings:org.example.relocatable:/org/example/testpath1/:greeting");
+      expect(
+        reconciler.address({ _tag: "Dconf", path: "/test/mypath", value: "['a', 'b']" }),
       ).toBe("dconf:/test/mypath");
     }),
 );
@@ -99,7 +109,7 @@ it.effect("Setting reconciler observe: undefined when the backend reports the ke
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const observed = yield* reconciler.observe(
-      { backend: "dconf", key: "/test/myuint", value: "uint32 5" },
+      { _tag: "Dconf", path: "/test/myuint", value: "uint32 5" },
       // Real captured `dconf read` output for a genuinely unset path: zero
       // bytes on stdout.
       planCtx(fakeExec("")),
@@ -114,28 +124,69 @@ it.effect(
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
       const observed = yield* reconciler.observe(
-        { backend: "gsettings", key: "org.gnome.desktop.interface:clock-format", value: "'24h'" },
+        {
+          _tag: "Gsettings",
+          schema: "org.gnome.desktop.interface",
+          key: "clock-format",
+          value: "'24h'",
+        },
         planCtx(fakeExec("'24h'\n")),
       );
       expect(observed).toEqual({
-        backend: "gsettings",
-        key: "org.gnome.desktop.interface:clock-format",
+        variant: "Gsettings",
+        schema: "org.gnome.desktop.interface",
+        key: "clock-format",
         value: "'24h'",
       });
     }),
 );
 
-it.effect("Setting reconciler matches: true iff backend, key and value are all equal", () =>
+it.effect(
+  "Setting reconciler observe: a relocatable schema reports schema/path/key together",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const observed = yield* reconciler.observe(
+        {
+          _tag: "GsettingsRelocatable",
+          schema: "org.example.relocatable",
+          path: "/org/example/testpath1/",
+          key: "greeting",
+          value: "'hi there'",
+        },
+        planCtx(fakeExec("'hi there'\n")),
+      );
+      expect(observed).toEqual({
+        variant: "GsettingsRelocatable",
+        schema: "org.example.relocatable",
+        path: "/org/example/testpath1/",
+        key: "greeting",
+        value: "'hi there'",
+      });
+    }),
+);
+
+it.effect("Setting reconciler matches: true iff variant, schema/path/key and value are all equal", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const desired = {
-      backend: "gsettings" as const,
-      key: "org.gnome.desktop.interface:clock-format",
+      variant: "Gsettings" as const,
+      schema: "org.gnome.desktop.interface",
+      path: undefined,
+      key: "clock-format",
       value: "'24h'",
     };
     expect(reconciler.matches(desired, desired)).toBe(true);
     expect(reconciler.matches({ ...desired, value: "'12h'" }, desired)).toBe(false);
-    expect(reconciler.matches({ ...desired, backend: "dconf" }, desired)).toBe(false);
+    // A dconf state observed at the identical `key`/`value` text never
+    // matches a gsettings desired state — the illegal cross-backend mixup
+    // the previous flat `{backend, key, value}` shape made possible.
+    expect(
+      reconciler.matches(
+        { variant: "Dconf", schema: undefined, path: undefined, key: undefined, value: "'24h'" },
+        desired,
+      ),
+    ).toBe(false);
   }),
 );
 
@@ -144,8 +195,9 @@ it.effect("Setting reconciler apply: writes the value and confirms it by reading
     const reconciler = yield* makeSettingReconciler;
     const { exec, calls } = statefulExec("'12h'", "'24h'");
     const props = {
-      backend: "gsettings" as const,
-      key: "org.gnome.desktop.interface:clock-format",
+      _tag: "Gsettings" as const,
+      schema: "org.gnome.desktop.interface",
+      key: "clock-format",
       value: "'24h'",
     };
     const desired = yield* reconciler.desired(props);
@@ -153,8 +205,9 @@ it.effect("Setting reconciler apply: writes the value and confirms it by reading
     const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
 
     expect(result).toEqual({
-      backend: "gsettings",
-      key: "org.gnome.desktop.interface:clock-format",
+      variant: "Gsettings",
+      schema: "org.gnome.desktop.interface",
+      key: "clock-format",
       value: "'24h'",
     });
     expect(calls).toEqual([
@@ -172,8 +225,9 @@ it.effect(
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
       const props = {
-        backend: "gsettings" as const,
-        key: "org.gnome.desktop.interface:clock-format",
+        _tag: "Gsettings" as const,
+        schema: "org.gnome.desktop.interface",
+        key: "clock-format",
         value: "'24h'",
       };
       const desired = yield* reconciler.desired(props);
@@ -190,11 +244,13 @@ it.effect(
 
       expect(result._tag).toBe("SettingWriteNotObserved");
       expect(result).toMatchObject({
-        backend: "gsettings",
-        key: "org.gnome.desktop.interface:clock-format",
         expected: "'24h'",
         actual: "'12h'",
       });
+      // The message names the CLI and the schema/key, computed from `props`
+      // rather than a stored flat field.
+      expect(result.message).toContain("org.gnome.desktop.interface clock-format");
+      expect(result.message).toContain("gsettings");
       // Both the write and the confirmation read actually ran.
       expect(calls.length).toBe(2);
     }),
@@ -207,15 +263,21 @@ it.effect(
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
       const props = {
-        backend: "gsettings" as const,
-        key: "org.gnome.desktop.interface:clock-format",
+        _tag: "Gsettings" as const,
+        schema: "org.gnome.desktop.interface",
+        key: "clock-format",
         value: "'12h'",
       };
       // recorded is what this resource itself wrote (the persisted `output`
       // from the run that last applied); the fake exec answers every read
       // with the schema default `'24h'`, exactly as a real
       // `dbus-run-session`-backed `gsettings reset` restoring it would.
-      const recorded = { backend: "gsettings" as const, key: props.key, value: "'12h'" };
+      const recorded = {
+        variant: "Gsettings" as const,
+        schema: props.schema,
+        key: props.key,
+        value: "'12h'",
+      };
 
       yield* reconciler.unapply!(
         { props, observed: recorded, recorded },
@@ -237,11 +299,17 @@ it.effect(
       const reconciler = yield* makeSettingReconciler;
       const calls: string[] = [];
       const props = {
-        backend: "gsettings" as const,
-        key: "org.gnome.desktop.interface:clock-format",
+        _tag: "Gsettings" as const,
+        schema: "org.gnome.desktop.interface",
+        key: "clock-format",
         value: "'12h'",
       };
-      const recorded = { backend: "gsettings" as const, key: props.key, value: "'12h'" };
+      const recorded = {
+        variant: "Gsettings" as const,
+        schema: props.schema,
+        key: props.key,
+        value: "'12h'",
+      };
 
       // Every read — including the confirmation read `unapply` issues right
       // after resetting — still returns the value this resource itself
@@ -255,11 +323,8 @@ it.effect(
       );
 
       expect(result._tag).toBe("SettingResetNotObserved");
-      expect(result).toMatchObject({
-        backend: "gsettings",
-        key: "org.gnome.desktop.interface:clock-format",
-        unwanted: "'12h'",
-      });
+      expect(result).toMatchObject({ unwanted: "'12h'" });
+      expect(result.message).toContain("org.gnome.desktop.interface clock-format");
       // Both the reset and the confirmation read actually ran.
       expect(calls.length).toBe(2);
     }),
@@ -270,8 +335,8 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
-      const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
-      const recorded = { backend: "dconf" as const, key: props.key, value: "['a', 'b']" };
+      const props = { _tag: "Dconf" as const, path: "/test/mypath", value: "['a', 'b']" };
+      const recorded = { variant: "Dconf" as const, path: props.path, value: "['a', 'b']" };
 
       // A real `dconf reset` followed by `dconf read` on a path with no
       // remaining override prints zero bytes — modelled here via
@@ -291,15 +356,49 @@ it.effect("Setting reconciler apply: dconf backend writes and confirms an array 
   Effect.gen(function* () {
     const reconciler = yield* makeSettingReconciler;
     const { exec, calls } = statefulExec(undefined, "['a', 'b']");
-    const props = { backend: "dconf" as const, key: "/test/mypath", value: "['a', 'b']" };
+    const props = { _tag: "Dconf" as const, path: "/test/mypath", value: "['a', 'b']" };
     const desired = yield* reconciler.desired(props);
 
     const result = yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx(exec));
 
-    expect(result).toEqual({ backend: "dconf", key: "/test/mypath", value: "['a', 'b']" });
+    expect(result).toEqual({ variant: "Dconf", path: "/test/mypath", value: "['a', 'b']" });
     expect(calls).toEqual([
       "dconf write /test/mypath '['\\''a'\\'', '\\''b'\\'']'",
       "dconf read /test/mypath",
     ]);
   }),
+);
+
+it.effect(
+  "Setting reconciler apply: a relocatable schema writes with the combined `schema:path` argument",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const { exec, calls } = statefulExec("'hello'", "'hi there'");
+      const props = {
+        _tag: "GsettingsRelocatable" as const,
+        schema: "org.example.relocatable",
+        path: "/org/example/testpath1/",
+        key: "greeting",
+        value: "'hi there'",
+      };
+      const desired = yield* reconciler.desired(props);
+
+      const result = yield* reconciler.apply(
+        { props, observed: undefined, desired },
+        applyCtx(exec),
+      );
+
+      expect(result).toEqual({
+        variant: "GsettingsRelocatable",
+        schema: "org.example.relocatable",
+        path: "/org/example/testpath1/",
+        key: "greeting",
+        value: "'hi there'",
+      });
+      expect(calls).toEqual([
+        "gsettings set org.example.relocatable:/org/example/testpath1/ greeting ''\\''hi there'\\'''",
+        "gsettings get org.example.relocatable:/org/example/testpath1/ greeting",
+      ]);
+    }),
 );

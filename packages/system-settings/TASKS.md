@@ -61,11 +61,47 @@ this package: the tool reports success for a write that did not happen.
       `reset` is the tool's own way back to it, so there's nothing to
       capture at `apply` time.
 
+## Typing
+
+- [x] **`SettingProps` is a `Schema.TaggedUnion`** (`Gsettings` /
+      `GsettingsRelocatable` / `Dconf`), not `{ backend: SettingsBackendId,
+      key: Schema.String, value: Schema.String }`. The old shape spelled every
+      key as one opaque string, split apart at runtime by each backend's own
+      regex — `dconf`'s backend could in principle be handed a
+      `gsettings`-shaped string and the mismatch surfaced only as a late
+      `SettingKeyInvalid`. Each case now carries exactly the fields its CLI
+      invocation needs (`schema`+`key`, `schema`+`path`+`key`, or `path`), and
+      `SettingsBackend<Identity>` (`Backend.ts`) is parametrized so a backend
+      can no longer be handed fields shaped for a different store. This is a
+      props/state schema break; nothing has ever been deployed, so there is
+      no migration to write.
+- [x] **`SettingState` stays one flat `Schema.Struct`**, not a matching
+      `TaggedUnion` — tried directly and reverted, for the identical reason
+      `@machine-run/runtimes`' `RuntimeToolState` did (see that package's
+      `Tool.ts` doc comment, and `TASKS.md`): Alchemy's
+      `Resource<Type, Props, Attributes>` maps every `Attributes` key through
+      a homomorphic mapped type that does not resolve to a plain object when
+      `Attributes` is a union, so TypeScript refuses to let `Setting` extend
+      `Resource<...>` at all. Verified directly with a throwaway
+      `Resource<"X", Struct, TaggedUnion>` repro, not assumed from the error
+      text.
+
 ## Verification gaps
 
-- [ ] **Relocatable schemas.** `gsettings` supports `schema:path` addressing for
-      relocatable schemas (per-profile terminal settings being the common case),
-      and the current `schema-id:key-name` addressing cannot express it.
+- [x] **Relocatable schemas.** Was: `gsettings` supports `schema:path`
+      addressing for relocatable schemas (per-profile terminal settings being
+      the common case), and the old `schema-id:key-name` addressing couldn't
+      express it. Now expressible directly: `SettingProps`'s
+      `GsettingsRelocatable` case (`Setting.ts`) carries `schema`/`path`/`key`
+      as separate fields, and `Backend.ts`'s `GsettingsRelocatableIdentity`
+      documents the exact `gsettings get SCHEMA:PATH KEY` addressing —
+      verified directly against a throwaway relocatable schema compiled into
+      an `ubuntu:24.04` container, including that a `path` missing its
+      leading or trailing slash is rejected client-side
+      (`"Path must begin/end with a slash (/)"`, exit 1, before ever reaching
+      D-Bus) and that the identical no-session-D-Bus silent-no-op hazard
+      `gsettings set`/`reset` have for ordinary keys applies unchanged.
 - [ ] **A real GNOME session**, not a container. Everything verified so far ran
       without a desktop; the values a live session writes back may be spelled
-      differently from what a headless `dconf read` prints.
+      differently from what a headless `dconf read` prints. This includes the
+      relocatable-schema verification above, which also ran container-only.

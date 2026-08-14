@@ -8,6 +8,7 @@ import {
   type RuntimeBackend,
   type RuntimeObservation,
   type RuntimeScope,
+  type UvToolIdentity,
 } from "../Backend.ts";
 
 /**
@@ -62,7 +63,7 @@ export const makeUvBackend = (deps: {
    * comment for why.
    */
   configDirOverride: string | undefined;
-}): RuntimeBackend => {
+}): RuntimeBackend<UvToolIdentity> => {
   const { home, path, fs, configDirOverride } = deps;
 
   const configDir = configDirOverride ?? path.join(home, ".config");
@@ -82,7 +83,7 @@ export const makeUvBackend = (deps: {
       ),
     );
 
-  const observe: RuntimeBackend["observe"] = (_tool, scope, exec) =>
+  const observe: RuntimeBackend<UvToolIdentity>["observe"] = (_identity, scope, exec) =>
     Effect.gen(function* () {
       const result = yield* exec({
         command: "uv python list --only-installed --output-format json",
@@ -97,14 +98,14 @@ export const makeUvBackend = (deps: {
       return { installed, active } satisfies RuntimeObservation;
     });
 
-  const install: RuntimeBackend["install"] = (_tool, version, exec) =>
+  const install: RuntimeBackend<UvToolIdentity>["install"] = ({ version }, exec) =>
     exec({
       command: Sh.sh("uv", "python", "install", version),
       shell: true,
       timeout: "10 minutes",
     }).pipe(Effect.asVoid);
 
-  const activate: RuntimeBackend["activate"] = (_tool, version, scope, exec) =>
+  const activate: RuntimeBackend<UvToolIdentity>["activate"] = ({ version }, scope, exec) =>
     scope._tag === "Global"
       ? exec({
           command: Sh.sh("uv", "python", "pin", "--global", version),
@@ -119,9 +120,10 @@ export const makeUvBackend = (deps: {
         }).pipe(Effect.asVoid);
 
   return {
-    id: "uv",
-    // uv only ever manages Python — there is no second tool to name.
-    fixedTool: "python",
+    id: "Uv",
+    // uv only ever manages Python — there is no second tool to name, and
+    // `UvToolIdentity` (`Backend.ts`) has no `tool` field for a caller to
+    // misname in the first place.
     configPath,
     observe,
     install,

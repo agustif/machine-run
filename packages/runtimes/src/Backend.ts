@@ -24,7 +24,16 @@ export class BackendParseError extends Data.TaggedError("BackendParseError")<{
  */
 export type BackendError = CommandError | BackendParseError | PlatformError;
 
-export const RuntimeManagerId = Schema.Literals(["mise", "asdf", "rustup", "uv"]);
+/**
+ * Every runtime version manager this repo knows how to drive — spelled the
+ * same as the `_tag` each {@link RuntimeToolProps}/`RuntimeToolState` case
+ * (in `Tool.ts`) already carries. This literal set is used only for a
+ * backend's own self-identifying `id` field (the same convention
+ * `PackageManagerBackend`/`SettingsBackend` use); the actual dispatch between
+ * managers is the tagged union itself, matched exhaustively in `Tool.ts`, not
+ * a lookup keyed by this id.
+ */
+export const RuntimeManagerId = Schema.Literals(["Mise", "Asdf", "Rustup", "Uv"]);
 export type RuntimeManagerId = typeof RuntimeManagerId.Type;
 
 /**
@@ -61,6 +70,52 @@ export interface RuntimeObservation {
 }
 
 /**
+ * What identifies *which* tool, at which requested version, mise is being
+ * asked about. `tool` is looked up by membership in mise's own namespace
+ * (`"node"`, `"python"`, …) — the same choice `PackageManagerBackend.name`
+ * makes for package managers, deliberately with no cross-manager name
+ * mapping. `version` is a request (`"22"`, `"22.11"`, `"22.11.0"`), resolved
+ * by `versionSatisfies` (`version.ts`), not equality — every backend already
+ * resolves the identical shorthand itself (`mise use node@22`).
+ */
+export const MiseToolIdentity = Schema.Struct({ tool: Schema.String, version: Schema.String });
+export type MiseToolIdentity = typeof MiseToolIdentity.Type;
+
+/**
+ * Identical shape to {@link MiseToolIdentity}, kept as its own schema rather
+ * than reused: asdf's `tool` lives in asdf's own namespace, not mise's
+ * (`"nodejs"`, not `"node"` — see `Tool.ts`'s doc comment), so the two are
+ * different values under the same shape, not the same value read twice.
+ */
+export const AsdfToolIdentity = Schema.Struct({ tool: Schema.String, version: Schema.String });
+export type AsdfToolIdentity = typeof AsdfToolIdentity.Type;
+
+/**
+ * rustup manages exactly one toolchain — Rust — so there is no `tool` field
+ * to get wrong: {@link RuntimeToolProps}'s `Rustup` case (`Tool.ts`) has no
+ * way to name anything else in the first place, unlike the old
+ * `{ manager, tool }` shape this replaces (see `RuntimeToolMismatch`'s
+ * deletion note in `Tool.ts`'s git history). `channel` (not `version`) is
+ * deliberate: rustup's own vocabulary — `rustup toolchain install`,
+ * `rustup default`, `rustup override set`, all verified directly — takes a
+ * *channel* (`stable`, `beta`, `nightly`) or a pinned version like `1.79`,
+ * which `rustup show` calls a "toolchain" once resolved, never a "version"
+ * the way mise/asdf/uv do.
+ */
+export const RustupToolIdentity = Schema.Struct({ channel: Schema.String });
+export type RustupToolIdentity = typeof RustupToolIdentity.Type;
+
+/**
+ * uv manages exactly one toolchain — Python — so there is no `tool` field
+ * either, for the identical reason {@link RustupToolIdentity} has none.
+ * `version` (not `channel`) here because `uv python install`/`pin` take a
+ * Python version (`"3.12"`), never a channel name — verified via `uv python
+ * --help`.
+ */
+export const UvToolIdentity = Schema.Struct({ version: Schema.String });
+export type UvToolIdentity = typeof UvToolIdentity.Type;
+
+/**
  * The shared shape every runtime-version-manager backend implements —
  * `Runtime.Tool`'s one atomic seam, the same pattern as
  * `system-packages`'s `PackageManagerBackend`. `Runtime.Tool` knows nothing
@@ -68,22 +123,24 @@ export interface RuntimeObservation {
  * `observe`/`install`/`activate` the caller selected. Adding a manager means
  * writing one small backend module, never touching the resource itself.
  *
+ * Parametrized over `Identity` — one of {@link MiseToolIdentity}, {@link
+ * AsdfToolIdentity}, {@link RustupToolIdentity} or {@link UvToolIdentity} —
+ * rather than a bare `tool: Schema.String`. This is what makes a
+ * `RuntimeToolMismatch`-style error impossible to need: `makeRustupBackend`
+ * and `makeUvBackend` return a `RuntimeBackend<RustupToolIdentity>`/
+ * `RuntimeBackend<UvToolIdentity>`, whose `Identity` has no `tool` field at
+ * all, so there is no mismatched name a caller could hand them in the first
+ * place — the illegal combination is unrepresentable, not merely rejected at
+ * runtime. See `Tool.ts`'s doc comment on `RuntimeToolProps` for the full
+ * reasoning.
+ *
  * Every method takes an {@link Exec} — see `PackageManagerBackend`'s doc
  * comment in `system-packages` for why: a backend never sees a session or a
  * `CommandExecutor` directly, so it cannot run a command outside the
  * reconciler's own bookkeeping.
  */
-export interface RuntimeBackend {
+export interface RuntimeBackend<Identity> {
   readonly id: RuntimeManagerId;
-
-  /**
-   * Set when this manager only ever manages one fixed tool — rustup only
-   * ever manages "rust", uv only ever manages "python". `Tool.ts` checks a
-   * recipe's `tool` prop against this generically, so no backend has to
-   * reject a mismatched name itself and no special case lives in the
-   * resource's own `observe`/`apply`.
-   */
-  readonly fixedTool?: string;
 
   /**
    * The absolute path of the file a write at `scope` reads, modifies and
@@ -93,24 +150,19 @@ export interface RuntimeBackend {
    */
   readonly configPath: (scope: RuntimeScope) => string;
 
-  /** Installed versions of `tool`, and whichever one is active at `scope`. */
+  /** Installed versions of the identified tool, and whichever one is active at `scope`. */
   readonly observe: (
-    tool: string,
+    identity: Identity,
     scope: RuntimeScope,
     exec: Exec,
   ) => Effect.Effect<RuntimeObservation, BackendError>;
 
-  /** Installs `version` of `tool`. Does not touch activation at any scope. */
-  readonly install: (
-    tool: string,
-    version: string,
-    exec: Exec,
-  ) => Effect.Effect<void, BackendError>;
+  /** Installs the identified tool's requested version. Does not touch activation at any scope. */
+  readonly install: (identity: Identity, exec: Exec) => Effect.Effect<void, BackendError>;
 
-  /** Makes `version` of `tool` the active one at `scope`. Installs it first if needed. */
+  /** Makes the identified tool's requested version the active one at `scope`. Installs it first if needed. */
   readonly activate: (
-    tool: string,
-    version: string,
+    identity: Identity,
     scope: RuntimeScope,
     exec: Exec,
   ) => Effect.Effect<void, BackendError>;

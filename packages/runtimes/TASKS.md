@@ -4,6 +4,38 @@
 [../../docs/notes/runtime-notes.md](../../docs/notes/runtime-notes.md) for exactly what
 was verified by running each CLI, and where the remaining gaps are.
 
+## Typing
+
+- [x] **`RuntimeToolProps` is a `Schema.TaggedUnion`** (`Mise`/`Asdf`/`Rustup`/`Uv`),
+      not `{ manager: RuntimeManagerId, tool: Schema.String, version:
+      Schema.String }`. The old shape let a recipe write `{ manager: "rustup",
+      tool: "node" }` — a combination that was never legal (rustup only ever
+      manages `"rust"`) and was only ever caught at runtime by
+      `RuntimeToolMismatch`. That error class is deleted: `Rustup`'s case has
+      no `tool` field for a caller to get wrong, and `Uv`'s has none either.
+      `RuntimeBackend<Identity>` is now parametrized per manager
+      (`MiseToolIdentity`/`AsdfToolIdentity`/`RustupToolIdentity`/
+      `UvToolIdentity`, `Backend.ts`), so a backend can no longer be handed
+      fields shaped for a different tool. This is a props/state schema break;
+      nothing has ever been deployed, so there is no migration to write.
+- [x] **`RuntimeToolState` stays one flat `Schema.Struct`**, not a matching
+      `TaggedUnion` — tried directly and reverted. Alchemy's
+      `Resource<Type, Props, Attributes>` maps every `Attributes` key through
+      a homomorphic mapped type that does not resolve to a plain object when
+      `Attributes` is a union, so TypeScript refuses to let `RuntimeTool`
+      extend `Resource<...>` at all. Verified directly with a throwaway
+      `Resource<"X", Struct, TaggedUnion>` repro, not assumed from the error
+      text. See `Tool.ts`'s `RuntimeToolState` doc comment.
+- [ ] **`examples/complete-machine/recipes/runtimes.ts` still uses the old
+      `{ manager, tool, version }` shape** and needs updating to the new
+      tagged cases. Out of scope for the change that introduced the new
+      shape (examples/ was explicitly off limits), and the example package
+      was already failing to build beforehand for unrelated reasons (a
+      pre-existing `@machine-run/secrets` export mismatch breaks `packages/ai`
+      and `packages/tailscale`, which `complete-machine` also depends on) —
+      so this was not independently verified against a green build, only
+      against the new `RuntimeToolProps` type directly.
+
 ## Verification
 
 - [ ] **asdf on macOS or native Linux.** Only verified in an `ubuntu:24.04`

@@ -64,7 +64,7 @@ it.effect("mise backend: observe reads installed+active from `mise ls <tool> --j
     // active, from `mise ls node --json` inside a project with its own
     // `mise.toml`.
     const observation = yield* backend.observe(
-      "node",
+      { tool: "node", version: "20" },
       GLOBAL,
       fakeExec(
         JSON.stringify([
@@ -93,7 +93,7 @@ it.effect(
       // active because a global `mise.toml` requesting node 26 takes
       // precedence in this listing's resolution.
       const observation = yield* backend.observe(
-        "node",
+        { tool: "node", version: "22" },
         GLOBAL,
         fakeExec(
           JSON.stringify([
@@ -119,7 +119,11 @@ it.effect("mise backend: observe reports nothing for a tool that has never been 
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     // Real captured output: `mise ls python --json` against a fresh mise
     // home with nothing installed prints a bare empty array, exit 0.
-    const observation = yield* backend.observe("python", GLOBAL, fakeExec("[]"));
+    const observation = yield* backend.observe(
+      { tool: "python", version: "3.12" },
+      GLOBAL,
+      fakeExec("[]"),
+    );
     expect(observation).toEqual({ installed: [], active: undefined });
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -129,8 +133,9 @@ it.effect("mise backend: observe passes cwd=home for Global and cwd=dir for Dire
     const path = yield* Path.Path;
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.observe("node", GLOBAL, capturingExec("[]", calls));
-    yield* backend.observe("node", dir("/home/test/proj"), capturingExec("[]", calls));
+    const identity = { tool: "node", version: "22" };
+    yield* backend.observe(identity, GLOBAL, capturingExec("[]", calls));
+    yield* backend.observe(identity, dir("/home/test/proj"), capturingExec("[]", calls));
     expect(calls).toEqual([
       { command: "mise ls node --json", cwd: HOME },
       { command: "mise ls node --json", cwd: "/home/test/proj" },
@@ -143,7 +148,7 @@ it.effect("mise backend: install shells to `mise install <tool>@<version>`", () 
     const path = yield* Path.Path;
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.install("node", "22", capturingExec("", calls));
+    yield* backend.install({ tool: "node", version: "22" }, capturingExec("", calls));
     expect(calls).toEqual([{ command: "mise install node@22", cwd: undefined }]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -153,7 +158,7 @@ it.effect("mise backend: activate at Global scope uses `--global`, no cwd", () =
     const path = yield* Path.Path;
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.activate("node", "22", GLOBAL, capturingExec("", calls));
+    yield* backend.activate({ tool: "node", version: "22" }, GLOBAL, capturingExec("", calls));
     expect(calls).toEqual([{ command: "mise use --global --pin -y node@22", cwd: undefined }]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -163,7 +168,11 @@ it.effect("mise backend: activate at Directory scope sets cwd, no `--global`", (
     const path = yield* Path.Path;
     const backend = makeMiseBackend({ home: HOME, path, globalConfigOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.activate("node", "22", dir("/home/test/proj"), capturingExec("", calls));
+    yield* backend.activate(
+      { tool: "node", version: "22" },
+      dir("/home/test/proj"),
+      capturingExec("", calls),
+    );
     expect(calls).toEqual([{ command: "mise use --pin -y node@22", cwd: "/home/test/proj" }]);
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -240,7 +249,7 @@ it.effect(
       const path = yield* Path.Path;
       const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
       const observation = yield* backend.observe(
-        "rust",
+        { channel: "stable" },
         GLOBAL,
         fakeExec(RUSTUP_SHOW_DEFAULT_ACTIVE),
       );
@@ -258,7 +267,7 @@ it.effect(
       const path = yield* Path.Path;
       const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
       const observation = yield* backend.observe(
-        "rust",
+        { channel: "nightly" },
         dir("/private/tmp/proj"),
         fakeExec(RUSTUP_SHOW_DIRECTORY_OVERRIDE),
       );
@@ -274,9 +283,13 @@ it.effect("rustup backend: install/activate shell to the right subcommands", () 
     const path = yield* Path.Path;
     const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.install("rust", "1.75.0", capturingExec("", calls));
-    yield* backend.activate("rust", "1.75.0", GLOBAL, capturingExec("", calls));
-    yield* backend.activate("rust", "1.75.0", dir("/private/tmp/proj"), capturingExec("", calls));
+    yield* backend.install({ channel: "1.75.0" }, capturingExec("", calls));
+    yield* backend.activate({ channel: "1.75.0" }, GLOBAL, capturingExec("", calls));
+    yield* backend.activate(
+      { channel: "1.75.0" },
+      dir("/private/tmp/proj"),
+      capturingExec("", calls),
+    );
     expect(calls).toEqual([
       { command: "rustup toolchain install 1.75.0", cwd: undefined },
       { command: "rustup default 1.75.0", cwd: undefined },
@@ -285,11 +298,15 @@ it.effect("rustup backend: install/activate shell to the right subcommands", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect('rustup backend: fixedTool is "rust", and configPath ignores scope', () =>
+it.effect('rustup backend: id is "Rustup", and configPath ignores scope', () =>
   Effect.gen(function* () {
     const path = yield* Path.Path;
     const backend = makeRustupBackend({ home: HOME, path, rustupHomeOverride: undefined });
-    expect(backend.fixedTool).toBe("rust");
+    expect(backend.id).toBe("Rustup");
+    // Rustup has no `tool` dimension at all — `RustupToolIdentity` (`Backend.ts`)
+    // has no `tool` field, so there is nothing here for a caller to misname;
+    // this replaces the old runtime-checked `fixedTool` field.
+    //
     // Every scope shares one file — see `Rustup.ts`'s doc comment: the
     // directory-override table lives inside the same `settings.toml` as the
     // global default, verified directly by inspecting it after setting one.
@@ -312,7 +329,7 @@ it.effect(
       // Real captured output (`asdf 0.20.0`): a fresh asdf reports this,
       // exit 0, when nothing has ever been added.
       const observation = yield* backend.observe(
-        "nodejs",
+        { tool: "nodejs", version: "22" },
         GLOBAL,
         capturingExec("No plugins installed", calls),
       );
@@ -331,7 +348,7 @@ it.effect("asdf backend: observe is empty when the plugin exists but nothing is 
     // Real captured output: `asdf list nodejs` once the plugin is added but
     // before anything is installed.
     const observation = yield* backend.observe(
-      "nodejs",
+      { tool: "nodejs", version: "22" },
       GLOBAL,
       sequencedExec(["nodejs", "No compatible versions installed (nodejs)"]),
     );
@@ -345,7 +362,7 @@ it.effect("asdf backend: observe finds the `*`-marked active version among sever
     const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
     // Real captured output: two versions installed, the second active.
     const observation = yield* backend.observe(
-      "nodejs",
+      { tool: "nodejs", version: "22" },
       GLOBAL,
       sequencedExec(["nodejs", "  20.11.0\n *22.11.0"]),
     );
@@ -358,7 +375,7 @@ it.effect("asdf backend: install adds the plugin (idempotently) before installin
     const path = yield* Path.Path;
     const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.install("nodejs", "22.11.0", capturingExec("", calls));
+    yield* backend.install({ tool: "nodejs", version: "22.11.0" }, capturingExec("", calls));
     expect(calls).toEqual([
       { command: "asdf plugin add nodejs", cwd: undefined },
       { command: "asdf install nodejs 22.11.0", cwd: undefined },
@@ -371,8 +388,9 @@ it.effect("asdf backend: activate uses `set -u` for Global and `set` with cwd fo
     const path = yield* Path.Path;
     const backend = makeAsdfBackend({ home: HOME, path, filenameOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.activate("nodejs", "22.11.0", GLOBAL, capturingExec("", calls));
-    yield* backend.activate("nodejs", "22.11.0", dir("/home/test/proj"), capturingExec("", calls));
+    const identity = { tool: "nodejs", version: "22.11.0" };
+    yield* backend.activate(identity, GLOBAL, capturingExec("", calls));
+    yield* backend.activate(identity, dir("/home/test/proj"), capturingExec("", calls));
     expect(calls).toEqual([
       { command: "asdf set -u nodejs 22.11.0", cwd: undefined },
       { command: "asdf set nodejs 22.11.0", cwd: "/home/test/proj" },
@@ -435,7 +453,7 @@ it.effect("uv backend: observe de-duplicates versions reported through more than
     const fs = yield* FileSystem.FileSystem;
     const backend = makeUvBackend({ home: HOME, path, fs, configDirOverride: undefined });
     const observation = yield* backend.observe(
-      "python",
+      { version: "3.11" },
       GLOBAL,
       fakeExec(UV_PYTHON_LIST_ONLY_INSTALLED),
     );
@@ -454,7 +472,7 @@ it.effect("uv backend: observe reads the active version from the pin file it wri
     // request, not a resolved patch version.
     yield* fs.writeFileString(pathSvc.join(projectDir, ".python-version"), "3.11\n");
 
-    const observation = yield* backend.observe("python", dir(projectDir), fakeExec("[]"));
+    const observation = yield* backend.observe({ version: "3.11" }, dir(projectDir), fakeExec("[]"));
     expect(observation.active).toBe("3.11");
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -466,7 +484,7 @@ it.effect("uv backend: observe reports no active version when the pin file does 
     const backend = makeUvBackend({ home: HOME, path: pathSvc, fs, configDirOverride: undefined });
     const projectDir = yield* fs.makeTempDirectoryScoped();
 
-    const observation = yield* backend.observe("python", dir(projectDir), fakeExec("[]"));
+    const observation = yield* backend.observe({ version: "3.11" }, dir(projectDir), fakeExec("[]"));
     expect(observation.active).toBeUndefined();
   }).pipe(Effect.provide(NodeServices.layer)),
 );
@@ -477,9 +495,9 @@ it.effect("uv backend: install/activate shell to `uv python install`/`pin`", () 
     const pathSvc = yield* Path.Path;
     const backend = makeUvBackend({ home: HOME, path: pathSvc, fs, configDirOverride: undefined });
     const calls: Array<{ command: string; cwd: string | undefined }> = [];
-    yield* backend.install("python", "3.12", capturingExec("", calls));
-    yield* backend.activate("python", "3.12", GLOBAL, capturingExec("", calls));
-    yield* backend.activate("python", "3.12", dir("/home/test/proj"), capturingExec("", calls));
+    yield* backend.install({ version: "3.12" }, capturingExec("", calls));
+    yield* backend.activate({ version: "3.12" }, GLOBAL, capturingExec("", calls));
+    yield* backend.activate({ version: "3.12" }, dir("/home/test/proj"), capturingExec("", calls));
     expect(calls).toEqual([
       { command: "uv python install 3.12", cwd: undefined },
       { command: "uv python pin --global 3.12", cwd: undefined },
@@ -488,19 +506,19 @@ it.effect("uv backend: install/activate shell to `uv python install`/`pin`", () 
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
-it.effect(
-  'uv backend: fixedTool is "python", configPath is <dir>/.python-version for Directory',
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const pathSvc = yield* Path.Path;
-      const backend = makeUvBackend({
-        home: HOME,
-        path: pathSvc,
-        fs,
-        configDirOverride: undefined,
-      });
-      expect(backend.fixedTool).toBe("python");
-      expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".python-version"));
-    }).pipe(Effect.provide(NodeServices.layer)),
+it.effect('uv backend: id is "Uv", configPath is <dir>/.python-version for Directory', () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pathSvc = yield* Path.Path;
+    const backend = makeUvBackend({
+      home: HOME,
+      path: pathSvc,
+      fs,
+      configDirOverride: undefined,
+    });
+    expect(backend.id).toBe("Uv");
+    // uv has no `tool` dimension either — `UvToolIdentity` (`Backend.ts`) has
+    // no `tool` field, replacing the old runtime-checked `fixedTool` field.
+    expect(backend.configPath(dir("/home/test/proj"))).toBe(p(HOME, "proj", ".python-version"));
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

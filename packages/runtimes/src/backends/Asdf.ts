@@ -1,7 +1,12 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
-import type { RuntimeBackend, RuntimeObservation, RuntimeScope } from "../Backend.ts";
+import type {
+  AsdfToolIdentity,
+  RuntimeBackend,
+  RuntimeObservation,
+  RuntimeScope,
+} from "../Backend.ts";
 import { lines } from "../parse.ts";
 
 /**
@@ -58,7 +63,7 @@ export const makeAsdfBackend = (deps: {
    * `home` is used directly for that part.
    */
   filenameOverride: string | undefined;
-}): RuntimeBackend => {
+}): RuntimeBackend<AsdfToolIdentity> => {
   const { home, path, filenameOverride } = deps;
 
   const filename = filenameOverride ?? ".tool-versions";
@@ -66,7 +71,7 @@ export const makeAsdfBackend = (deps: {
   const configPath = (scope: RuntimeScope): string =>
     scope._tag === "Global" ? path.join(home, filename) : path.join(scope.path, filename);
 
-  const observe: RuntimeBackend["observe"] = (tool, scope, exec) =>
+  const observe: RuntimeBackend<AsdfToolIdentity>["observe"] = ({ tool }, scope, exec) =>
     Effect.gen(function* () {
       const cwd = scope._tag === "Global" ? home : scope.path;
 
@@ -83,7 +88,7 @@ export const makeAsdfBackend = (deps: {
       } satisfies RuntimeObservation;
     });
 
-  const install: RuntimeBackend["install"] = (tool, version, exec) =>
+  const install: RuntimeBackend<AsdfToolIdentity>["install"] = ({ tool, version }, exec) =>
     Effect.gen(function* () {
       // Idempotent — verified: exit 0 both the first time and every time
       // after ("Plugin named nodejs already added", still exit 0).
@@ -95,7 +100,11 @@ export const makeAsdfBackend = (deps: {
       });
     }).pipe(Effect.asVoid);
 
-  const activate: RuntimeBackend["activate"] = (tool, version, scope, exec) =>
+  const activate: RuntimeBackend<AsdfToolIdentity>["activate"] = (
+    { tool, version },
+    scope,
+    exec,
+  ) =>
     // `-u`/`--home` targets `$HOME`'s file regardless of cwd; its absence
     // writes into (or creates) cwd's own file — verified directly, including
     // that a fresh directory with no `.tool-versions` gets one created
@@ -110,5 +119,5 @@ export const makeAsdfBackend = (deps: {
           cwd: scope.path,
         }).pipe(Effect.asVoid);
 
-  return { id: "asdf", configPath, observe, install, activate };
+  return { id: "Asdf", configPath, observe, install, activate };
 };

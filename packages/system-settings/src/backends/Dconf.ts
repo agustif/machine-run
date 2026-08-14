@@ -1,16 +1,18 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import { type SettingsBackend, SettingKeyInvalid } from "../Backend.ts";
+import { type DconfIdentity, type SettingsBackend, SettingKeyInvalid } from "../Backend.ts";
 
 const EXPECTED =
   'an absolute dconf path starting, but not ending, with "/", e.g. "/org/gnome/desktop/interface/clock-format"';
 
-const isValidPath = (key: string): boolean => key.startsWith("/") && !key.endsWith("/");
+const isValidPath = (path: string): boolean => path.startsWith("/") && !path.endsWith("/");
 
-const checkKey = (key: string): Effect.Effect<string, SettingKeyInvalid> =>
-  isValidPath(key)
-    ? Effect.succeed(key)
-    : Effect.fail(new SettingKeyInvalid({ backend: "dconf", key, expected: EXPECTED }));
+const checkPath = (path: string): Effect.Effect<string, SettingKeyInvalid> =>
+  isValidPath(path)
+    ? Effect.succeed(path)
+    : Effect.fail(
+        new SettingKeyInvalid({ backend: "dconf", field: "path", value: path, expected: EXPECTED }),
+      );
 
 /**
  * Raw `dconf`, via its own CLI — the layer `gsettings` sits on top of.
@@ -39,13 +41,13 @@ const checkKey = (key: string): Effect.Effect<string, SettingKeyInvalid> =>
  * (its GVariant text form), never as zero bytes. `read` below relies on
  * exactly that distinction.
  */
-export const DconfBackend: SettingsBackend = {
+export const DconfBackend: SettingsBackend<DconfIdentity> = {
   id: "dconf",
 
-  read: (key, exec) =>
-    checkKey(key).pipe(
-      Effect.flatMap((path) =>
-        exec({ command: Sh.sh("dconf", "read", path), shell: true }).pipe(
+  read: ({ path }, exec) =>
+    checkPath(path).pipe(
+      Effect.flatMap((checked) =>
+        exec({ command: Sh.sh("dconf", "read", checked), shell: true }).pipe(
           Effect.map((result) => result.stdout.trim()),
           Effect.orElseSucceed(() => ""),
         ),
@@ -53,10 +55,10 @@ export const DconfBackend: SettingsBackend = {
       Effect.map((trimmed) => (trimmed === "" ? undefined : trimmed)),
     ),
 
-  write: (key, value, exec) =>
-    checkKey(key).pipe(
-      Effect.flatMap((path) =>
-        exec({ command: Sh.sh("dconf", "write", path, value), shell: true }),
+  write: ({ path }, value, exec) =>
+    checkPath(path).pipe(
+      Effect.flatMap((checked) =>
+        exec({ command: Sh.sh("dconf", "write", checked, value), shell: true }),
       ),
       Effect.asVoid,
     ),
@@ -69,9 +71,9 @@ export const DconfBackend: SettingsBackend = {
    * differ. With a session bus reachable, `dconf reset` genuinely removes
    * the override (`dconf read` afterward prints zero bytes, exit 0).
    */
-  reset: (key, exec) =>
-    checkKey(key).pipe(
-      Effect.flatMap((path) => exec({ command: Sh.sh("dconf", "reset", path), shell: true })),
+  reset: ({ path }, exec) =>
+    checkPath(path).pipe(
+      Effect.flatMap((checked) => exec({ command: Sh.sh("dconf", "reset", checked), shell: true })),
       Effect.asVoid,
     ),
 };
