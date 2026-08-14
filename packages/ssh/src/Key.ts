@@ -1,4 +1,4 @@
-import { isNotFound, MachinePaths, Sh } from "@machine-run/core";
+import { isNotFound, MachinePaths, Sh, Timeouts } from "@machine-run/core";
 import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -395,7 +395,7 @@ export const makeKeyReconciler: Effect.Effect<
           argv.push("-b", String(props.bits));
         }
 
-        yield* ctx.exec({ command: Sh.sh(...argv), shell: true, timeout: "30 seconds" });
+        yield* ctx.exec({ command: Sh.sh(...argv), shell: true, timeout: Timeouts.quickCommand });
         yield* fs.chmod(desired.path, props.mode ?? DEFAULT_MODE);
 
         const generated = yield* readKeyState(desired.path, desired.publicKeyPath);

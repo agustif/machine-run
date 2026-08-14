@@ -1,7 +1,8 @@
-import { isNotFound, MachinePaths } from "@machine-run/core";
-import { type Reconciler, toProvider } from "@machine-run/engine";
+import { isNotFound, MachinePaths, Platform, Windows } from "@machine-run/core";
+import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
+import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -11,6 +12,7 @@ import * as Redacted from "effect/Redacted";
 import { SecretSource, type SecretError } from "./Backend.ts";
 import { readSecret } from "./Store.ts";
 import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 
 /** What the file's final byte should be. */
 export const TrailingNewline = Schema.Literals(["preserve", "ensure", "strip"]);
@@ -63,6 +65,8 @@ export type SecretFileProps = typeof SecretFileProps.Type;
 export const SecretFileState = Schema.Struct({
   path: Schema.String,
   mode: Schema.Number,
+  /** `icacls <path>`'s listing, on Windows only — see `Machine.Directory`. */
+  acl: Schema.optionalKey(Schema.String),
 });
 
 export type SecretFileState = typeof SecretFileState.Type;
@@ -95,6 +99,9 @@ export class SecretFilePathUnreadable extends Data.TaggedError("SecretFilePathUn
 const DEFAULT_MODE = 0o600;
 const DEFAULT_DIRECTORY_MODE = 0o700;
 
+/** `0o600`-style rendering for a `DriftField`, matching this file's own doc comments. */
+const octal = (mode: number): string => `0o${mode.toString(8).padStart(3, "0")}`;
+
 /**
  * `strip` removes `\r` as well as `\n`, because a secret that arrived from a
  * vault over a CRLF-normalising transport would otherwise keep a dangling
@@ -111,6 +118,30 @@ const applyNewline = (value: string, policy: TrailingNewline | undefined): strin
   return value;
 };
 
+/**
+ * Whether observed permissions satisfy the desired mode — mode bits on POSIX,
+ * the live ACL on Windows, where there is no mode to compare. An unreadable ACL
+ * is never satisfied: "cannot confirm" converges by re-applying. See
+ * `Machine.Directory` for the full reasoning.
+ */
+const modeSatisfied = (
+  platform: typeof Platform.Service,
+  observed: { readonly path: string; readonly mode?: number; readonly acl?: string },
+  desiredMode: number | undefined,
+): boolean => {
+  if (desiredMode === undefined) return true;
+  if (!platform.isWindows) return observed.mode === desiredMode;
+  return Windows.aclSatisfiesMode(
+    UndefinedOr.match(observed.acl, {
+      onUndefined: () => Option.none<string>(),
+      onDefined: (acl) => Option.some(acl),
+    }),
+    observed.path,
+    desiredMode,
+    "file",
+  );
+};
+
 export const makeSecretFileReconciler: Effect.Effect<
   Reconciler<
     SecretFileProps,
@@ -118,8 +149,9 @@ export const makeSecretFileReconciler: Effect.Effect<
     PlatformError | SecretError | SecretFilePathUnreadable
   >,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths
+  FileSystem.FileSystem | Path.Path | MachinePaths | Platform
 > = Effect.gen(function* () {
+  const platform = yield* Platform;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
@@ -135,7 +167,7 @@ export const makeSecretFileReconciler: Effect.Effect<
     // Presence and permissions only. Reading the file back to compare content
     // would mean holding a secret in memory during planning for no decision it
     // can inform, since the store — not the file — is the source of truth.
-    observe: (props) =>
+    observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
         const info = yield* fs
@@ -148,7 +180,15 @@ export const makeSecretFileReconciler: Effect.Effect<
             ),
           );
         if (info === undefined) return Option.none();
-        return Option.some({ path: target, mode: Number(info.mode) & 0o777 });
+        const acl = yield* Boolean.match(platform.isWindows, {
+          onFalse: () => Effect.succeed(Option.none<string>()),
+          onTrue: () => Windows.readAcl(ctx.exec, target),
+        });
+        return Option.some({
+          path: target,
+          mode: Number(info.mode) & 0o777,
+          ...Option.match(acl, { onNone: () => ({}), onSome: (value) => ({ acl: value }) }),
+        });
       }),
 
     desired: (props) =>
@@ -158,7 +198,29 @@ export const makeSecretFileReconciler: Effect.Effect<
       }),
 
     matches: (observed, desired) =>
-      observed.path === desired.path && observed.mode === desired.mode,
+      observed.path === desired.path && modeSatisfied(platform, observed, desired.mode),
+
+    // Only `path`/`mode` — the same two fields `matches` compares, and the
+    // only two `SecretFileState` carries. Never add a field derived from the
+    // secret's bytes: a `DriftField` ends up in plan output, and this state
+    // is deliberately blind to the value already (see `SecretFileState`'s
+    // doc comment) — a rotated secret behind an unchanged `path`/`mode`
+    // stays undetectable here too, for the same reason.
+    drift: (observed, desired): Drift => {
+      const fields: DriftField[] = [];
+      if (observed.path !== desired.path) {
+        fields.push({ field: "path", observed: observed.path, desired: desired.path });
+      }
+      if (observed.mode !== desired.mode) {
+        fields.push({
+          field: "mode",
+          observed: octal(observed.mode),
+          desired: octal(desired.mode),
+          direction: observed.mode < desired.mode ? "behind" : "ahead",
+        });
+      }
+      return fields;
+    },
 
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
@@ -176,10 +238,28 @@ export const makeSecretFileReconciler: Effect.Effect<
         // the OS only applies `mode` when the file is created — an existing
         // file keeps whatever bits it already had.
         yield* fs.writeFileString(desired.path, content, { mode: desired.mode });
-        yield* fs.chmod(desired.path, desired.mode);
+        // On Windows `chmod` only toggles the read-only bit, so the mode has to
+        // be expressed as an ACL or a secret file's 0600 intent is never actually
+        // established and `matches` reports drift forever.
+        yield* Boolean.match(platform.isWindows, {
+          onFalse: () => fs.chmod(desired.path, desired.mode),
+          onTrue: () =>
+            Windows.applyMode(ctx.exec, desired.path, desired.mode, "file").pipe(
+              Effect.orElseSucceed(() => undefined),
+            ),
+        });
 
         return desired;
       }),
+
+    // No `unapply`: `State` carries no marker distinguishing a file this
+    // resource itself wrote from one it merely adopted (an operator's own
+    // key, already matching desired state on first `observe`, so `apply` and
+    // its `snapshotBeforeApply` snapshot never ran). Deleting on `destroy`
+    // would be a safe undo in the first case — the secret still lives in its
+    // store, refetchable — but an unrecoverable, unbacked-up loss of real
+    // credential material in the second, and `unapply` cannot tell them
+    // apart. Retain (no-op) is the honest choice for both.
   };
 });
 

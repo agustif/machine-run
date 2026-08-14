@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 import {
@@ -6,6 +6,7 @@ import {
   type RuntimeBackend,
   type RuntimeObservation,
   type RustupToolIdentity,
+  type RuntimeTimeouts,
 } from "../Backend.ts";
 
 /**
@@ -78,6 +79,8 @@ const parseRustupShow = (
   return { installed, active };
 };
 
+const rustupTimeouts: RuntimeTimeouts = { install: Timeouts.toolchain };
+
 export const makeRustupBackend = (deps: {
   home: string;
   path: Path.Path;
@@ -127,7 +130,7 @@ export const makeRustupBackend = (deps: {
     exec({
       command: Sh.sh("rustup", "toolchain", "install", channel),
       shell: true,
-      timeout: "15 minutes",
+      timeout: rustupTimeouts.install,
     }).pipe(Effect.asVoid);
 
   const activate: RuntimeBackend<RustupToolIdentity>["activate"] = ({ channel }, scope, exec) =>
@@ -135,17 +138,18 @@ export const makeRustupBackend = (deps: {
       ? exec({
           command: Sh.sh("rustup", "default", channel),
           shell: true,
-          timeout: "15 minutes",
+          timeout: rustupTimeouts.install,
         }).pipe(Effect.asVoid)
       : exec({
           command: Sh.sh("rustup", "override", "set", channel),
           shell: true,
           cwd: scope.path,
-          timeout: "15 minutes",
+          timeout: rustupTimeouts.install,
         }).pipe(Effect.asVoid);
 
   return {
     id: "Rustup",
+    timeouts: rustupTimeouts,
     // rustup has no "tool" dimension — it manages exactly one thing, the
     // Rust toolchain. `RustupToolIdentity` (`Backend.ts`) has no `tool`
     // field at all, so there is nothing here to validate against a fixed

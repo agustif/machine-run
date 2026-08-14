@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -96,9 +97,14 @@ export const parseGemList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const gemTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+
 export const makeGemBackend = (): PackageManagerBackend => ({
   id: "gem",
   versions: gemVersionSupport,
+  timeouts: gemTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("gem", "list", "--local") }).pipe(
       Effect.map((result) => parseGemList(result.stdout)),
@@ -109,7 +115,7 @@ export const makeGemBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("gem", "install", "--user-install", name),
           shell: true,
-          timeout: "5 minutes",
+          timeout: gemTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -118,7 +124,7 @@ export const makeGemBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("gem", "install", "--user-install", name, "-v", v.version),
                 shell: true,
-                timeout: "5 minutes",
+                timeout: gemTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

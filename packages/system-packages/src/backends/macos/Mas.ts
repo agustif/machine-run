@@ -1,4 +1,4 @@
-import { type VersionSpec, Sh } from "@machine-run/core";
+import { type VersionSpec, Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -8,6 +8,7 @@ import {
   rejectUnsupportedVersionSpec,
   type PackageEntry,
   type PackageManagerBackend,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -77,9 +78,14 @@ export const parseMasList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const masTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeMasBackend = (): PackageManagerBackend => ({
   id: "mas",
   versions: NO_VERSION_SUPPORT,
+  timeouts: masTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("mas", "list") }).pipe(
       Effect.map((result) => parseMasList(result.stdout)),
@@ -90,7 +96,7 @@ export const makeMasBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "mas", "install", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: masTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec: VersionSpec) => {
         const reject = rejectUnsupportedVersionSpec("mas", NO_VERSION_SUPPORT);

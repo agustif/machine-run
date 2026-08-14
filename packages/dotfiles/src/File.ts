@@ -1,6 +1,7 @@
-import { MachinePaths, isNotFound, makeSha256, readIfPresent } from "@machine-run/core";
+import { MachinePaths, Platform, Windows, isNotFound, makeSha256, readIfPresent } from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
+import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -52,6 +53,8 @@ export const FileState = Schema.Struct({
   path: Schema.String,
   hash: Schema.String,
   mode: Schema.optionalKey(Schema.Number),
+  /** `icacls <path>`'s listing, on Windows only — see `Machine.Directory`. */
+  acl: Schema.optionalKey(Schema.String),
   backupPath: Schema.optionalKey(Schema.String),
 });
 
@@ -80,11 +83,36 @@ export class FilePathUnreadable extends Data.TaggedError("FilePathUnreadable")<{
   }
 }
 
+/**
+ * Whether an observed file's permissions satisfy the desired mode — mode bits on
+ * POSIX, the live ACL on Windows, where there is no mode to compare. See
+ * `Machine.Directory` for the full reasoning; an unreadable ACL is never
+ * satisfied.
+ */
+const modeSatisfied = (
+  platform: typeof Platform.Service,
+  observed: FileState,
+  desired: FileState,
+): boolean => {
+  if (desired.mode === undefined) return true;
+  if (!platform.isWindows) return observed.mode === desired.mode;
+  return Windows.aclSatisfiesMode(
+    UndefinedOr.match(observed.acl, {
+      onUndefined: () => Option.none<string>(),
+      onDefined: (acl) => Option.some(acl),
+    }),
+    observed.path,
+    desired.mode,
+    "file",
+  );
+};
+
 export const makeFileReconciler: Effect.Effect<
   Reconciler<FileProps, FileState, PlatformError | FilePathUnreadable>,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
+  FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto | Platform
 > = Effect.gen(function* () {
+  const platform = yield* Platform;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
@@ -94,7 +122,7 @@ export const makeFileReconciler: Effect.Effect<
     address: (props) => paths.expand(props.path),
     snapshotBeforeApply: true,
 
-    observe: (props) =>
+    observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
         const info = yield* fs
@@ -125,10 +153,15 @@ export const makeFileReconciler: Effect.Effect<
           ),
           () => "",
         );
+        const acl = yield* Boolean.match(platform.isWindows, {
+          onFalse: () => Effect.succeed(Option.none<string>()),
+          onTrue: () => Windows.readAcl(ctx.exec, target),
+        });
         return Option.some({
           path: target,
           hash: yield* sha256(content),
           mode: Number(info.mode) & 0o777,
+          ...Option.match(acl, { onNone: () => ({}), onSome: (value) => ({ acl: value }) }),
         });
       }),
 
@@ -144,12 +177,7 @@ export const makeFileReconciler: Effect.Effect<
     matches: (observed, desired) =>
       observed.path === desired.path &&
       observed.hash === desired.hash &&
-      // An unset desired mode means the recipe does not constrain
-      // permissions, so any observed mode satisfies it.
-      UndefinedOr.match(desired.mode, {
-        onUndefined: () => true,
-        onDefined: (mode) => observed.mode === mode,
-      }),
+      modeSatisfied(platform, observed, desired),
 
     drift: (observed, desired): Drift => {
       const fields: DriftField[] = [];
@@ -185,7 +213,7 @@ export const makeFileReconciler: Effect.Effect<
       return fields;
     },
 
-    apply: ({ props, desired, snapshot }) =>
+    apply: ({ props, desired, snapshot }, ctx) =>
       Effect.gen(function* () {
         const target = desired.path;
         yield* fs.makeDirectory(path.dirname(target), {
@@ -207,7 +235,15 @@ export const makeFileReconciler: Effect.Effect<
         // leave a newly created file readable at the process umask for the
         // window between the two calls.
         yield* fs.writeFileString(target, props.content, { mode: props.mode });
-        if (props.mode !== undefined) yield* fs.chmod(target, props.mode);
+        if (props.mode !== undefined) {
+          yield* Boolean.match(platform.isWindows, {
+            onFalse: () => fs.chmod(target, props.mode ?? 0),
+            onTrue: () =>
+              Windows.applyMode(ctx.exec, target, props.mode ?? 0, "file").pipe(
+                Effect.orElseSucceed(() => undefined),
+              ),
+          });
+        }
         const info = yield* fs.stat(target);
         return {
           ...desired,

@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
@@ -91,16 +91,16 @@ const decodeBrewServiceInfoList = Schema.decodeUnknownEffect(BrewServiceInfoList
 const parseFailure = (cause: unknown) => new ServiceParseError({ backend: "brew-services", cause });
 
 const runStart = (name: string, exec: Exec) =>
-  exec({ command: Sh.sh("brew", "services", "start", name), shell: true, timeout: "2 minutes" });
+  exec({ command: Sh.sh("brew", "services", "start", name), shell: true, timeout: Timeouts.serviceControl });
 
 const runStop = (name: string, exec: Exec) =>
-  exec({ command: Sh.sh("brew", "services", "stop", name), shell: true, timeout: "2 minutes" });
+  exec({ command: Sh.sh("brew", "services", "stop", name), shell: true, timeout: Timeouts.serviceControl });
 
 const runKill = (name: string, exec: Exec) =>
-  exec({ command: Sh.sh("brew", "services", "kill", name), shell: true, timeout: "2 minutes" });
+  exec({ command: Sh.sh("brew", "services", "kill", name), shell: true, timeout: Timeouts.serviceControl });
 
 const runRun = (name: string, exec: Exec) =>
-  exec({ command: Sh.sh("brew", "services", "run", name), shell: true, timeout: "2 minutes" });
+  exec({ command: Sh.sh("brew", "services", "run", name), shell: true, timeout: Timeouts.serviceControl });
 
 export const makeBrewServicesBackend = (): ServiceBackend => {
   const observe: ServiceBackend["observe"] = (name, _path, exec) =>

@@ -1,4 +1,4 @@
-import { MachinePathsLive, silentSession } from "@machine-run/core";
+import { MachinePathsLive, silentSession, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { CommandExecutor, CommandExecutorLive, type CommandRunProps } from "alchemy/Command";
@@ -67,7 +67,7 @@ it("parseFingerprint reports undefined for output with no SHA256 field where exp
 // default comment).
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), CommandExecutorLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), CommandExecutorLive()).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

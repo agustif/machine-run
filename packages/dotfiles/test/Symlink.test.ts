@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -12,7 +12,7 @@ import {
   SymlinkSourceMissing,
 } from "../src/Symlink.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 const applyCtx = {
   exec: () => Effect.die("not used"),

@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 
 /**
@@ -87,9 +88,14 @@ export const parseCargoInstallList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const cargoTimeouts: PackageTimeouts = { install: Timeouts.toolchain, refresh: Timeouts.indexRefresh };
+
 export const makeCargoBackend = (): PackageManagerBackend => ({
   id: "cargo",
   versions: cargoVersionSupport,
+  timeouts: cargoTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("cargo", "install", "--list") }).pipe(
       Effect.map((result) => parseCargoInstallList(result.stdout)),
@@ -100,7 +106,7 @@ export const makeCargoBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("cargo", "install", name),
           shell: true,
-          timeout: "10 minutes",
+          timeout: cargoTimeouts.refresh,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -109,7 +115,7 @@ export const makeCargoBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("cargo", "install", name, "--version", v.version),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: cargoTimeouts.refresh,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

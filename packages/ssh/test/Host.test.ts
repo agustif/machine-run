@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import * as Dotfiles from "@machine-run/dotfiles";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -87,7 +87,7 @@ it("carries `after` through verbatim when given", () => {
 // also sets.
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

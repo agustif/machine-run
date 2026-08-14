@@ -30,7 +30,7 @@ it.effect("list enumerates real packages from whichever managers are present", (
       expect(entry.name).toBeTruthy();
     }
     const managers = [...new Set(entries.map((entry) => entry.manager))].sort();
-    console.log(`list found ${entries.length} packages across: ${managers.join(", ")}`);
+    yield* Effect.log(`list found ${entries.length} packages across: ${managers.join(", ")}`);
   }).pipe(
     Effect.scoped,
     Effect.provide(CommandExecutorLive().pipe(Layer.provideMerge(NodeServices.layer))),

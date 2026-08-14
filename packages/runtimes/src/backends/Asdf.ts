@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 import type {
@@ -6,6 +6,7 @@ import type {
   RuntimeBackend,
   RuntimeObservation,
   RuntimeScope,
+  RuntimeTimeouts,
 } from "../Backend.ts";
 import { lines } from "../parse.ts";
 
@@ -50,6 +51,8 @@ import { lines } from "../parse.ts";
  * `CommandError`. `list`'s `*` marker gives the identical information without
  * ever going through a failing exit code.
  */
+const asdfTimeouts: RuntimeTimeouts = { install: Timeouts.toolchain };
+
 export const makeAsdfBackend = (deps: {
   home: string;
   path: Path.Path;
@@ -96,7 +99,7 @@ export const makeAsdfBackend = (deps: {
       yield* exec({
         command: Sh.sh("asdf", "install", tool, version),
         shell: true,
-        timeout: "15 minutes",
+        timeout: asdfTimeouts.install,
       });
     }).pipe(Effect.asVoid);
 
@@ -115,5 +118,5 @@ export const makeAsdfBackend = (deps: {
           cwd: scope.path,
         }).pipe(Effect.asVoid);
 
-  return { id: "Asdf", configPath, observe, install, activate };
+  return { id: "Asdf", timeouts: asdfTimeouts, configPath, observe, install, activate };
 };

@@ -2,6 +2,7 @@ import { type VersionSpec } from "@machine-run/core";
 import type { CommandError } from "alchemy/Command";
 import type { Exec, ExecutionContext } from "@machine-run/engine";
 import * as Boolean from "effect/Boolean";
+import type * as Duration from "effect/Duration";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -153,6 +154,26 @@ export interface PackageEntry {
  * that is the signal to revisit this decision — the same signal
  * `RuntimeToolProps.Rustup.channel` was for `Runtime.Tool`.
  */
+/**
+ * How long this manager's own operations are allowed to take.
+ *
+ * Declared per backend, alongside {@link PackageVersionSupport}, because the tool
+ * is the only thing that knows: `brew install` may compile from source, `apt-get
+ * install` is a download and unpack, `mas` waits on the App Store. A central
+ * table of durations would still be someone else guessing on the tool's behalf,
+ * and a bare literal at the `exec` site says nothing about why that number.
+ *
+ * `core`'s `Timeouts` supplies the vocabulary so the *classes* of duration stay
+ * consistent and adjustable in one place; which class applies is this backend's
+ * call.
+ */
+export interface PackageTimeouts {
+  /** Installing or upgrading one package. */
+  readonly install: Duration.Input;
+  /** Refreshing the local index, where this manager has one. */
+  readonly refresh: Duration.Input;
+}
+
 export interface PackageVersionSupport {
   readonly accepts: ReadonlySet<VersionSpec["_tag"]>;
   readonly canDowngrade: boolean;
@@ -201,6 +222,7 @@ export interface PackageManagerBackend {
   readonly id: string;
   /** See {@link PackageVersionSupport}. */
   readonly versions: PackageVersionSupport;
+  readonly timeouts: PackageTimeouts;
   readonly list: (exec: Exec) => Effect.Effect<PackageEntry[], BackendError>;
   /**
    * `version` is always the full `VersionSpec | undefined` a recipe wrote —

@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -8,6 +8,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -60,9 +61,14 @@ const rejectSpec = rejectUnsupportedVersionSpec("pacman", pacmanVersionSupport);
  * artifact of this test environment, not something `install` below needs to
  * pass on a real machine).
  */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const pacmanTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makePacmanBackend = (): PackageManagerBackend => ({
   id: "pacman",
   versions: pacmanVersionSupport,
+  timeouts: pacmanTimeouts,
   /**
    * `pacman -Q` (without `-q`) prints `<name> <version>` pairs — verified in
    * the same container: `pacman -Q tree` → `tree 2.3.2-1`, versus `pacman -Qq
@@ -88,7 +94,7 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "pacman", "-S", "--noconfirm", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: pacmanTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -99,7 +105,7 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
                   ...elevated(execution, "pacman", "-S", "--noconfirm", `${name}=${v.version}`),
                 ),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: pacmanTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,
@@ -136,6 +142,6 @@ export const makePacmanBackend = (): PackageManagerBackend => ({
     exec({
       command: Sh.sh(...elevated(execution, "pacman", "-Sy", "--noconfirm")),
       shell: true,
-      timeout: "5 minutes",
+      timeout: pacmanTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });

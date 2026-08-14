@@ -1,5 +1,5 @@
 import { CommandError, UnexpectedExit } from "alchemy/Command";
-import { expandHome, MachinePaths, MachinePathsLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
@@ -16,7 +16,7 @@ import {
   type ServiceState,
 } from "../src/Service.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A `MachinePaths` whose home is a fixed temp directory — same pattern as `dotfiles/test/Symlink.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>

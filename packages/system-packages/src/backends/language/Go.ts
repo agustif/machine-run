@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 
 /**
@@ -119,9 +120,14 @@ export const parseGoVersionM = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const goTimeouts: PackageTimeouts = { install: Timeouts.toolchain, refresh: Timeouts.indexRefresh };
+
 export const makeGoBackend = (): PackageManagerBackend => ({
   id: "go-install",
   versions: goVersionSupport,
+  timeouts: goTimeouts,
   list: (exec) =>
     exec({
       // A fixed, multi-statement shell script — conditional fallback,
@@ -148,7 +154,7 @@ export const makeGoBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("go", "install", `${name}@latest`),
           shell: true,
-          timeout: "10 minutes",
+          timeout: goTimeouts.refresh,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -157,7 +163,7 @@ export const makeGoBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("go", "install", `${name}@${v.version}`),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: goTimeouts.refresh,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

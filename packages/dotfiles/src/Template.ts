@@ -1,4 +1,4 @@
-import { MachinePaths } from "@machine-run/core";
+import { MachinePaths, Platform } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -189,7 +189,7 @@ export const makeTemplateReconciler: Effect.Effect<
     PlatformError | FilePathUnreadable | TemplateRenderFailed
   >,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
+  FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto | Platform
 > = Effect.gen(function* () {
   const file: Reconciler<FileProps, FileState, PlatformError | FilePathUnreadable> =
     yield* makeFileReconciler;

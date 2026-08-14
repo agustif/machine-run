@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -10,6 +10,7 @@ import {
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
   type RepoBackend,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -58,9 +59,14 @@ const rejectSpec = rejectUnsupportedVersionSpec("dnf", dnfVersionSupport);
  * not independently checked, but this is exactly the CLI surface dnf5's own
  * compatibility layer targets, so it isn't expected to differ.
  */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const dnfTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeDnfBackend = (): PackageManagerBackend => ({
   id: "dnf",
   versions: dnfVersionSupport,
+  timeouts: dnfTimeouts,
   /**
    * `%{name}\t%{evr}\n` — verified in the same container: a tab-separated
    * `name\tevr` pair per package (`tree\t2.2.1-4.fc44`,
@@ -91,7 +97,7 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "dnf", "install", "-y", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: dnfTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -102,7 +108,7 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
                   ...elevated(execution, "dnf", "install", "-y", `${name}-${v.version}`),
                 ),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: dnfTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,
@@ -127,7 +133,7 @@ export const makeDnfBackend = (): PackageManagerBackend => ({
     exec({
       command: Sh.sh(...elevated(execution, "dnf", "makecache")),
       shell: true,
-      timeout: "5 minutes",
+      timeout: dnfTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });
 

@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import type * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
@@ -7,6 +7,7 @@ import {
   type MiseToolIdentity,
   type RuntimeBackend,
   type RuntimeScope,
+  type RuntimeTimeouts,
 } from "../Backend.ts";
 
 /**
@@ -55,6 +56,8 @@ const parseFailure = (cause: unknown) => new BackendParseError({ manager: "mise"
  * {@link RuntimeObservation} in one shell-out, so `observe` here is exactly
  * one command per call — no separate "which one is active" round trip.
  */
+const miseTimeouts: RuntimeTimeouts = { install: Timeouts.toolchain };
+
 export const makeMiseBackend = (deps: {
   home: string;
   path: Path.Path;
@@ -99,7 +102,7 @@ export const makeMiseBackend = (deps: {
     exec({
       command: Sh.sh("mise", "install", `${tool}@${version}`),
       shell: true,
-      timeout: "15 minutes",
+      timeout: miseTimeouts.install,
     }).pipe(Effect.asVoid);
 
   const activate: RuntimeBackend<MiseToolIdentity>["activate"] = (
@@ -117,15 +120,15 @@ export const makeMiseBackend = (deps: {
       ? exec({
           command: Sh.sh("mise", "use", "--global", "--pin", "-y", spec),
           shell: true,
-          timeout: "15 minutes",
+          timeout: miseTimeouts.install,
         }).pipe(Effect.asVoid)
       : exec({
           command: Sh.sh("mise", "use", "--pin", "-y", spec),
           shell: true,
           cwd: scope.path,
-          timeout: "15 minutes",
+          timeout: miseTimeouts.install,
         }).pipe(Effect.asVoid);
   };
 
-  return { id: "Mise", configPath, observe, install, activate };
+  return { id: "Mise", timeouts: miseTimeouts, configPath, observe, install, activate };
 };

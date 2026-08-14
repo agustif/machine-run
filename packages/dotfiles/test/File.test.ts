@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -13,7 +13,7 @@ import {
   type FileState,
 } from "../src/File.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

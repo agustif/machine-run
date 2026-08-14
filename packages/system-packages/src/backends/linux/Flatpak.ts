@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -10,6 +10,7 @@ import {
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
   type RepoBackend,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -85,9 +86,14 @@ const rejectSpec = rejectUnsupportedVersionSpec("flatpak", flatpakVersionSupport
  * `addRepo`, below, are exactly that wiring — this used to be a real, named
  * gap (see `Repo.ts`'s doc comment on `RepoSpec`); it no longer is.
  */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const flatpakTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeFlatpakBackend = (): PackageManagerBackend => ({
   id: "flatpak",
   versions: flatpakVersionSupport,
+  timeouts: flatpakTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("flatpak", "list", "--app", "--columns=application,branch") }).pipe(
       Effect.map((result) =>
@@ -105,7 +111,7 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("flatpak", "install", "-y", "--noninteractive", name),
           shell: true,
-          timeout: "10 minutes",
+          timeout: flatpakTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -114,7 +120,7 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("flatpak", "install", "-y", "--noninteractive", `${name}//${v.name}`),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: flatpakTimeouts.install,
               }).pipe(Effect.asVoid),
             Exact: rejectSpec,
             AtLeast: rejectSpec,

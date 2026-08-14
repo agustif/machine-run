@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -13,7 +13,7 @@ import {
   type SecretFileProps,
 } from "../src/SecretFile.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** `ctx.exec` is unused by the `env` backend, so a stub that dies if it's ever called keeps that honest. */
 const applyCtx = {
@@ -239,6 +239,99 @@ it.effect("observe reports absent before the first write, then presence and mode
     const observed = yield* reconciler.observe(props, observeCtx);
     expect(observed).toEqual(Option.some({ path: target, mode: 0o600 }));
     expect(Option.isSome(observed) && reconciler.matches(observed.value, desired)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift agrees with matches: empty when path and mode both match", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSecretFileReconciler;
+    const state = { path: "/tmp/token", mode: 0o600 };
+
+    const drift = reconciler.drift?.(state, state) ?? [];
+    expect(drift).toEqual([]);
+    expect(reconciler.matches(state, state)).toBe(true);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'mode' field, with 'behind' when observed is the looser mode", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSecretFileReconciler;
+    const observed = { path: "/tmp/token", mode: 0o644 };
+    const desired = { path: "/tmp/token", mode: 0o600 };
+
+    const drift = reconciler.drift?.(observed, desired) ?? [];
+    expect(reconciler.matches(observed, desired)).toBe(false);
+    expect(drift).toEqual([
+      { field: "mode", observed: "0o644", desired: "0o600", direction: "ahead" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports 'behind' when observed is the tighter mode", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSecretFileReconciler;
+    const observed = { path: "/tmp/token", mode: 0o600 };
+    const desired = { path: "/tmp/token", mode: 0o644 };
+
+    const drift = reconciler.drift?.(observed, desired) ?? [];
+    expect(drift).toEqual([
+      { field: "mode", observed: "0o600", desired: "0o644", direction: "behind" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect("drift reports a 'path' field with no direction, since paths aren't ordered", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeSecretFileReconciler;
+    const observed = { path: "/tmp/old-token", mode: 0o600 };
+    const desired = { path: "/tmp/new-token", mode: 0o600 };
+
+    const drift = reconciler.drift?.(observed, desired) ?? [];
+    expect(drift).toEqual([
+      { field: "path", observed: "/tmp/old-token", desired: "/tmp/new-token" },
+    ]);
+  }).pipe(Effect.provide(layer)),
+);
+
+/**
+ * The valuable test: `SecretFileState` never carries the secret's bytes, so
+ * this proves `drift` can't leak one either, not just that it happens not to
+ * today. Applies a real secret, then checks every string `drift` could
+ * possibly produce (from both a matching and a drifted comparison) for the
+ * secret's own text.
+ */
+it.effect("drift never contains the secret's value, in any field", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "token");
+
+    const secretValue = "sk-do-not-leak-this-3f9a8c7e";
+    const props = propsFor(target, "API_TOKEN", { mode: 0o640 });
+    const desired = yield* reconciler.desired(props);
+
+    yield* withEnv(
+      { API_TOKEN: secretValue },
+      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
+    );
+
+    const observed = yield* reconciler.observe(props, observeCtx);
+    expect(Option.isSome(observed)).toBe(true);
+    if (Option.isNone(observed)) return;
+
+    const matching = reconciler.drift?.(observed.value, desired) ?? [];
+    // A drifted comparison too — a different desired mode is the only other
+    // shape this reconciler's `drift` can produce.
+    const drifted = reconciler.drift?.(observed.value, { ...desired, mode: 0o600 }) ?? [];
+
+    for (const fields of [matching, drifted]) {
+      for (const field of fields) {
+        expect(field.observed).not.toContain(secretValue);
+        expect(field.desired).not.toContain(secretValue);
+      }
+    }
   }).pipe(Effect.provide(layer)),
 );
 

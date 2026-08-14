@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -8,6 +8,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -145,9 +146,14 @@ export const parseSnapList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const snapTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeSnapBackend = (): PackageManagerBackend => ({
   id: "snap",
   versions: snapVersionSupport,
+  timeouts: snapTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("snap", "list") }).pipe(
       Effect.map((result) => parseSnapList(result.stdout)),
@@ -158,7 +164,7 @@ export const makeSnapBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "snap", "install", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: snapTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -169,7 +175,7 @@ export const makeSnapBackend = (): PackageManagerBackend => ({
                   ...elevated(execution, "snap", "install", name, `--channel=${v.name}`),
                 ),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: snapTimeouts.install,
               }).pipe(
                 Effect.asVoid,
                 Effect.catchTag("CommandError", () =>
@@ -178,7 +184,7 @@ export const makeSnapBackend = (): PackageManagerBackend => ({
                       ...elevated(execution, "snap", "refresh", name, `--channel=${v.name}`),
                     ),
                     shell: true,
-                    timeout: "10 minutes",
+                    timeout: snapTimeouts.install,
                   }).pipe(Effect.asVoid),
                 ),
               ),

@@ -1,7 +1,7 @@
 import * as http from "node:http";
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -45,7 +45,7 @@ const withServer = (body: Uint8Array) =>
 
 const sha256Hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-const layer = Layer.mergeAll(MachinePathsLive(), FetchHttpClient.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), FetchHttpClient.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

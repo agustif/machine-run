@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import { CommandError, UnexpectedExit } from "alchemy/Command";
@@ -14,7 +14,7 @@ import {
   makeGitRepoReconciler,
 } from "../src/Repo.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Fails the way real `git -C <path> rev-parse --show-toplevel` does when `path` is not inside any repository. */
 const notARepo = () =>

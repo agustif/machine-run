@@ -1,5 +1,5 @@
 import { CommandError, UnexpectedExit } from "alchemy/Command";
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { Exec } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
@@ -12,7 +12,7 @@ import { makeBrewServicesBackend } from "../src/backends/macos/BrewServices.ts";
 import { makeLaunchdBackend } from "../src/backends/macos/Launchd.ts";
 import { makeSystemdUserBackend } from "../src/backends/linux/SystemdUser.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A command runner returning fixed output for every call. */
 const fakeExec =

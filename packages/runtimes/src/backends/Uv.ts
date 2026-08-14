@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import type * as Path from "effect/Path";
@@ -9,6 +9,7 @@ import {
   type RuntimeObservation,
   type RuntimeScope,
   type UvToolIdentity,
+  type RuntimeTimeouts,
 } from "../Backend.ts";
 
 /**
@@ -46,6 +47,8 @@ import {
 const UvPythonEntry = Schema.Struct({ version: Schema.String });
 const UvPythonList = Schema.fromJsonString(Schema.Array(UvPythonEntry));
 const decodeUvPythonList = Schema.decodeUnknownEffect(UvPythonList);
+
+const uvTimeouts: RuntimeTimeouts = { install: Timeouts.systemPackage };
 
 export const makeUvBackend = (deps: {
   home: string;
@@ -102,7 +105,7 @@ export const makeUvBackend = (deps: {
     exec({
       command: Sh.sh("uv", "python", "install", version),
       shell: true,
-      timeout: "10 minutes",
+      timeout: uvTimeouts.install,
     }).pipe(Effect.asVoid);
 
   const activate: RuntimeBackend<UvToolIdentity>["activate"] = ({ version }, scope, exec) =>
@@ -110,17 +113,18 @@ export const makeUvBackend = (deps: {
       ? exec({
           command: Sh.sh("uv", "python", "pin", "--global", version),
           shell: true,
-          timeout: "10 minutes",
+          timeout: uvTimeouts.install,
         }).pipe(Effect.asVoid)
       : exec({
           command: Sh.sh("uv", "python", "pin", version),
           shell: true,
           cwd: scope.path,
-          timeout: "10 minutes",
+          timeout: uvTimeouts.install,
         }).pipe(Effect.asVoid);
 
   return {
     id: "Uv",
+    timeouts: uvTimeouts,
     // uv only ever manages Python — there is no second tool to name, and
     // `UvToolIdentity` (`Backend.ts`) has no `tool` field for a caller to
     // misname in the first place.

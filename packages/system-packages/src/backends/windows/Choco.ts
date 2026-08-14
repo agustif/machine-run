@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -49,9 +50,14 @@ const rejectSpec = rejectUnsupportedVersionSpec("choco", chocoVersionSupport);
  * as a no-op rather than an error, so passing it explicitly stays safe across
  * versions.
  */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const chocoTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeChocoBackend = (): PackageManagerBackend => ({
   id: "choco",
   versions: chocoVersionSupport,
+  timeouts: chocoTimeouts,
   list: (exec) =>
     exec({
       command: Sh.pwsh("choco", "list", "--local-only", "--limit-output"),
@@ -74,7 +80,7 @@ export const makeChocoBackend = (): PackageManagerBackend => ({
           // default; widely documented but UNVERIFIED here.
           command: Sh.pwsh("choco", "install", name, "-y"),
           shell: "powershell.exe",
-          timeout: "10 minutes",
+          timeout: chocoTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -91,7 +97,7 @@ export const makeChocoBackend = (): PackageManagerBackend => ({
                   "-y",
                 ),
                 shell: "powershell.exe",
-                timeout: "10 minutes",
+                timeout: chocoTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

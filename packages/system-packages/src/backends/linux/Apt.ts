@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -10,6 +10,7 @@ import {
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
   type RepoBackend,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 import { parseAllSources } from "./apt/sources.ts";
@@ -46,9 +47,14 @@ export const aptVersionSupport: PackageVersionSupport = {
 
 const rejectSpec = rejectUnsupportedVersionSpec("apt", aptVersionSupport);
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const aptTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeAptBackend = (): PackageManagerBackend => ({
   id: "apt",
   versions: aptVersionSupport,
+  timeouts: aptTimeouts,
   /**
    * `dpkg-query -f '${binary:Package}\t${Version}\n' -W` — verified against
    * the same `ubuntu:24.04` container: `bash\t5.2.21-2ubuntu4` and
@@ -77,7 +83,7 @@ export const makeAptBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "apt-get", "install", "-y", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: aptTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -88,7 +94,7 @@ export const makeAptBackend = (): PackageManagerBackend => ({
                   ...elevated(execution, "apt-get", "install", "-y", `${name}=${v.version}`),
                 ),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: aptTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,
@@ -116,7 +122,7 @@ export const makeAptBackend = (): PackageManagerBackend => ({
     exec({
       command: Sh.sh(...elevated(execution, "apt-get", "update")),
       shell: true,
-      timeout: "5 minutes",
+      timeout: aptTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });
 

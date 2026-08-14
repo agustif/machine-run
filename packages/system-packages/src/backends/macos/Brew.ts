@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
@@ -8,6 +8,7 @@ import {
   type PackageManagerBackend,
   rejectUnsupportedVersionSpec,
   type RepoBackend,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -32,9 +33,14 @@ export const brewVersionSupport = NO_VERSION_SUPPORT;
 
 const rejectSpec = rejectUnsupportedVersionSpec("brew", brewVersionSupport);
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const brewTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeBrewBackend = (): PackageManagerBackend => ({
   id: "brew",
   versions: brewVersionSupport,
+  timeouts: brewTimeouts,
   /**
    * `--full-name` is load-bearing, not cosmetic: plain `brew list --formula`
    * reports every formula by its bare name regardless of which tap it came
@@ -68,7 +74,7 @@ export const makeBrewBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("brew", "install", name),
           shell: true,
-          timeout: "10 minutes",
+          timeout: brewTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: rejectSpec,
     }),
@@ -111,6 +117,7 @@ export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
 export const makeBrewCaskBackend = (): PackageManagerBackend => ({
   id: "brew-cask",
   versions: brewVersionSupport,
+  timeouts: brewTimeouts,
   /**
    * Unlike formula's `list`, `--cask` has no `--full-name` fix to protect,
    * so `--versions` is free to add here — verified on this real machine:
@@ -138,7 +145,7 @@ export const makeBrewCaskBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("brew", "install", "--cask", name),
           shell: true,
-          timeout: "10 minutes",
+          timeout: brewTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: rejectSpec,
     }),

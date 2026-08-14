@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
@@ -8,6 +8,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -29,9 +30,14 @@ export const portVersionSupport: PackageVersionSupport = NO_VERSION_SUPPORT;
 const rejectSpec = rejectUnsupportedVersionSpec("port", portVersionSupport);
 
 /** MacPorts — the second real option on macOS, alongside Homebrew. Install commands need `sudo` (MacPorts, unlike brew, expects root). */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const macPortsTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makePortBackend = (): PackageManagerBackend => ({
   id: "port",
   versions: portVersionSupport,
+  timeouts: macPortsTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("port", "installed"), shell: true }).pipe(
       Effect.map((result) =>
@@ -58,7 +64,7 @@ export const makePortBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh(...elevated(execution, "port", "install", name)),
           shell: true,
-          timeout: "10 minutes",
+          timeout: macPortsTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: rejectSpec,
     }),
@@ -70,6 +76,6 @@ export const makePortBackend = (): PackageManagerBackend => ({
     exec({
       command: Sh.sh(...elevated(execution, "port", "selfupdate")),
       shell: true,
-      timeout: "5 minutes",
+      timeout: macPortsTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });

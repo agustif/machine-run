@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -153,7 +153,7 @@ it.effect("CRLF known_hosts: a second entry is appended using the file's own CRL
 // The reconciler, against a real temp file.
 // ---------------------------------------------------------------------------
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 const observeCtx = { exec: () => Effect.die("Ssh.KnownHost never runs a command") };
 const applyCtx = { ...observeCtx, snapshot: () => Effect.succeed(undefined) };

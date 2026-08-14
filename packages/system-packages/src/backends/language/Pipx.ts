@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -78,9 +79,14 @@ export const parsePipxList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const pipxTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+
 export const makePipxBackend = (): PackageManagerBackend => ({
   id: "pipx",
   versions: pipxVersionSupport,
+  timeouts: pipxTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("pipx", "list", "--short") }).pipe(
       Effect.map((result) => parsePipxList(result.stdout)),
@@ -91,7 +97,7 @@ export const makePipxBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("pipx", "install", name),
           shell: true,
-          timeout: "5 minutes",
+          timeout: pipxTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -103,7 +109,7 @@ export const makePipxBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("pipx", "install", "--force", `${name}==${v.version}`),
                 shell: true,
-                timeout: "5 minutes",
+                timeout: pipxTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

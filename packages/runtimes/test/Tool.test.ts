@@ -1,4 +1,4 @@
-import { MachinePathsLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformLive } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
@@ -13,7 +13,7 @@ import {
   type RuntimeToolState,
 } from "../src/Tool.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** Queues one fixture per call — `Runtime.Tool.observe` issues exactly one command against mise. */
 const queuedExec = (outputs: readonly string[]): Exec => {

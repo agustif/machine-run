@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import { readSecret, SecretSource, type SecretError } from "@machine-run/secrets";
 import type { CommandError } from "alchemy/Command";
@@ -197,7 +197,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
           ),
           shell: true,
           env: { TS_AUTHKEY: authKey, ...hostnameEnv },
-          timeout: "2 minutes",
+          timeout: Timeouts.serviceControl,
         });
         return desired;
       }
@@ -214,7 +214,7 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
         }),
         shell: true,
         env: hostnameEnv,
-        timeout: "1 minute",
+        timeout: Timeouts.networkQuery,
       });
       return desired;
     }).pipe(

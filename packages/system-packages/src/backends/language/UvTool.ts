@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -103,9 +104,14 @@ export const parseUvToolList = (stdout: string): PackageEntry[] => {
   return entries;
 };
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const uvToolTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+
 export const makeUvToolBackend = (): PackageManagerBackend => ({
   id: "uv-tool",
   versions: uvToolVersionSupport,
+  timeouts: uvToolTimeouts,
   list: (exec) =>
     exec({ command: Sh.sh("uv", "tool", "list") }).pipe(
       Effect.map((result) => parseUvToolList(result.stdout)),
@@ -116,7 +122,7 @@ export const makeUvToolBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("uv", "tool", "install", name),
           shell: true,
-          timeout: "5 minutes",
+          timeout: uvToolTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -125,7 +131,7 @@ export const makeUvToolBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("uv", "tool", "install", "--force", `${name}==${v.version}`),
                 shell: true,
-                timeout: "5 minutes",
+                timeout: uvToolTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

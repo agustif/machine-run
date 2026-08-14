@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Schema from "effect/Schema";
@@ -9,6 +9,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 
 /**
@@ -72,9 +73,14 @@ const NpmLs = Schema.fromJsonString(
 
 const decodeNpmLs = Schema.decodeUnknownEffect(NpmLs);
 
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const npmTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+
 export const makeNpmBackend = (): PackageManagerBackend => ({
   id: "npm",
   versions: npmVersionSupport,
+  timeouts: npmTimeouts,
   /**
    * `npm ls -g` exits non-zero (`ELSPROBLEMS`) whenever it finds *any*
    * problem in the global tree — an unmet peer dependency chief among
@@ -125,7 +131,7 @@ export const makeNpmBackend = (): PackageManagerBackend => ({
         exec({
           command: Sh.sh("npm", "install", "-g", name),
           shell: true,
-          timeout: "5 minutes",
+          timeout: npmTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -134,7 +140,7 @@ export const makeNpmBackend = (): PackageManagerBackend => ({
               exec({
                 command: Sh.sh("npm", "install", "-g", `${name}@${v.version}`),
                 shell: true,
-                timeout: "5 minutes",
+                timeout: npmTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,

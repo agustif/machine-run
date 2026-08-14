@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -105,6 +106,7 @@ export const aurVersionSupport: PackageVersionSupport = {
 const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
   id: bin,
   versions: aurVersionSupport,
+  timeouts: aurTimeouts,
   // `-Qm` (without `-q`) reports `<name> <version>` pairs for foreign
   // packages, the same way `Pacman.ts`'s `list` drops `-q` — not
   // independently re-run in this session (see this module's doc comment on
@@ -130,7 +132,7 @@ const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
         exec({
           command: Sh.sh(bin, "-S", "--noconfirm", name),
           shell: true,
-          timeout: "10 minutes",
+          timeout: aurTimeouts.refresh,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -139,7 +141,7 @@ const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
               exec({
                 command: Sh.sh(bin, "-S", "--noconfirm", `${name}=${v.version}`),
                 shell: true,
-                timeout: "10 minutes",
+                timeout: aurTimeouts.refresh,
               }).pipe(Effect.asVoid),
             AtLeast: rejectUnsupportedVersionSpec(bin, aurVersionSupport),
             Channel: rejectUnsupportedVersionSpec(bin, aurVersionSupport),
@@ -161,9 +163,13 @@ const makeAurHelperBackend = (bin: "yay" | "paru"): PackageManagerBackend => ({
     exec({
       command: Sh.sh(bin, "-Sy", "--noconfirm"),
       shell: true,
-      timeout: "5 minutes",
+      timeout: aurTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });
+
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const aurTimeouts: PackageTimeouts = { install: Timeouts.toolchain, refresh: Timeouts.indexRefresh };
 
 export const makeYayBackend = (): PackageManagerBackend => makeAurHelperBackend("yay");
 export const makeParuBackend = (): PackageManagerBackend => makeAurHelperBackend("paru");

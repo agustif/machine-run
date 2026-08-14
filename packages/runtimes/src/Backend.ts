@@ -1,3 +1,4 @@
+import type * as Duration from "effect/Duration";
 import type { CommandError } from "alchemy/Command";
 import type { Exec } from "@machine-run/engine";
 import * as Data from "effect/Data";
@@ -137,7 +138,19 @@ export type UvToolIdentity = typeof UvToolIdentity.Type;
  * `CommandExecutor` directly, so it cannot run a command outside the
  * reconciler's own bookkeeping.
  */
+/**
+ * How long this runtime manager's work is allowed to take, declared by the
+ * backend for the same reason `system-packages`' `PackageTimeouts` is: `rustup`
+ * downloads a prebuilt toolchain, `mise` may build a language from source, `uv`
+ * resolves a Python. Only the tool knows.
+ */
+export interface RuntimeTimeouts {
+  /** Installing or activating a version. */
+  readonly install: Duration.Input;
+}
+
 export interface RuntimeBackend<Identity> {
+  readonly timeouts: RuntimeTimeouts;
   readonly id: RuntimeManagerId;
 
   /**

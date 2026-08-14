@@ -1,4 +1,4 @@
-import { Sh } from "@machine-run/core";
+import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
@@ -7,6 +7,7 @@ import {
   type PackageManagerBackend,
   type PackageVersionSupport,
   rejectUnsupportedVersionSpec,
+  type PackageTimeouts,
 } from "../../Backend.ts";
 import { lines } from "../../parse.ts";
 
@@ -114,9 +115,14 @@ export const parseWingetList = (stdout: string): PackageEntry[] => {
  * the widely-documented ones for a non-interactive `winget install`, but are
  * UNVERIFIED on this machine (no Windows install available to test against).
  */
+/** Declared here rather than inline at each `exec`, the same way this
+ * backend's `versions` is: one statement of what this tool's own work costs. */
+const wingetTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+
 export const makeWingetBackend = (): PackageManagerBackend => ({
   id: "winget",
   versions: wingetVersionSupport,
+  timeouts: wingetTimeouts,
   list: (exec) =>
     exec({
       command: Sh.pwsh("winget", "list", "--accept-source-agreements"),
@@ -138,7 +144,7 @@ export const makeWingetBackend = (): PackageManagerBackend => ({
             "--disable-interactivity",
           ),
           shell: "powershell.exe",
-          timeout: "10 minutes",
+          timeout: wingetTimeouts.install,
         }).pipe(Effect.asVoid),
       onDefined: (spec) =>
         Match.value(spec).pipe(
@@ -160,7 +166,7 @@ export const makeWingetBackend = (): PackageManagerBackend => ({
                   "--disable-interactivity",
                 ),
                 shell: "powershell.exe",
-                timeout: "10 minutes",
+                timeout: wingetTimeouts.install,
               }).pipe(Effect.asVoid),
             AtLeast: rejectSpec,
             Channel: rejectSpec,
@@ -177,6 +183,6 @@ export const makeWingetBackend = (): PackageManagerBackend => ({
     exec({
       command: Sh.pwsh("winget", "source", "update"),
       shell: "powershell.exe",
-      timeout: "5 minutes",
+      timeout: wingetTimeouts.refresh,
     }).pipe(Effect.asVoid),
 });

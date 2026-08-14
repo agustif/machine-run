@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive } from "@machine-run/core";
+import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -18,7 +18,7 @@ import {
   type GitConfigProps,
 } from "../src/Config.ts";
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /** A `MachinePaths` whose home is a fixed temp directory — see `Symlink.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>

@@ -1,8 +1,9 @@
-import { CREDENTIAL_FILE_MODE, isNotFound, MachinePaths } from "@machine-run/core";
+import { CREDENTIAL_FILE_MODE, isNotFound, MachinePaths, Platform, Windows } from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
+import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
 import * as FileSystem from "effect/FileSystem";
@@ -10,6 +11,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { type PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 import { HttpClientError } from "effect/unstable/http/HttpClientError";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
@@ -131,6 +133,8 @@ export const DownloadState = Schema.Struct({
   path: Schema.String,
   hash: Schema.String,
   mode: Schema.optionalKey(Schema.Number),
+  /** `icacls <path>`'s listing, on Windows only — see `Machine.Directory`. */
+  acl: Schema.optionalKey(Schema.String),
 });
 
 export type DownloadState = typeof DownloadState.Type;
@@ -138,6 +142,30 @@ export type DownloadState = typeof DownloadState.Type;
 export interface Download extends Resource<"Machine.Download", DownloadProps, DownloadState> {}
 
 export const Download = Resource<Download>("Machine.Download");
+
+/**
+ * Whether observed permissions satisfy the desired mode — mode bits on POSIX,
+ * the live ACL on Windows, where there is no mode to compare. An unreadable ACL
+ * is never satisfied: "cannot confirm" converges by re-applying. See
+ * `Machine.Directory` for the full reasoning.
+ */
+const modeSatisfied = (
+  platform: typeof Platform.Service,
+  observed: { readonly path: string; readonly mode?: number; readonly acl?: string },
+  desiredMode: number | undefined,
+): boolean => {
+  if (desiredMode === undefined) return true;
+  if (!platform.isWindows) return observed.mode === desiredMode;
+  return Windows.aclSatisfiesMode(
+    UndefinedOr.match(observed.acl, {
+      onUndefined: () => Option.none<string>(),
+      onDefined: (acl) => Option.some(acl),
+    }),
+    observed.path,
+    desiredMode,
+    "file",
+  );
+};
 
 export const makeDownloadReconciler: Effect.Effect<
   Reconciler<
@@ -151,8 +179,14 @@ export const makeDownloadReconciler: Effect.Effect<
     | DownloadPathUnreadable
   >,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto | HttpClient.HttpClient
+  | FileSystem.FileSystem
+  | Path.Path
+  | MachinePaths
+  | Crypto.Crypto
+  | HttpClient.HttpClient
+  | Platform
 > = Effect.gen(function* () {
+  const platform = yield* Platform;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
@@ -178,7 +212,7 @@ export const makeDownloadReconciler: Effect.Effect<
   return {
     address: (props) => paths.expand(props.path),
 
-    observe: (props) =>
+    observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.path);
         const info = yield* fs
@@ -203,10 +237,15 @@ export const makeDownloadReconciler: Effect.Effect<
           return yield* Effect.fail(new DownloadTooLarge({ path: target, bytes: size, limit }));
         }
         const bytes = yield* fs.readFile(target);
+        const acl = yield* Boolean.match(platform.isWindows, {
+          onFalse: () => Effect.succeed(Option.none<string>()),
+          onTrue: () => Windows.readAcl(ctx.exec, target),
+        });
         return Option.some({
           path: target,
           hash: yield* hashBytes(bytes),
           mode: Number(info.mode) & 0o777,
+          ...Option.match(acl, { onNone: () => ({}), onSome: (value) => ({ acl: value }) }),
         });
       }),
 
@@ -225,9 +264,7 @@ export const makeDownloadReconciler: Effect.Effect<
     matches: (observed, desired) =>
       observed.path === desired.path &&
       observed.hash === desired.hash &&
-      // An unset desired mode means the recipe does not constrain
-      // permissions, so any observed mode satisfies it.
-      (desired.mode === undefined || observed.mode === desired.mode),
+      modeSatisfied(platform, observed, desired.mode),
 
     drift: (observed, desired): Drift => {
       const fields: DriftField[] = [];
@@ -259,7 +296,7 @@ export const makeDownloadReconciler: Effect.Effect<
       return fields;
     },
 
-    apply: ({ props, desired }) =>
+    apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
         const target = desired.path;
         const dir = path.dirname(target);
@@ -328,7 +365,13 @@ export const makeDownloadReconciler: Effect.Effect<
         if (props.mode !== undefined) {
           yield* fs.chmod(tempPath, CREDENTIAL_FILE_MODE);
           yield* fs.writeFile(tempPath, bytes);
-          yield* fs.chmod(tempPath, props.mode);
+          yield* Boolean.match(platform.isWindows, {
+            onFalse: () => fs.chmod(tempPath, props.mode ?? 0),
+            onTrue: () =>
+              Windows.applyMode(ctx.exec, tempPath, props.mode ?? 0, "file").pipe(
+                Effect.orElseSucceed(() => undefined),
+              ),
+          });
         } else {
           yield* fs.writeFile(tempPath, bytes);
         }

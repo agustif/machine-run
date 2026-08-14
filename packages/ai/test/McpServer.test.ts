@@ -1,4 +1,4 @@
-import { MachinePaths, MachinePathsLive } from "@machine-run/core";
+import { MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
 import type { McpServerProps, McpServerState } from "@machine-run/ai";
 import { makeMcpServerReconciler } from "@machine-run/ai";
 import { NodeServices } from "@effect/platform-node";
@@ -26,7 +26,7 @@ import { jsonRecordOr } from "../src/backends/jsonConfigFile.ts";
 const envConfig = (vars: Record<string, string>) =>
   ConfigProvider.layer(ConfigProvider.fromEnvRecord(vars));
 
-const layer = MachinePathsLive().pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
 
 /**
  * Decodes a written config file's raw text as JSON — `Schema.Json` rather

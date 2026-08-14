@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
-import { MachinePaths, MachinePathsLive, silentSession } from "@machine-run/core";
+import { MachinePaths, MachinePathsLive, silentSession, PlatformLive } from "@machine-run/core";
 import { expect, it } from "@effect/vitest";
 import { CommandExecutor, CommandExecutorLive } from "alchemy/Command";
 import * as Effect from "effect/Effect";
@@ -16,7 +16,7 @@ import { ExecGuardRequired, makeExecReconciler, type ExecProps } from "../src/Ex
  * would test the reconciler's plumbing against a fiction of how `sh` behaves,
  * not against `sh`.
  */
-const layer = Layer.mergeAll(MachinePathsLive(), CommandExecutorLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), CommandExecutorLive()).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
