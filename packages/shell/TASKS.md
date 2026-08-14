@@ -11,7 +11,7 @@ It also owns the only `unapply` in the codebase.
 ## Verification
 
 - [x] **nu's chdir hook actually firing.** Confirmed live: `docker exec -it
-  <container> nu` inside a `tmux` session (a real terminal emulator, not
+<container> nu` inside a `tmux` session (a real terminal emulator, not
       just a raw pty — nu's reedline blocks on an unanswered ANSI DSR cursor
       query, `\x1b[6n`, from a bare pty, which is what made earlier attempts
       hang rather than a generic "no TTY" problem) got nu to a real `~>`

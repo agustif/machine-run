@@ -244,7 +244,7 @@ doc comment for the full transcript.
 ### `SecretBackend` — 5 ids, `secrets`
 
 ```
-~ 1password (op)   ~ doppler   ~ keychain (security)   ✓ pass   ~ env
+✓ env   ✓ pass   ! 1password (op)   ! doppler   ! keychain (security)
 ```
 
 **`✓ pass`** — the one backend in this seam a container can fully verify: no
