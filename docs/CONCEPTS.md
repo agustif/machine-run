@@ -131,10 +131,11 @@ console inspect. It does nothing about the state file. Anything that puts a
 This repo's answer is not to encrypt around the problem but to avoid it:
 `Machine.SecretFile`'s state is `{path, mode}` and contains no secret material
 at all, not even a hash. The cost is that secret rotation is undetectable by
-construction (V1-PLAN §5), which is a trade made knowingly. See
-[TASKS.md](./TASKS.md) for the encrypted state store that would cover what
-unavoidably lands in state — Alchemy's `StateService` is an explicit extension
-point, so it is implementable without forking anything.
+construction (see [V1-PLAN.md](./V1-PLAN.md#design-questions-still-open)),
+which is a trade made knowingly. See [TASKS.md](./TASKS.md) for the
+encrypted state store that would cover what unavoidably lands in state —
+Alchemy's `StateService` is an explicit extension point, so it is
+implementable without forking anything.
 
 ---
 
@@ -195,9 +196,8 @@ Two constructors, and the choice is not stylistic:
   typed payload, matched by `Effect.catchTag`. Use when the error stays in
   process.
 - **`Schema.TaggedError`** — schema-backed, so the error itself can be validated
-  and serialized. Use when an error must cross a serialization boundary. Nothing
-  here needs that yet; note that `alchemy@beta.67` used a `TaggedErrorClass`
-  form that `effect@rc.108` removed, so this API is still moving.
+  and serialized. Use when an error must cross a serialization boundary.
+  Nothing here needs that yet.
 
 Rules that hold regardless:
 

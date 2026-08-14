@@ -255,8 +255,8 @@ implementation, dispatched from inside one generic resource.
       *Also unverified on Windows:* `git clone`/`remote` behaviour — three
       `Git.Repo` `apply` tests fail and the cause has not been read yet.
 
-**Not before a deploy works.** Every package added while `plan` is broken is a
-package whose `observe`/`apply` the engine has never run.
+**Breadth before depth is the standing risk.** `deploy-check.sh` exercises 7 of
+23 kinds; the other 16 have an `observe`/`apply` the engine has still never run.
 
 ---
 

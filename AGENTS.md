@@ -14,21 +14,14 @@ Effect and Alchemy primitive is used for. This file is the rules layer on top.
 
 ## 0. Verify, don't recall
 
-This repo has already been damaged twice by plausible-sounding assertions that
-were never checked. A previous session recorded a fix for
-`Context.Tag.Service<...>` that **did not work and could not have worked**
-(`Context.Tag` doesn't exist in Effect 4), and recorded that resource tests were
-"blocked by an alchemy-test version-skew bug" when nothing was blocking them.
-
-So:
+Plausible-sounding assertions that were never checked have cost this repo
+real time. So:
 
 - **Before using any Effect or Alchemy API, grep its shipped types.**
   `node_modules/effect/dist/*.d.ts`, `node_modules/alchemy/src/**`. Do not rely
   on memory of Effect 3, blog posts, or this file.
 - **Before claiming something works, run it.** `npm run check`, `npm test`.
-- **Before claiming something is impossible, try the direct approach.** The
-  "untestable resources" claim survived multiple sessions because nobody tried
-  calling the provider body.
+- **Before claiming something is impossible, try the direct approach.**
 
 ### Effect 4 is not Effect 3
 
@@ -50,14 +43,10 @@ hand-rolled mutual exclusion, `Clock` over `new Date()`, `Schema` over
 
 ## 0b. Maximum type safety, always
 
-The compiler is the only reviewer that never gets tired, and every time this
-repo has widened a type to quiet it, the widening was hiding a real defect.
-`as never` at the engine seam hid a reconciler whose state was never tied to its
-resource's declared attributes. `Sh` returning a bare `string` hid a
-caller-supplied prop interpolated raw into a shell command. A `catch` that took
-every failure hid an encryption key being destroyed by a transient read error.
-
-So:
+The compiler is the only reviewer that never gets tired. Every time this repo
+has widened a type to quiet it, the widening was hiding a real defect — an
+untied reconciler state, a raw-interpolated shell prop, an encryption key
+destroyed by a transient read error a broad `catch` absorbed. So:
 
 - **No `as never`, no `as unknown as`, no widening to `unknown`** to make code
   compile. If something will not type, that is information about the model, not
@@ -90,26 +79,15 @@ has already reached Linux, Windows, Arch, Fedora and a real systemd PID 1 that
 way; a Mac is sitting right here for anything macOS.
 
 This is not pedantry — it is the single highest-yield habit in this codebase's
-history. Everything below was believed on documentation and turned out false
-when someone ran it:
-
-- `winget list` truncates an over-long cell with an ellipsis that eats the
-  column padding, so splitting on runs of spaces merged Id and Version on 9 of
-  64 rows.
-- `gsettings set` exits 0 while doing nothing when there is no session D-Bus.
-- `asdf current` prints its answer and exits non-zero.
-- `systemctl --user is-enabled` returns exit 1 for both "disabled" and a bus
-  failure, so the exit code alone cannot tell them apart.
-- `security find-generic-password -w` returns the ASCII-hex encoding of the
-  bytes, silently, whenever the secret contains a non-printable byte — which is
-  every SSH key and every PEM certificate.
-- `op`'s unauthenticated error says "No accounts configured"; the classifier
-  looked for "authentication".
-- `git verify-commit` accepts the right key under an entirely unrelated
-  principal, so `allowed_signers` principals are metadata, not a binding.
-
-Each of those was a bug shipped on a plausible guess. None survived contact with
-the real tool.
+history. A command's documented behavior and its actual behavior diverge in
+ways no amount of reading catches: `winget list` truncates an over-long cell
+with an ellipsis that eats column padding, so splitting on runs of spaces
+merges columns on some rows; `security find-generic-password -w` silently
+returns the ASCII-hex encoding of a secret whenever it contains a
+non-printable byte — every SSH key and PEM certificate; `git verify-commit`
+accepts the right key under an entirely unrelated principal, so
+`allowed_signers` principals are metadata, not a binding. None of those
+survived contact with the real tool.
 
 **A gap you cannot close is not a gap you get to shrug at.** If the real
 interface reveals something this repo cannot yet express, that is a finding to
@@ -202,10 +180,12 @@ format, which the apt backend had been documented as not supporting.
 
 Capture real output and use it verbatim as the test fixture.
 
-**Only when a target genuinely is not reachable** — Windows, say — say so in a
-comment and in docs/TASKS.md rather than inventing certainty. An invented flag
-that looks plausible is worse than an acknowledged gap, because it will be
-believed.
+**Only when a target genuinely is not reachable** — no CI runner, no
+container image, needs a live cloud account — say so in a comment and in
+docs/TASKS.md rather than inventing certainty. CI already runs on
+`macos-latest` and `windows-latest`, so "can't check this off a Mac" is
+rarely still true. An invented flag that looks plausible is worse than an
+acknowledged gap, because it will be believed.
 
 Tests must use **real captured output** as fixtures, never invented sample text.
 An invented fixture makes a parser look correct against output no tool emits.
@@ -268,11 +248,15 @@ whitespace and ignores quotes; with `shell: true` it invokes `/bin/sh`. Use
 
 ---
 
-## 10. `delete` is `() => Effect.void`
+## 10. `delete` reverses only if the reconciler says so
 
-Every resource leaves real machine state alone on `alchemy destroy`. If you add
-one whose delete *should* reverse something, call that out explicitly in the doc
-comment and the PR — it's the exception.
+The default is `() => Effect.void` — `alchemy destroy` leaves real machine
+state alone. `delete` calls `Reconciler.unapply` only when `RemovalPolicy` is
+explicitly `"destroy"` **and** the reconciler defines one; today that's 3 of
+23 resource kinds (`Shell.Login`, `Git.Maintenance`, `System.Setting`). If
+you add a resource whose delete *should* reverse something, implement
+`unapply` and say why in its doc comment — the absence of one must mean "I
+decided this can't honestly reverse," not "I forgot."
 
 ---
 
