@@ -52,10 +52,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("choco", chocoVersionSupport);
  */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const chocoTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const chocoTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeChocoBackend = (): PackageManagerBackend => ({
   id: "choco",
+  executable: "choco",
+  shell: "powershell",
   versions: chocoVersionSupport,
   timeouts: chocoTimeouts,
   list: (exec) =>

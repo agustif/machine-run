@@ -35,10 +35,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("brew", brewVersionSupport);
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const brewTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const brewTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeBrewBackend = (): PackageManagerBackend => ({
   id: "brew",
+  executable: "brew",
+  shell: "posix",
   versions: brewVersionSupport,
   timeouts: brewTimeouts,
   /**
@@ -116,6 +121,8 @@ export const makeBrewRepoBackend = (): RepoBackend<BrewRepo> => ({
  */
 export const makeBrewCaskBackend = (): PackageManagerBackend => ({
   id: "brew-cask",
+  executable: "brew",
+  shell: "posix",
   versions: brewVersionSupport,
   timeouts: brewTimeouts,
   /**

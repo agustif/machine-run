@@ -12,8 +12,10 @@ import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Boolean from "effect/Boolean";
+import * as FileSystem from "effect/FileSystem";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as UndefinedOr from "effect/UndefinedOr";
 import { makeYayBackend, makeParuBackend } from "./backends/linux/Aur.ts";
@@ -36,6 +38,7 @@ import { makeWingetBackend } from "./backends/windows/Winget.ts";
 import {
   CannotDowngrade,
   type BackendError,
+  type PackageListContext,
   type PackageManagerBackend,
   UnsupportedVersionSpec,
 } from "./Backend.ts";
@@ -158,7 +161,8 @@ const versionSpecTarget = (spec: VersionSpec): string =>
  * comment for why `Never` is the one that applies when a recipe says
  * nothing at all.
  */
-const resolvePolicy = (props: PackageProps): UpdatePolicy => props.updatePolicy ?? { _tag: "Never" };
+const resolvePolicy = (props: PackageProps): UpdatePolicy =>
+  props.updatePolicy ?? { _tag: "Never" };
 
 /**
  * What `observed.version` must equal for a package to count as converged,
@@ -185,8 +189,32 @@ const resolvedTarget = (props: PackageProps): string | undefined =>
  * for the same pattern).
  */
 export const makePackageReconciler: Effect.Effect<
-  Reconciler<PackageProps, PackageState, BackendError | UnsupportedVersionSpec | CannotDowngrade>
+  Reconciler<PackageProps, PackageState, BackendError | UnsupportedVersionSpec | CannotDowngrade>,
+  never,
+  FileSystem.FileSystem | Path.Path
 > = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+
+  /**
+   * Winget's real list surface is a file export, not a stream. Keep the
+   * temporary artifact inside a bracketed effect so it is removed on command,
+   * parse, and interruption failure alike. The file name is formed by the
+   * platform Path service and never assumes POSIX separators or a fixed temp
+   * root.
+   */
+  const packageListContext: PackageListContext = {
+    withTemporaryFile: (use) =>
+      Effect.acquireUseRelease(
+        fs.makeTempDirectory({ prefix: "machine-run-package-list-" }),
+        (directory) => {
+          const file = path.join(directory, "export.json");
+          return use({ path: file, read: fs.readFileString(file) });
+        },
+        (directory) => fs.remove(directory, { recursive: true, force: true }),
+      ),
+  };
+
   const backends = {
     brew: makeBrewBackend(),
     "brew-cask": makeBrewCaskBackend(),
@@ -255,7 +283,9 @@ export const makePackageReconciler: Effect.Effect<
     Effect.gen(function* () {
       const backend = backends[props.manager];
       const index = isApplyPhase(ctx) ? applyIndex : planIndex;
-      const installed = yield* index.packages.get(props.manager, () => backend.list(ctx.exec));
+      const installed = yield* index.packages.get(props.manager, () =>
+        backend.list(ctx.exec, packageListContext),
+      );
       // `Arr.findFirst` rather than `.find` plus an `=== undefined` check: the
       // absence this is looking for is exactly what `Option` models, and the
       // version work made the entry itself carry a `version` worth keeping.
@@ -267,35 +297,6 @@ export const makePackageReconciler: Effect.Effect<
         })),
       );
     });
-
-  /**
-   * The binary each manager drives, for deciding whether it exists on this
-   * machine before asking it to enumerate. Taken from what each backend
-   * actually invokes — `apt` drives `apt-get`, `uv-tool` drives `uv`,
-   * `go-install` drives `go` — and `yay`/`paru` name the AUR helper rather than
-   * `pacman`, since `pacman` being present says nothing about either.
-   */
-  const cliOf = {
-    brew: "brew",
-    "brew-cask": "brew",
-    port: "port",
-    apt: "apt-get",
-    dnf: "dnf",
-    pacman: "pacman",
-    cargo: "cargo",
-    npm: "npm",
-    winget: "winget",
-    choco: "choco",
-    pipx: "pipx",
-    "uv-tool": "uv",
-    gem: "gem",
-    "go-install": "go",
-    mas: "mas",
-    flatpak: "flatpak",
-    snap: "snap",
-    yay: "yay",
-    paru: "paru",
-  } satisfies Record<PackageManagerId, string>;
 
   const managerIds: readonly PackageManagerId[] = PackageManagerId.literals;
 
@@ -362,7 +363,22 @@ export const makePackageReconciler: Effect.Effect<
         managerIds,
         (manager) =>
           ctx
-            .exec({ command: Sh.sh("command", "-v", cliOf[manager]), shell: true })
+            .exec(
+              backends[manager].shell === "powershell"
+                ? {
+                    command: Sh.pwsh(
+                      "Get-Command",
+                      backends[manager].executable,
+                      "-ErrorAction",
+                      "SilentlyContinue",
+                    ),
+                    shell: "powershell.exe",
+                  }
+                : {
+                    command: Sh.sh("command", "-v", backends[manager].executable),
+                    shell: true,
+                  },
+            )
             .pipe(
               Effect.map((result) => result.stdout.trim() !== ""),
               Effect.orElseSucceed(() => false),
@@ -370,7 +386,7 @@ export const makePackageReconciler: Effect.Effect<
                 Boolean.match(present, {
                   onFalse: () => Effect.succeed<PackageState[]>([]),
                   onTrue: () =>
-                    backends[manager].list(ctx.exec).pipe(
+                    backends[manager].list(ctx.exec, packageListContext).pipe(
                       Effect.map((entries) =>
                         entries.map((entry) => ({
                           manager,
@@ -403,7 +419,9 @@ export const makePackageReconciler: Effect.Effect<
       }
       if (desired.version !== undefined && observed.version !== desired.version) {
         const comparison =
-          observed.version === undefined ? "Unknown" : compareVersions(observed.version, desired.version);
+          observed.version === undefined
+            ? "Unknown"
+            : compareVersions(observed.version, desired.version);
         fields.push({
           field: "version",
           observed: observed.version ?? "",

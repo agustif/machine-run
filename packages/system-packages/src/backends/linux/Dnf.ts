@@ -61,10 +61,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("dnf", dnfVersionSupport);
  */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const dnfTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const dnfTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeDnfBackend = (): PackageManagerBackend => ({
   id: "dnf",
+  executable: "dnf",
+  shell: "posix",
   versions: dnfVersionSupport,
   timeouts: dnfTimeouts,
   /**

@@ -148,10 +148,15 @@ export const parseSnapList = (stdout: string): PackageEntry[] => {
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const snapTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const snapTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeSnapBackend = (): PackageManagerBackend => ({
   id: "snap",
+  executable: "snap",
+  shell: "posix",
   versions: snapVersionSupport,
   timeouts: snapTimeouts,
   list: (exec) =>

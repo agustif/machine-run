@@ -64,7 +64,10 @@ it.effect("accepts a recipe whose default export is not a reference", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const dir = yield* fs.makeTempDirectoryScoped();
-    const file = yield* writeRecipe(dir, "real.mjs", REAL_STACK_MODULE);
+    // The dynamic import must use URL encoding, not string concatenation:
+    // spaces are common in a user's checkout path and `file://${path}` turns
+    // them into an invalid file URL.
+    const file = yield* writeRecipe(dir, "real recipe.mjs", REAL_STACK_MODULE);
 
     // Loading succeeds; whether the value is a *valid* stack is Alchemy's
     // judgement, and this deliberately does not duplicate it.

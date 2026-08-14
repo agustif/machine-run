@@ -106,10 +106,15 @@ export const parseUvToolList = (stdout: string): PackageEntry[] => {
 
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const uvToolTimeouts: PackageTimeouts = { install: Timeouts.languagePackage, refresh: Timeouts.indexRefresh };
+const uvToolTimeouts: PackageTimeouts = {
+  install: Timeouts.languagePackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeUvToolBackend = (): PackageManagerBackend => ({
   id: "uv-tool",
+  executable: "uv",
+  shell: "posix",
   versions: uvToolVersionSupport,
   timeouts: uvToolTimeouts,
   list: (exec) =>

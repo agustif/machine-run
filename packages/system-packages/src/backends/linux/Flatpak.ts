@@ -89,10 +89,15 @@ const rejectSpec = rejectUnsupportedVersionSpec("flatpak", flatpakVersionSupport
  */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const flatpakTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const flatpakTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeFlatpakBackend = (): PackageManagerBackend => ({
   id: "flatpak",
+  executable: "flatpak",
+  shell: "posix",
   versions: flatpakVersionSupport,
   timeouts: flatpakTimeouts,
   list: (exec) =>
@@ -121,7 +126,9 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
     UndefinedOr.match(version, {
       onUndefined: () =>
         exec({
-          command: Sh.sh(...elevated(execution, "flatpak", "install", "-y", "--noninteractive", name)),
+          command: Sh.sh(
+            ...elevated(execution, "flatpak", "install", "-y", "--noninteractive", name),
+          ),
           shell: true,
           timeout: flatpakTimeouts.install,
         }).pipe(Effect.asVoid),
@@ -130,7 +137,13 @@ export const makeFlatpakBackend = (): PackageManagerBackend => ({
           Match.tagsExhaustive({
             Channel: (v) =>
               exec({
-                command: Sh.sh("flatpak", "install", "-y", "--noninteractive", `${name}//${v.name}`),
+                command: Sh.sh(
+                  "flatpak",
+                  "install",
+                  "-y",
+                  "--noninteractive",
+                  `${name}//${v.name}`,
+                ),
                 shell: true,
                 timeout: flatpakTimeouts.install,
               }).pipe(Effect.asVoid),
@@ -244,7 +257,9 @@ export const makeFlatpakRepoBackend = (): RepoBackend<FlatpakRepo> => ({
         ),
       onDefined: (location) =>
         exec({
-          command: Sh.sh(...elevated(execution, "flatpak", "remote-add", "--if-not-exists", repo.name, location)),
+          command: Sh.sh(
+            ...elevated(execution, "flatpak", "remote-add", "--if-not-exists", repo.name, location),
+          ),
           shell: true,
         }).pipe(Effect.asVoid),
     }),

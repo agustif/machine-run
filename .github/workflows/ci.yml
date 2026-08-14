@@ -51,6 +51,26 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run lint
 
+  hermetic-tests:
+    name: hermetic tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: restricted default suite
+        run: npm run test:hermetic
+      - name: read-only, networkless container suite
+        run: >-
+          docker run --rm --network=none --read-only --cap-drop=ALL
+          --security-opt=no-new-privileges --user 1000:1000
+          --tmpfs /tmp:rw,noexec,nosuid,size=2g
+          --mount type=bind,source=${{ github.workspace }},target=/workspace,readonly
+          --workdir /workspace node:22-bookworm
+          node scripts/hermetic-tests.mjs
+
   live-tests:
     name: live tests (ubuntu)
     runs-on: ubuntu-latest
@@ -115,6 +135,9 @@ jobs:
         run: |
           winget --version | Tee-Object -FilePath winget-version.txt
           winget list --accept-source-agreements --disable-interactivity | Tee-Object -FilePath winget-list.txt
+          $export = Join-Path $env:RUNNER_TEMP "machine-run-winget-export.json"
+          Add-Content -Path $env:GITHUB_ENV -Value "MACHINE_RUN_WINGET_EXPORT=$export"
+          winget export --output $export --include-versions --accept-source-agreements --disable-interactivity | Tee-Object -FilePath winget-export.log
       - name: Capture real choco output
         shell: pwsh
         run: |

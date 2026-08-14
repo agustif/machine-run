@@ -1,8 +1,10 @@
 import { Sh, Timeouts } from "@machine-run/core";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
+import * as Schema from "effect/Schema";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
+  BackendParseError,
   type PackageEntry,
   type PackageManagerBackend,
   type PackageVersionSupport,
@@ -35,12 +37,12 @@ export const wingetVersionSupport: PackageVersionSupport = {
 const rejectSpec = rejectUnsupportedVersionSpec("winget", wingetVersionSupport);
 
 /**
- * Parses `winget list`'s human-readable table into package IDs.
+ * Parses the legacy `winget list` human-readable table into package IDs for
+ * captured-output regression tests and diagnostics. Production reconciliation
+ * uses {@link parseWingetExport} instead.
  *
- * winget has no machine-readable listing output — no `--json`, and no
- * `-r`/`--limit-output` the way choco has. The table is fixed-width columns
- * (`Name  Id  Version  Available  Source`) whose widths depend on the console
- * width and on the widest value printed.
+ * The table is fixed-width columns (`Name  Id  Version  Available  Source`)
+ * whose widths depend on the console width and on the widest value printed.
  *
  * Verified against real `winget list` output from a Windows runner, kept as
  * `test/fixtures/winget-list.txt`. That output is why this slices by column
@@ -64,11 +66,10 @@ const rejectSpec = rejectUnsupportedVersionSpec("winget", wingetVersionSupport);
  *   Add/Remove-Programs and MSIX entries with no winget package behind them, so
  *   `winget install --id` cannot act on them. They are noise for a reconciler.
  *
- * The consequence to know about: a package whose id is truncated reads as *not
- * installed*, so `apply` will run `winget install` for it on every deploy.
- * winget itself is idempotent, so nothing breaks, but the plan is not empty.
- * The real fix is `winget export`, which emits JSON with untruncated
- * identifiers — see docs/TASKS.md.
+ * This parser remains exported for the captured-output regression test and for
+ * diagnosing old runner transcripts. It is not the reconciler's production
+ * listing path: `winget export` is the machine-readable path used below, so a
+ * truncated table cell can no longer make an installed package look absent.
  *
  * The `Version` column (immediately right of `Id` in the same fixture) is
  * read the identical way — sliced by the next column's start offset, dropped
@@ -99,10 +100,61 @@ export const parseWingetList = (stdout: string): PackageEntry[] => {
     if (id.length === 0 || id.includes("…") || /^(?:ARP|MSIX)\\/.test(id)) continue;
     const rawVersion = versionEnd === undefined ? row.slice(idEnd) : row.slice(idEnd, versionEnd);
     const version = rawVersion.trim();
-    entries.push(version.length === 0 || version.includes("…") ? { name: id } : { name: id, version });
+    entries.push(
+      version.length === 0 || version.includes("…") ? { name: id } : { name: id, version },
+    );
   }
   return entries;
 };
+
+/**
+ * The JSON document written by `winget export`.
+ *
+ * The current schema nests package entries under `Sources`, because an export
+ * can contain both the public Winget source and the Microsoft Store source.
+ * Unknown fields are intentionally ignored: the CLI adds metadata such as
+ * `CreationDate`, `WinGetVersion`, and source details that membership
+ * reconciliation does not need.
+ */
+const WingetExport = Schema.fromJsonString(
+  Schema.Struct({
+    Sources: Schema.Array(
+      Schema.Struct({
+        Packages: Schema.Array(
+          Schema.Struct({
+            PackageIdentifier: Schema.String,
+            Version: Schema.optionalKey(Schema.String),
+          }),
+        ),
+      }),
+    ),
+  }),
+);
+
+const decodeWingetExport = Schema.decodeUnknownEffect(WingetExport);
+
+/**
+ * Decodes a real `winget export` document into the common package inventory.
+ * Malformed JSON and schema drift are a typed parse failure at the CLI
+ * boundary, never a guessed empty inventory.
+ */
+export const parseWingetExport = (
+  content: string,
+): Effect.Effect<PackageEntry[], BackendParseError> =>
+  decodeWingetExport(content).pipe(
+    Effect.map((document) =>
+      document.Sources.flatMap((source) =>
+        source.Packages.map((entry) =>
+          entry.Version === undefined
+            ? { name: entry.PackageIdentifier }
+            : { name: entry.PackageIdentifier, version: entry.Version },
+        ),
+      ),
+    ),
+    Effect.catchTag("SchemaError", (cause) =>
+      Effect.fail(new BackendParseError({ manager: "winget export", cause })),
+    ),
+  );
 
 /**
  * Windows Package Manager. Uses PowerShell quoting (`Sh.pwsh` + `shell:
@@ -117,17 +169,45 @@ export const parseWingetList = (stdout: string): PackageEntry[] => {
  */
 /** Declared here rather than inline at each `exec`, the same way this
  * backend's `versions` is: one statement of what this tool's own work costs. */
-const wingetTimeouts: PackageTimeouts = { install: Timeouts.systemPackage, refresh: Timeouts.indexRefresh };
+const wingetTimeouts: PackageTimeouts = {
+  install: Timeouts.systemPackage,
+  refresh: Timeouts.indexRefresh,
+};
 
 export const makeWingetBackend = (): PackageManagerBackend => ({
   id: "winget",
+  executable: "winget",
+  shell: "powershell",
   versions: wingetVersionSupport,
   timeouts: wingetTimeouts,
-  list: (exec) =>
-    exec({
-      command: Sh.pwsh("winget", "list", "--accept-source-agreements"),
-      shell: "powershell.exe",
-    }).pipe(Effect.map((result) => parseWingetList(result.stdout))),
+  list: (exec, context) => {
+    if (context === undefined) {
+      return Effect.fail(
+        new BackendParseError({
+          manager: "winget export",
+          cause: "a PackageListContext is required to read winget export's file output",
+        }),
+      );
+    }
+    return context.withTemporaryFile((file) =>
+      exec({
+        command: Sh.pwsh(
+          "winget",
+          "export",
+          "--output",
+          file.path,
+          "--include-versions",
+          "--accept-source-agreements",
+          "--disable-interactivity",
+        ),
+        shell: "powershell.exe",
+        timeout: wingetTimeouts.refresh,
+      }).pipe(
+        Effect.flatMap(() => file.read),
+        Effect.flatMap(parseWingetExport),
+      ),
+    );
+  },
   install: (name, version, exec) =>
     UndefinedOr.match(version, {
       onUndefined: () =>

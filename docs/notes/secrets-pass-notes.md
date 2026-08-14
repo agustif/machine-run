@@ -1,12 +1,14 @@
 # secrets: `pass` verification
 
 `pass` (`packages/secrets/src/backends/Pass.ts`) is the first backend in the
-`secrets` seam to read a real secret out of a real (if disposable) vault. Every
-other backend in this seam is still `~`: `1password`/`doppler` need an
+`secrets` seam to read a real secret out of a real (if disposable) vault. At
+the time of this capture, `keychain` was still awaiting its real macOS check;
+that check and its successful-read fix are now recorded in
+`docs/notes/secrets-keychain-notes.md`. `1password`/`doppler` still need an
 authenticated account this session has neither the credentials nor the
 authority to create (see `AGENTS.md` rule 8 — never automate authentication to
-a secret store), `keychain` needs a real macOS login keychain, and `env` reads
-`process.env` directly and has no CLI to verify.
+a secret store), and `env` reads `process.env` directly and has no CLI to
+verify.
 
 ## What was run
 
@@ -83,8 +85,7 @@ findings — the first-line extraction (with real captured multi-line stdout,
 not an invented fixture) and the missing-entry classification (with the real
 captured stderr text as `UnexpectedExit.stderr`).
 
-`pass` is `✓` in [MAP.md](../MAP.md) as of this session. The rest of the
-`secrets` seam is untouched: getting `1password`/`doppler`/`keychain` past `~`
-needs either a real account (which this environment cannot supply without
-violating rule 8) or a real macOS keychain unlock, neither of which a
-disposable Linux container can stand in for.
+`pass` is `✓` in [MAP.md](../MAP.md) as of this session. The current seam
+status is `✓ env`, `✓ pass`, `✓ keychain`, and `~ 1password`/`~ doppler`; the
+latter two still need authenticated accounts, which this environment cannot
+supply without violating rule 8.

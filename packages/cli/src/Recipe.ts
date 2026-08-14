@@ -5,6 +5,7 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import { pathToFileURL } from "node:url";
 
 /**
  * What a recipe file default-exports: the effect `Alchemy.Stack(...)` returns,
@@ -87,7 +88,7 @@ export class RecipeImportFailed extends Data.TaggedError("RecipeImportFailed")<{
  * dynamic import has one obvious home.
  */
 const importRecipeModule = (absolutePath: string): Promise<{ default?: unknown }> =>
-  import(`file://${absolutePath}`);
+  import(pathToFileURL(absolutePath).href);
 
 /** Recipe filenames looked for when none is given, in order. */
 const DEFAULT_NAMES: readonly ["alchemy.run.ts", "machine.run.ts"] = [
