@@ -166,9 +166,10 @@ CI has `windows-latest` and `macos-latest` runners, which removed the last
 - [x] `winget` / `choco` parsers against captured Windows output. Done, and it
       found a real winget parsing bug — detail in [TASKS.md](./TASKS.md) and
       [MAP.md](./MAP.md#4-the-six-backend-seams).
-- [ ] `mas`, and the `defaults` read path, against a real macOS runner.
-- [ ] `snap` — needs systemd, so a container is not enough; a VM or a runner
-      with systemd is required.
+- [x] `mas`, and the `defaults` read path, against a real macOS runner.
+- [x] `snap` — a privileged, systemd-booted container (`docker run
+      --privileged --cgroupns=host`, real `systemd` PID 1) reaches `snapd`
+      fine; see [MAP.md](./MAP.md#4-the-eight-backend-seams).
 - [ ] nu's chdir hook *firing* (registration is verified; firing needs a TTY).
 - [ ] `tailscale status --json`'s real shape.
 - [ ] `Git.Signing` end to end — nothing in the repo signs anything yet.

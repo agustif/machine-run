@@ -52,9 +52,15 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       `docs/notes/system-packages-notes.md`). A future session with a longer
       budget (or a faster host than this sandbox's QEMU amd64 emulation) can
       pick the from-source build back up and finish the `-S`/`-Qmq` checks.
-- [ ] **`brew-cask` separately from `brew`.** Verified as one backend, but casks
-      differ where it matters: `brew list --cask` output, and the fact that a
-      cask install can require a GUI prompt or admin password.
+- [x] **`brew-cask` separately from `brew`.** Read-only verified against this
+      real machine's actual `brew list --cask` (thirteen casks, fixture:
+      `test/fixtures/brew-list-cask.txt`) — a bare one-token-per-line list,
+      no header, no version, which the existing plain `lines()` parser
+      already handles correctly with no change needed. `install` stays
+      unexercised by design: a cask install can require a GUI prompt or
+      admin password this backend cannot satisfy unattended, and nothing
+      installs anything on this machine to prove otherwise — see
+      `docs/notes/system-packages-notes.md`.
 
 ## Coverage
 
@@ -63,10 +69,12 @@ Backends are split per OS under `src/backends/{macos,linux,windows,language}/`.
       server-side repo concept), not a gap — see `Repo.ts`'s doc comment and
       `docs/notes/system-packages-notes.md`.
 - [x] More backends: `pipx`, `uv tool`, `gem`, `go install`, `mas`, `flatpak`,
-      AUR helpers (`yay`/`paru`) — all added and verified (see
-      `docs/notes/system-packages-notes.md`). `snap` was added too but stays
-      UNVERIFIED (snapd needs `systemd`, unreachable from a plain container
-      here). `nix` remains unaddressed.
+      AUR helpers (`yay`/`paru`), `snap` — all added and verified (see
+      `docs/notes/system-packages-notes.md`). `snap` needed a privileged,
+      systemd-booted container rather than a plain one — the earlier "needs
+      systemd, unreachable from a container" note undersold what a
+      `--privileged --cgroupns=host` container with a real `/sbin/init` PID 1
+      can do. `nix` remains unaddressed.
 - [ ] **Version pinning.** `PackageProps` has no `version`, so "install ripgrep"
       cannot mean a particular ripgrep. This is a real gap for reproducibility
       and changes `matches` from membership to comparison.

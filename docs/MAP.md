@@ -183,9 +183,9 @@ new resource kind, never a special case inside a resource.
 ### `PackageManagerBackend` — 19 ids, `system-packages`
 
 ```
-macOS    ✓ brew        ~ brew-cask   ~ port(MacPorts)   ✓ mas (list only)
+macOS    ✓ brew        ✓ brew-cask   ~ port(MacPorts)   ✓ mas (list only)
 Linux    ✓ apt         ✓ dnf         ✓ pacman           ✓ yay   ~ paru
-         ✓ flatpak     ~ snap  ← needs systemd; a container is not enough
+         ✓ flatpak     ✓ snap
 Windows  ! winget      ✓ choco
 language ✓ cargo  ✓ npm  ✓ pipx  ✓ uv-tool  ✓ gem  ✓ go-install
 ```
@@ -200,14 +200,41 @@ no-op `winget install` forever. `winget export` emits JSON with full ids and is
 the real fix — `✗`, not started. winget's *install* flags remain unverified:
 nothing here has ever installed a Windows package.
 
+`✓ brew-cask` — read-only verified against this real machine's actual
+`brew list --cask` (thirteen installed casks, fixture:
+`system-packages/test/fixtures/brew-list-cask.txt`): a bare one-token-per-line
+list with no header and no version column, which the existing plain `lines()`
+parser (the same one plain `brew list --formula` would use without
+`--full-name`) already handles correctly. Nothing was installed — a cask
+install can need a GUI prompt or admin password this backend's `install`
+can't satisfy unattended, so `install` itself stays unverified by design, not
+just by caution.
+
 `✓ mas (list only)` — verified on a real signed-in machine, but `mas install`
-needs root and was never run. `~ paru` was attempted twice: `paru-bin` built
+needs root and was never run — that boundary was re-confirmed this session,
+not overclaimed. `~ paru` was attempted twice: `paru-bin` built
 and installed but failed to *run* (`libalpm.so.15` missing — a real ABI
 mismatch, unlike `yay-bin`'s clean run in the same kind of container), and a
 from-source build compiled cleanly through its whole ~140-crate dependency
 tree but didn't finish its final LTO link inside the session's time budget
-(see `docs/notes/system-packages-notes.md`). `~ snap` is the one backend a
-container genuinely cannot verify.
+(see `docs/notes/system-packages-notes.md`).
+
+`✓ snap` — the "needs systemd, so a container is not enough" excuse this
+entry used to carry was wrong: it was true of a *plain* `docker run`, not of
+containers in general. Booting a genuine `systemd` PID 1 (`docker run
+--privileged --cgroupns=host` with `/sys/fs/cgroup` bind-mounted, entrypoint
+`/sbin/init`, on an image with `systemd`/`systemd-sysv`/`dbus-user-session`/
+`snapd` installed — the same technique `system-services`' `systemd-user`
+backend already used) reaches a real `snapd` perfectly well:
+`systemctl is-system-running` printed `running`, `snap install hello-world`
+ran the daemon's real first-install bootstrap (pulling the `snapd`/`core`
+base snaps, restarting itself mid-install), and the installed snap actually
+executed (`snap run hello-world` → `Hello World!`). `snap list`'s empty case
+prints nothing on stdout — the "No snaps are installed yet" message is on
+stderr, confirmed by capturing the two streams separately — and the
+populated case matched the documented header-plus-rows shape exactly
+(fixture: `system-packages/test/fixtures/snap-list.txt`). See `Snap.ts`'s
+doc comment for the full transcript.
 
 ### `SecretBackend` — 5 ids, `secrets`
 

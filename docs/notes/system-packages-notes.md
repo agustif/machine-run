@@ -95,14 +95,33 @@ specific commands and captured output. Summary:
   `goimports` isn't `golang.org/x/tools/cmd/goimports`, which `go install`
   requires and `props.name` is set to).
 - **`mas`** (`backends/macos/Mas.ts`) — `list` verified against this real,
-  already-signed-in machine's actual `mas list` output. `install` was
-  **not** run — unlike every other backend here, it would durably install a
-  real app under a real Apple ID, the kind of side effect worth avoiding
-  without it being what was actually asked for — so it's verified against
-  `mas install --help`'s own text instead (`mas install <id>`, requires
-  root). Recipes using this backend still need the machine already signed
-  into an Apple ID by hand; `mas` dropped its own `signin` command years ago
-  and nothing here should try to automate that.
+  already-signed-in machine's actual `mas list` output, re-captured this
+  session as `test/fixtures/mas-list.txt` (seven apps now, up from three;
+  identical shape). `install` was **not** run, on this second look either —
+  unlike every other backend here, it would durably install a real app
+  under a real Apple ID, the kind of side effect worth avoiding without it
+  being what was actually asked for — so it's verified against a freshly
+  re-run `mas install --help`'s own text instead (`mas install <id>`,
+  requires root, output unchanged from the first verification). This is a
+  deliberate, permanent boundary for this backend, not a gap: `mas install`
+  needs root and durable account-linked state, and nothing about a second
+  pass changes that. Recipes using this backend still need the machine
+  already signed into an Apple ID by hand; `mas` dropped its own `signin`
+  command years ago and nothing here should try to automate that.
+- **`brew-cask`** (`backends/macos/Brew.ts`) — read-only verified this
+  session against this real machine's actual `brew list --cask` output
+  (thirteen already-installed casks, fixture:
+  `test/fixtures/brew-list-cask.txt`). Previously only exercised as part of
+  `brew`'s own verification; the two differ where it matters. `brew list
+  --cask` prints one bare cask token per line — no header, no version
+  column, same shape a plain (non-`--full-name`) `brew list --formula`
+  would have — so the existing `lines()` parser needed no change. `install`
+  was **not** run: this is a Mac, not a container, so nothing here mutates
+  it, and a cask install specifically (unlike a formula) can require a GUI
+  prompt or admin password (Gatekeeper/notarization, or a `.pkg` installer
+  some casks shell out to) that this backend's non-interactive `install`
+  cannot satisfy regardless — a real, structural difference from `brew`
+  worth recording, not just an unexercised code path.
 - **`yay`/`paru`** (`backends/linux/Aur.ts`) — verified building `yay-bin`
   from the real AUR in the Arch container (see above). `list` uses
   `pacman -Qmq` (foreign packages) rather than either helper's own query
@@ -155,22 +174,44 @@ specific commands and captured output. Summary:
     first space — the same "one string, backend owns its own namespace"
     precedent `dnf`'s COPR shorthand and `apt`'s `ppa:` prefix already set,
     not a new pattern.
-- **`snap`** (`backends/linux/Snap.ts`) — **UNVERIFIED, same category as
-  Winget/Choco below.** `snap` fundamentally needs a running `snapd`, which
-  needs `systemd` and its own mount namespaces — a plain container doesn't
-  provide either, which is itself a widely-documented snap-in-Docker
-  limitation. This was still attempted rather than assumed: `apt-get install
-  snapd` inside `ubuntu:24.04` timed out repeatedly within this session's
-  time budget before `snap version` ever returned, both with and without
-  manually starting `snapd`, and no `--help` output was captured either.
-  Consistent with the known limitation, but not a clean confirmation of it —
-  genuinely unverified, not "confirmed unsupported in Docker." The backend
-  is implemented against `snap list`'s and `snap install`'s widely-published
-  documented shapes (a header row + one row per snap; `sudo snap install
-  <name>`), same as this file's Winget/Choco sections, and its module doc
-  comment says so plainly. Its test coverage is limited to the trivial
-  empty-input case for exactly this reason — no populated fixture exists to
-  test the header-stripping logic against.
+- **`snap`** (`backends/linux/Snap.ts`) — **verified, overturning the earlier
+  "needs systemd, so a container is not enough" excuse.** That excuse was
+  true of a bare `docker run` (`apt-get install snapd` inside a plain
+  `ubuntu:24.04` really did time out repeatedly before `snap version` ever
+  returned, in an earlier session) but not of containers in general: a
+  privileged, systemd-booted container reaches `snapd` the same way it
+  already reached `systemd --user` for `system-services`' `systemd-user`
+  backend. Recipe: `docker run -d ubuntu:24.04 sleep infinity`, install
+  `systemd systemd-sysv dbus-user-session snapd` inside it, `docker commit`
+  that into an image, then `docker run -d --privileged --cgroupns=host -v
+  /sys/fs/cgroup:/sys/fs/cgroup:rw <image> /sbin/init`. `systemctl
+  is-system-running` printed `running` and `ps -p 1` showed a real `systemd`
+  process.
+
+  `snap install hello-world` (as root, no `sudo` needed in the container)
+  triggered snapd's genuine first-install bootstrap — pulling the `snapd`
+  and `core` base snaps, restarting the daemon mid-install ("Requested
+  daemon restart (snapd snap)"), then completing all three installs — and
+  the installed snap actually ran (`snap run hello-world` → `Hello World!`).
+  `snap list` on the empty state prints **nothing on stdout**; the
+  human-facing "No snaps are installed yet." message is on **stderr**,
+  confirmed by redirecting the two streams separately — so `parseSnapList`'s
+  empty-input guard was already handling the right case. The populated
+  listing (fixture: `test/fixtures/snap-list.txt`) matched the
+  widely-documented header-plus-rows shape exactly:
+  ```
+  Name         Version             Rev    Tracking       Publisher    Notes
+  core         16-2.61.4-20260225  17290  latest/stable  canonical**  core
+  hello-world  6.4                 29     latest/stable  canonical**  -
+  snapd        2.76.2              27709  latest/stable  canonical**  snapd
+  ```
+  One previously-undocumented detail: `Publisher` can carry a trailing `**`
+  (Canonical's verified-publisher marker) glued directly onto the name with
+  no space, and `Notes` reads `-` rather than being blank when there's
+  nothing to report — neither affects `firstTokens`, which only reads the
+  first column, but both are now confirmed shape rather than assumption.
+  Containers and images used for this were removed after capturing the
+  fixture (`docker stop`/`rm`/`rmi`), nothing was left running.
 
 ## Winget (`src/backends/windows/Winget.ts`)
 
