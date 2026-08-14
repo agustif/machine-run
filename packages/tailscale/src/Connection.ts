@@ -95,11 +95,19 @@ const isCommandNotFound = (error: CommandError): boolean => {
   return message.includes("command not found") || message.includes("enoent");
 };
 
+/**
+ * `CommandError` is in the union because `tailscale up` failing is the most
+ * likely outcome in this whole package, not an impossible one: a rejected or
+ * expired auth key, an unreachable control plane, a daemon that is not running,
+ * or a run without the privileges to join a tailnet all surface as a non-zero
+ * exit. `apply` previously converted every one of those into a defect, which
+ * nothing can catch and which aborts the run rather than failing this resource.
+ */
 export const makeTailscaleConnectionReconciler: Effect.Effect<
   Reconciler<
     TailscaleConnectionProps,
     TailscaleConnectionState,
-    TailscaleNotInstalled | SecretError
+    TailscaleNotInstalled | SecretError | CommandError
   >
 > = Effect.succeed({
   // One tailnet membership per machine, so every instance contends for the
@@ -190,10 +198,18 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
       });
       return desired;
     }).pipe(
-      Effect.catchTag("CommandError", (error) =>
-        isCommandNotFound(error)
-          ? Effect.fail(new TailscaleNotInstalled({ cause: error }))
-          : Effect.die(error),
+      // A missing binary is worth its own error because the remedy is
+      // different (install tailscale, versus look at why the join was
+      // refused); everything else is reported as the command failure it is.
+      // The handler is annotated rather than inferred: both branches fail, with
+      // different error types, and inference otherwise narrows to whichever
+      // branch it reads first.
+      Effect.catchTag(
+        "CommandError",
+        (error): Effect.Effect<never, TailscaleNotInstalled | CommandError> =>
+          isCommandNotFound(error)
+            ? Effect.fail(new TailscaleNotInstalled({ cause: error }))
+            : Effect.fail(error),
       ),
     ),
 });

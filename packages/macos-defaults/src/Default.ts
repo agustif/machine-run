@@ -1,5 +1,6 @@
 import { Sh } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
+import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -50,8 +51,19 @@ export interface MacDefault extends Resource<"MacOS.Default", MacDefaultProps, M
 
 export const MacDefault = Resource<MacDefault>("MacOS.Default");
 
+/**
+ * `CommandError` is in the error union rather than being converted to a defect,
+ * which is what `apply` used to do. A `defaults write` fails for ordinary
+ * reasons — a domain needing privileges this run does not have, a container
+ * without a real preferences daemon, a sandboxed app's container being
+ * unwritable — and dying on those made one unwritable key abort the whole run
+ * instead of failing one resource, unrecoverably, since nothing can catch a
+ * defect. Two other reconcilers (`Dotfiles.Exec`, `Shell.Login`) already carry
+ * `CommandError` in `E`, so this was a choice rather than something the seam
+ * forced.
+ */
 export const makeMacDefaultReconciler: Effect.Effect<
-  Reconciler<MacDefaultProps, MacDefaultState, PlistDecodeError>
+  Reconciler<MacDefaultProps, MacDefaultState, PlistDecodeError | CommandError>
 > = Effect.succeed({
   // `defaults` serialises per domain, and two keys in one domain are two
   // read-modify-write cycles over the same plist, so applies are serialised
@@ -130,7 +142,7 @@ export const makeMacDefaultReconciler: Effect.Effect<
       }
 
       return desired;
-    }).pipe(Effect.catchTag("CommandError", (error) => Effect.die(error))),
+    }),
 });
 
 export const MacDefaultProvider = () => toProvider(MacDefault, makeMacDefaultReconciler);

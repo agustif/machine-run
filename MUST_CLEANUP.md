@@ -338,6 +338,39 @@ but if the schema default happens to equal it, a successful reset reports as a
 failure. Notably the *inverse* of everything else here: a false negative, not a
 false success.
 
+### 1b.6 Two reconcilers turned every command failure into a defect — *fixed*
+
+`packages/macos-defaults/src/Default.ts` and
+`packages/tailscale/src/Connection.ts`.
+
+Both declared an error union without `CommandError` and then had `apply` end in
+`Effect.catchTag("CommandError", (e) => Effect.die(e))`. A defect is not a
+failure: nothing can catch it, and it aborts the run rather than marking one
+resource failed.
+
+What that covered up is not exotic. `defaults write` fails when the domain needs
+privileges the run does not have, when there is no real preferences daemon
+(any container), or when a sandboxed app's container is unwritable. `tailscale
+up` fails on a rejected or expired auth key, an unreachable control plane, a
+daemon that is not running, or a run without the privileges to join a tailnet
+— which is to say the single most likely outcome in that package was the one
+routed to a defect.
+
+It was a choice, not a constraint: `Dotfiles.Exec` and `Shell.Login` already
+carry `CommandError` in `E`, and `toProvider` is generic in `E`. This is the
+behavioural sibling of the `as never` family — the type system objected, and
+rather than widening the error channel the objection was silenced, here by
+converting the value instead of the type.
+
+**Fixed:** both unions widened, both dies replaced with `Effect.fail`. Tailscale
+keeps `TailscaleNotInstalled` as a distinct error because the remedy differs
+(install it, versus find out why the join was refused), with the handler
+explicitly annotated so the two failing branches unify without a cast.
+
+The one remaining `Effect.die` in the repo (`PackageIndex`) guards a real
+invariant — a fetcher missing for a key `get` always registers first — and is
+correct. There are no `orDie`, `runSync` or `throw` sites in any source file.
+
 ### 1b.5 Read-after-write confirmation is applied to two resources out of five
 
 `System.Setting` and `System.Service` re-read after writing and raise if the
