@@ -18,6 +18,13 @@ FROM node:22-bookworm
 # *container run time*, not just at image build time, and there is no reason
 # to make it pay for a redundant `apt-get update` when the image already has
 # a fresh index from the build that just happened.
+# `dbus-x11` (for `dbus-run-session`), `dconf-gsettings-backend` and
+# `gsettings-desktop-schemas` are here for `System.Setting`. `gsettings set`
+# silently no-ops with no session bus reachable — it prints a dconf warning and
+# still exits 0, leaving the key unchanged — which is why that kind had never been
+# deployed. `entrypoint.sh` runs each alchemy invocation under
+# `dbus-run-session`, and the schemas package supplies a real key to write.
+#
 # `cron` is here for `Git.Maintenance`: `git maintenance start` schedules through
 # systemd timers or crontab, and a plain container has neither, so the resource
 # correctly refuses with `GitMaintenanceSchedulerUnavailable`. Installing cron is
@@ -25,6 +32,7 @@ FROM node:22-bookworm
 # into real coverage.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends sudo ca-certificates cron \
+       dbus-x11 dconf-gsettings-backend gsettings-desktop-schemas \
     && apt-get clean
 
 # A throwaway user with its own real $HOME. Every `~`-expanded path any

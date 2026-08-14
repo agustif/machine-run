@@ -146,6 +146,34 @@ export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, 
       // construction — no separate manager id is needed to build this.
       address: (props) => props.repo._tag,
 
+      /**
+       * Every extra repository each manager on this machine reports.
+       *
+       * Enumerates across all four rather than one: a machine can carry both a
+       * Homebrew tap and an apt PPA, and covering one would be an incomplete
+       * inventory presented as complete. Availability is not probed here the way
+       * `System.Package.list` probes it — a manager that is absent fails its
+       * `listRepos` and that failure propagates, because unlike a package listing
+       * there is no useful "this manager has no repos" answer to distinguish from
+       * "this manager is not installed". A short inventory is worse than none.
+       */
+      list: (ctx) => {
+        // Annotated to the union: each backend's `listRepos` returns its own arm
+        // of `RepoSpec`, and an unannotated array literal infers from whichever
+        // element comes first, making the other three type errors.
+        const listers: ReadonlyArray<
+          () => Effect.Effect<readonly RepoSpec[], BackendError>
+        > = [
+          () => brew.listRepos(ctx.exec),
+          () => apt.listRepos(ctx.exec),
+          () => dnf.listRepos(ctx.exec),
+          () => flatpak.listRepos(ctx.exec),
+        ];
+        return Effect.forEach(listers, (listRepos) => listRepos(), {
+          concurrency: 4,
+        }).pipe(Effect.map((perManager) => perManager.flat().map((repo) => ({ repo }))));
+      },
+
       observe,
 
       desired: (props) => Effect.succeed(props),

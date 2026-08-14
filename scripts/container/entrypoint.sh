@@ -36,7 +36,7 @@ deploy_log() { echo "$LOG_DIR/deploy-$1.log"; }
 
 run_plan() {
   local label="$1"
-  "$ALCHEMY" plan "$RECIPE" 2>&1 | tee "$(plan_log "$label")"
+  dbus-run-session -- "$ALCHEMY" plan "$RECIPE" 2>&1 | tee "$(plan_log "$label")"
 }
 
 # `alchemy deploy` prompts for approval unless `--yes` is passed (see
@@ -44,7 +44,7 @@ run_plan() {
 # "no" to that prompt otherwise) — so this is not optional.
 run_deploy() {
   local label="$1"
-  "$ALCHEMY" deploy "$RECIPE" --yes 2>&1 | tee "$(deploy_log "$label")"
+  dbus-run-session -- "$ALCHEMY" deploy "$RECIPE" --yes 2>&1 | tee "$(deploy_log "$label")"
 }
 
 assert_contains() {
@@ -121,6 +121,7 @@ assert_contains "initial plan proposes to create Git.Maintenance" "$plan1" "demo
 assert_contains "initial plan proposes to create the Ssh.Key" "$plan1" "demo-ssh-key"
 assert_contains "initial plan proposes to create the Ssh.KnownHost" "$plan1" "demo-known-host"
 assert_contains "initial plan proposes to create the Ai.McpServer" "$plan1" "demo-mcp-server"
+assert_contains "initial plan proposes to create the System.Setting" "$plan1" "demo-clock-format"
 
 note "alchemy deploy --yes"
 run_deploy initial
@@ -187,6 +188,9 @@ printf '{"firstStartTime":"2026-01-01T00:00:00.000Z","mcpServers":{}}\n' > "$HOM
 # doing so would mean reading a private key. Asserting drift detection for it
 # would be asserting something the resource deliberately does not do.
 
+note "Drift: change System.Setting's value out from under it (demo-clock-format)"
+dbus-run-session -- gsettings set org.gnome.desktop.interface clock-format "'12h'"
+
 note "alchemy plan (post-drift — every drifted resource must be reported)"
 run_plan post-drift
 plan3="$(plan_log post-drift)"
@@ -211,6 +215,7 @@ assert_contains "drifted Git.Repo is detected" "$plan3" "demo-repo-clone"
 assert_contains "drifted Git.Maintenance is detected" "$plan3" "demo-repo-maintenance"
 assert_contains "drifted Ssh.KnownHost is detected" "$plan3" "demo-known-host"
 assert_contains "drifted Ai.McpServer is detected" "$plan3" "demo-mcp-server"
+assert_contains "drifted System.Setting is detected" "$plan3" "demo-clock-format"
 
 note "Re-deploy to converge before destroy"
 run_deploy reconverge >/dev/null
@@ -230,9 +235,10 @@ before_ssh_key="$(sha256sum "$HOME/.ssh/id_demo" | cut -d' ' -f1)"
 before_known_hosts="$(cat "$HOME/.ssh/known_hosts")"
 before_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))')"
 before_maintenance="$(git config --global --get-all maintenance.repo | grep -c demo-repo-clone || true)"
+before_clock="$(dbus-run-session -- gsettings get org.gnome.desktop.interface clock-format)"
 
 note "alchemy destroy --yes"
-"$ALCHEMY" destroy "$RECIPE" --yes 2>&1 | tee "$LOG_DIR/destroy.log"
+dbus-run-session -- "$ALCHEMY" destroy "$RECIPE" --yes 2>&1 | tee "$LOG_DIR/destroy.log"
 
 note "Assert the machine is untouched (retain is the default — see toProvider.ts)"
 after_gitconfig="$(sha256sum "$HOME/.gitconfig-personal" 2>/dev/null | cut -d' ' -f1 || echo MISSING)"
@@ -249,6 +255,7 @@ after_ssh_key="$(sha256sum "$HOME/.ssh/id_demo" 2>/dev/null | cut -d' ' -f1 || e
 after_known_hosts="$(cat "$HOME/.ssh/known_hosts" 2>/dev/null || echo MISSING)"
 after_mcp="$(node -e 'const d=require(process.env.HOME+"/.claude.json");process.stdout.write(String(!!d.mcpServers?.["deploy-check-server"]))' 2>/dev/null || echo MISSING)"
 after_maintenance="$(git config --global --get-all maintenance.repo 2>/dev/null | grep -c demo-repo-clone || true)"
+after_clock="$(dbus-run-session -- gsettings get org.gnome.desktop.interface clock-format 2>/dev/null || echo MISSING)"
 
 assert_true "Machine.File content unchanged after destroy" \
   test "$before_gitconfig" = "$after_gitconfig"
@@ -283,6 +290,10 @@ assert_true "Ai.McpServer registration survives destroy under the default retain
   test "$before_mcp" = "$after_mcp"
 assert_true "Git.Maintenance registration survives destroy under the default retain policy" \
   test "$before_maintenance" = "$after_maintenance"
+# System.Setting has an `unapply` (`gsettings reset`), so like the three above this
+# proves retain still wins by default.
+assert_true "System.Setting value survives destroy under the default retain policy" \
+  test "$before_clock" = "$after_clock"
 
 kill "$HTTP_SERVER_PID" 2>/dev/null || true
 

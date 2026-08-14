@@ -123,9 +123,9 @@ export const makeTailscaleConnectionReconciler: Effect.Effect<
         Boolean.match(status.BackendState === "Running", {
           onFalse: () => Option.none(),
           onTrue: () =>
-            Option.some({
-              ...(status.Self?.HostName !== undefined ? { hostname: status.Self.HostName } : {}),
-            }),
+            Option.some(
+              status.Self?.HostName === undefined ? {} : { hostname: status.Self.HostName },
+            ),
         }),
       ),
       Effect.catchTag("CommandError", (error) =>

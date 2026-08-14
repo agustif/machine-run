@@ -56,6 +56,7 @@ import * as Dotfiles from "@machine-run/dotfiles";
 import * as Git from "@machine-run/git";
 import * as Secrets from "@machine-run/secrets";
 import * as Ssh from "@machine-run/ssh";
+import * as SystemSettings from "@machine-run/system-settings";
 import * as SystemPackages from "@machine-run/system-packages";
 import * as Alchemy from "alchemy";
 import { CommandExecutorLive } from "alchemy/Command";
@@ -81,6 +82,7 @@ const providers = Layer.mergeAll(
   Secrets.providers(),
   Ssh.providers(),
   SystemPackages.providers(),
+  SystemSettings.providers(),
 ).pipe(Layer.provideMerge(Core.services()), Layer.provide(CommandExecutorLive()));
 
 export default Alchemy.Stack(
@@ -202,6 +204,18 @@ export default Alchemy.Stack(
 
     // The Claude backend writes `~/.claude.json` directly, with no CLI involved,
     // so this exercises the whole AI seam in a container with nothing installed.
+    // `org.gnome.desktop.interface clock-format` comes from
+    // `gsettings-desktop-schemas`, which the image installs — a real schema key
+    // rather than one invented for the test. `entrypoint.sh` runs every alchemy
+    // invocation under `dbus-run-session`, without which `gsettings set` exits 0
+    // and changes nothing.
+    yield* SystemSettings.Setting("demo-clock-format", {
+      _tag: "Gsettings",
+      schema: "org.gnome.desktop.interface",
+      key: "clock-format",
+      value: "'24h'",
+    });
+
     yield* Ai.McpServer("demo-mcp-server", {
       tool: "claude",
       name: "deploy-check-server",

@@ -9,6 +9,11 @@
     "**/node_modules/**"
   ],
   "rules": {
+    // Turned off because it directly contradicts `effect/noAs`, which this repo
+    // enforces as an error: it asks for `as const` on exactly the declarations
+    // `noAs` forbids. `ENVELOPE_VERSION: 1 = 1` is the shape that satisfies the
+    // stricter of the two, so the weaker one is noise that can never be resolved.
+    "typescript/prefer-as-const": "off",
     "effect/noAsyncFunction": "error",
     "effect/noNewPromise": "error",
     "effect/noTryCatch": "error",

@@ -370,11 +370,10 @@ const identityDrift = (observed: SettingState, desired: SettingState): DriftFiel
     ),
     Match.when(
       "Dconf",
-      (): DriftField[] => [
-        ...(observed.path !== desired.path
-          ? [{ field: "path", observed: observed.path ?? "", desired: desired.path ?? "" }]
-          : []),
-      ],
+      (): DriftField[] =>
+        observed.path === desired.path
+          ? []
+          : [{ field: "path", observed: observed.path ?? "", desired: desired.path ?? "" }],
     ),
     Match.exhaustive,
   );
