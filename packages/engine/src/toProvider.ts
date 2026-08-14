@@ -9,7 +9,7 @@ import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { DEFAULT_EXECUTION, detectPrivilege } from "./Reconciler.ts";
-import type { ApplyContext, ExecutionContext, ObserveContext, Reconciler } from "./Reconciler.ts";
+import type { ApplyContext, ExecProps, ExecutionContext, ObserveContext, Reconciler } from "./Reconciler.ts";
 
 /**
  * Builds the Alchemy provider for a {@link Reconciler}.
@@ -131,20 +131,37 @@ export const toProvider = <Res extends ResourceLike, E, R>(
       const backups = yield* Backups;
       const locks = yield* FileLock;
 
-      const exec: ObserveContext["exec"] = (props) => executor.run(props, silentSession);
+      // The probe runs unwrapped, deliberately: it is what *establishes* the
+      // execution context, so it cannot depend on one. Neither `id -u` nor
+      // `command -v sudo` produces translatable output, so it needs no locale.
+      const probe: ObserveContext["exec"] = (props) => executor.run(props, silentSession);
 
       // Detected once per provider, not per reconcile: whether this run can or
       // should escalate is a property of the machine, and probing it on every
       // command would be two extra processes per package.
       const execution: ExecutionContext = {
         ...DEFAULT_EXECUTION,
-        privilege: yield* detectPrivilege(exec),
+        privilege: yield* detectPrivilege(probe),
       };
+
+      // Every command a backend runs goes through here, the one place a locale
+      // can be pinned. Backends parse CLI output — `apt`, `dnf`, `brew`,
+      // `defaults`, `gsettings` — and that output is translated on a non-English
+      // machine, so an unpinned locale is a parser that works in CI and fails on
+      // the operator's laptop. A caller that sets these deliberately still wins,
+      // since its own `env` is spread last.
+      const withLocale = (props: ExecProps): ExecProps => ({
+        ...props,
+        env: { LC_ALL: execution.locale, LANG: execution.locale, ...props.env },
+      });
+
+      const exec: ObserveContext["exec"] = (props) =>
+        executor.run(withLocale(props), silentSession);
 
       const observeCtx: ObserveContext = { exec, execution };
 
       const applyCtx = (session: ScopedPlanStatusSession): ApplyContext => ({
-        exec: (props) => executor.run(props, session),
+        exec: (props) => executor.run(withLocale(props), session),
         execution,
         snapshot: (path) => backups.snapshot(path),
       });

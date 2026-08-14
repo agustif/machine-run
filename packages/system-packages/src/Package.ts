@@ -1,4 +1,4 @@
-import { compareVersions, UpdatePolicy, VersionSpec } from "@machine-run/core";
+import { compareVersions, Sh, UpdatePolicy, VersionSpec } from "@machine-run/core";
 import {
   type ApplyContext,
   type Drift,
@@ -11,6 +11,7 @@ import {
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
+import * as Boolean from "effect/Boolean";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -267,6 +268,37 @@ export const makePackageReconciler: Effect.Effect<
       );
     });
 
+  /**
+   * The binary each manager drives, for deciding whether it exists on this
+   * machine before asking it to enumerate. Taken from what each backend
+   * actually invokes — `apt` drives `apt-get`, `uv-tool` drives `uv`,
+   * `go-install` drives `go` — and `yay`/`paru` name the AUR helper rather than
+   * `pacman`, since `pacman` being present says nothing about either.
+   */
+  const cliOf = {
+    brew: "brew",
+    "brew-cask": "brew",
+    port: "port",
+    apt: "apt-get",
+    dnf: "dnf",
+    pacman: "pacman",
+    cargo: "cargo",
+    npm: "npm",
+    winget: "winget",
+    choco: "choco",
+    pipx: "pipx",
+    "uv-tool": "uv",
+    gem: "gem",
+    "go-install": "go",
+    mas: "mas",
+    flatpak: "flatpak",
+    snap: "snap",
+    yay: "yay",
+    paru: "paru",
+  } satisfies Record<PackageManagerId, string>;
+
+  const managerIds: readonly PackageManagerId[] = PackageManagerId.literals;
+
   return {
     // Serialises on the *manager*, not on `manager:name`. apt/dpkg holds a
     // single global lock (`/var/lib/dpkg/lock-frontend`), so two concurrent
@@ -311,6 +343,48 @@ export const makePackageReconciler: Effect.Effect<
     // already rejects an `AtLeast` spec for every manager before `matches`
     // would ever see one — this branch is unreachable today, not silently
     // wrong.
+
+    /**
+     * Every package every manager on this machine reports, for importing a
+     * machine nobody wrote a recipe for yet.
+     *
+     * Enumerates across *all* present managers rather than one: a machine can
+     * carry both `brew` and `apt`, and a list covering one of them would be an
+     * incomplete inventory presented as a complete one. Availability is probed
+     * per manager, so a `dnf` box does not fail because `brew` is absent.
+     *
+     * A manager that is present but whose listing fails propagates that failure
+     * rather than being skipped. A silently short inventory is the one outcome
+     * worse than no inventory.
+     */
+    list: (ctx) =>
+      Effect.forEach(
+        managerIds,
+        (manager) =>
+          ctx
+            .exec({ command: Sh.sh("command", "-v", cliOf[manager]), shell: true })
+            .pipe(
+              Effect.map((result) => result.stdout.trim() !== ""),
+              Effect.orElseSucceed(() => false),
+              Effect.flatMap((present) =>
+                Boolean.match(present, {
+                  onFalse: () => Effect.succeed<PackageState[]>([]),
+                  onTrue: () =>
+                    backends[manager].list(ctx.exec).pipe(
+                      Effect.map((entries) =>
+                        entries.map((entry) => ({
+                          manager,
+                          name: entry.name,
+                          ...(entry.version === undefined ? {} : { version: entry.version }),
+                        })),
+                      ),
+                    ),
+                }),
+              ),
+            ),
+        { concurrency: 4 },
+      ).pipe(Effect.map((perManager) => perManager.flat())),
+
     matches: (observed, desired) =>
       observed.manager === desired.manager &&
       observed.name === desired.name &&
