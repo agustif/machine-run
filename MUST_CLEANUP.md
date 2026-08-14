@@ -380,6 +380,45 @@ accidental one look identical.
 remaining unsafe site has to say so out loud. The 107 compliant sites migrate for
 free; the ~20 that do not are precisely the list worth reviewing.
 
+### 2.6 Versions are spelled four ways and pinning is not a concept
+
+Eleven declaration sites, four vocabularies, no shared meaning:
+
+| Spelling | Where | What it really is |
+|---|---|---|
+| `version: Schema.String` | `runtimes` mise/asdf/uv (×6), `Runtime.Tool` state | a *range* — `"22"` is satisfied by any 22.x, per `versionSatisfies` |
+| `channel: Schema.String` | `runtimes` rustup | not a version at all; `stable`/`nightly` — discovered only by running rustup |
+| `checksum: Schema.String` | `Machine.Download` | content-addressed pinning, the strongest form |
+| `branch` | `Git.Repo` | a moving ref — "latest" wearing a different word |
+| *nothing* | `System.Package`, `System.Repo` | every install means whatever is latest today |
+
+`packages/runtimes/src/version.ts` already implements matching semantics
+(`versionSatisfies`) that nothing outside `runtimes` reuses, so any future
+version comparison will be written a fifth time.
+
+**The cost is reproducibility, which is the product.** `System.Package` cannot
+pin, and `matches` compares presence only — so a package that moved three major
+versions still reports converged, and `plan` says nothing changed. A recipe that
+cannot reproduce a machine is running an installer, not reconciling.
+
+It also produces concrete failures that get misdiagnosed. `Go.ts` carries a long
+comment explaining why `go install pkg@latest` failing on a toolchain floor
+"cannot be helped" — it can: the resource simply has no way to say which version
+it wants.
+
+**The idea that makes this a framework concept rather than a field:** *`latest`
+is not a version, it is a policy.* It means "re-resolve on every run", which
+makes a resource non-reproducible by construction. Today that is the silent
+default for every package. It should be something a recipe says out loud and a
+plan can show.
+
+**Fix:** a `VersionSpec` tagged union in `core` — `Exact`, `AtLeast`, `Channel`,
+`Latest`, `Digest` — with each backend declaring in its *type* which forms it
+can honour, since `snap` takes channels, `mas` takes an App Store id, and
+several managers can pin at install but cannot downgrade. A backend that
+silently ignores a pin is the same bug class as everything else in this
+document.
+
 ### 2.2 One directory, two mechanisms — and it is spreading
 
 `Machine.Directory` is a resource for "a directory should exist with this mode".
