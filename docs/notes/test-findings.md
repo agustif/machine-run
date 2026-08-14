@@ -157,3 +157,47 @@ produce, or accept the current gap as deliberate and say so in
 `SecretFile.ts`'s doc comment instead — either way, this is a decision for
 whoever owns `packages/secrets/src`, not something to fix silently under a
 test-only task.
+
+## 4. `KeychainBackend.read` silently returns hex garbage for any secret with a non-printable byte
+
+`packages/secrets/src/backends/Keychain.ts`, `read`:
+
+```ts
+Effect.map((result) => Redacted.make(result.stdout.replace(/\n$/, ""))),
+```
+
+`security find-generic-password -w` — the flag this backend uses — prints
+the **ASCII-hex encoding of the stored bytes, not the bytes themselves**,
+whenever the stored value contains a byte outside `isprint()`'s range.
+Verified directly on real macOS (2026-08-14, disposable test keychain, never
+the login keychain): a value with embedded newlines came back as
+`6c696e65310a6c696e65320a6c696e6533` (the correct bytes, but hex-encoded as
+ASCII text) instead of the literal three-line string that was stored; a
+value with a single embedded tab showed the identical behaviour. A
+plain single-line ASCII value, with or without embedded spaces, round-trips
+correctly. Exit code is `0` in both cases — nothing signals that the
+fallback encoding kicked in.
+
+Consequences: any secret this tool is likely to actually store in a
+keychain and later need to write out — an SSH private key, a PEM
+certificate, a multi-line token, anything `Machine.SecretFile` exists to
+place at `0o600` — comes back corrupted (as its own hex encoding) rather
+than failing loudly. There is no reliable way to detect this from `-w`'s
+output alone after the fact: a hex-looking string is inherently ambiguous
+between "this is the fallback encoding" and "this genuinely is the secret,
+and it happens to look like hex."
+
+Fix sketch (not applied — out of scope for the session that found this):
+`security find-generic-password -g` disambiguates the two cases
+(`password: 0x<hex>` for the raw-byte fallback vs. a bare `password:
+"quoted string"` for the printable case, confirmed against the same two
+entries), so `read` should switch from `-w` to `-g` and parse both of its
+forms, rather than relying on `-w`'s output being unambiguous, which it
+is not.
+
+Pinned by: `packages/secrets/test/Keychain.test.ts` ›
+`"BUG: read returns the hex-encoded fallback, not the real value, for a
+secret with an embedded newline (real security find-generic-password -w
+output)"`. See also `docs/notes/secrets-keychain-notes.md` and
+`packages/secrets/test/fixtures/keychain-multiline-hex-stdout.txt` for the
+full captured session.

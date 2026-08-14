@@ -19,11 +19,15 @@ type OnePasswordSource = Extract<SecretSource, { _tag: "OnePassword" }>;
  * `vault`/`item`/`field` are assembled into an `op://<vault>/<item>/<field>`
  * secret reference — the same syntax `op read` and `op inject` accept.
  *
- * No output-shaping flags are passed: `op` is not installed on the machine
- * this was written on, and guessing at a CLI's surface is worse than an
- * acknowledged gap. Whatever `op read` prints is returned verbatim, and
- * `Machine.SecretFile`'s `trailingNewline` decides the file's final byte.
- * See docs/TASKS.md for verifying this against a real `op`.
+ * No output-shaping flags are passed: nothing here has read a real secret
+ * from a real vault (that needs an account this environment deliberately
+ * never creates, `AGENTS.md` rule 8). Whatever `op read` prints is returned
+ * verbatim, and `Machine.SecretFile`'s `trailingNewline` decides the file's
+ * final byte. See `packages/secrets/TASKS.md` for verifying this against a
+ * real `op` read.
+ *
+ * `classify`'s `SecretAuthRequired` bucket, unlike the happy path, has been
+ * checked against a real, unauthenticated `op` — see its own doc comment.
  */
 export const OnePasswordBackend: SecretBackend<OnePasswordSource> = {
   id: "OnePassword",
@@ -44,6 +48,22 @@ export const OnePasswordBackend: SecretBackend<OnePasswordSource> = {
  * stable API and is not predictably localised. This exists to tell the
  * operator what to do next, with {@link SecretReadFailed} as the honest
  * fallback; control flow should not depend on the finer buckets.
+ *
+ * Verified against a real `op` (2.38.1, installed from the official apt
+ * repo inside `docker run --rm debian:stable`, zero accounts ever
+ * configured): `op read op://Personal/does-not-exist/field` exited `1` with
+ * stderr beginning `No accounts configured for use with 1Password CLI.` —
+ * this contains none of `not signed in`/`no valid session`/`authentication`
+ * (the CLI's own text reads "Authenticate", not "authentication"), so
+ * before this session that real, very-likely-to-be-hit state fell through
+ * to {@link SecretReadFailed} instead of {@link SecretAuthRequired}, the
+ * opposite of what this comment used to claim. `no accounts configured` is
+ * now also matched, against that real captured text (see
+ * `docs/notes/secrets-op-notes.md` and
+ * `packages/secrets/test/fixtures/op-unauthenticated-stderr.txt`). The
+ * other three substrings are left in place as unverified: they may be
+ * correct for a real *expired* session, which this environment cannot
+ * produce without an account that has first signed in.
  */
 const classify = (source: OnePasswordSource, cause: CommandError): SecretError => {
   const message = cause.message.toLowerCase();
@@ -58,7 +78,8 @@ const classify = (source: OnePasswordSource, cause: CommandError): SecretError =
   if (
     message.includes("not signed in") ||
     message.includes("no valid session") ||
-    message.includes("authentication")
+    message.includes("authentication") ||
+    message.includes("no accounts configured")
   ) {
     return new SecretAuthRequired({
       source,
