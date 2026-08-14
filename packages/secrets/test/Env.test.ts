@@ -41,7 +41,9 @@ const neverExec: Exec = () => Effect.die("EnvBackend must never call exec");
  * and independent of test order.
  */
 const withEnv = <A, E, R>(vars: Record<string, string>, effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: vars })));
+  effect.pipe(
+    Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env: vars })),
+  );
 
 it.effect("EnvBackend.read returns the real value for a variable that is set", () =>
   Effect.gen(function* () {
@@ -57,7 +59,10 @@ it.effect("EnvBackend.read surfaces an unset variable as SecretReadFailed", () =
   Effect.gen(function* () {
     const failure = yield* withEnv(
       {},
-      EnvBackend.read({ _tag: "Env", variable: "MACHINE_RUN_TEST_SECRET_DOES_NOT_EXIST" }, neverExec),
+      EnvBackend.read(
+        { _tag: "Env", variable: "MACHINE_RUN_TEST_SECRET_DOES_NOT_EXIST" },
+        neverExec,
+      ),
     ).pipe(Effect.flip);
     expect(failure).toBeInstanceOf(SecretReadFailed);
     expect(failure).toMatchObject({

@@ -10,10 +10,10 @@ subsumes most of the surface, and the compositions are thin because of it.
 ## Verification
 
 - [x] **`Git.Signing` end to end.** Container-verified (`docker run --rm
-    debian:stable`, git 2.47.3, `docs/notes/git-notes.md`): a throwaway SSH
+  debian:stable`, git 2.47.3, `docs/notes/git-notes.md`): a throwaway SSH
       key, this composition's exact config keys, a real `allowed_signers`
       file, `git commit -S`, and `git verify-commit` returning a real `Good
-    "git" signature ...` at exit `0`. Three negative controls confirm what
+  "git" signature ...` at exit `0`. Three negative controls confirm what
       actually gets checked: swap in a different key under the right
       principal, or point `allowedSignersFile` at a missing path, and
       `verify-commit` correctly fails (`No principal matched.`, exit `1`).

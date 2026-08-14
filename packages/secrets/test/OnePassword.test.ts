@@ -38,10 +38,7 @@ it.effect(
       // the generic SecretReadFailed bucket instead.
       const failure = yield* OnePasswordBackend.read(
         { _tag: "OnePassword", vault: "Personal", item: "does-not-exist", field: "field" },
-        failingExec(
-          'op read "op://Personal/does-not-exist/field"',
-          noAccountsStderr,
-        ),
+        failingExec('op read "op://Personal/does-not-exist/field"', noAccountsStderr),
       ).pipe(Effect.flip);
       expect(failure).toBeInstanceOf(SecretAuthRequired);
       expect(failure).toMatchObject({
