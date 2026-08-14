@@ -10,6 +10,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type { PlatformError } from "effect/PlatformError";
 import { Position } from "./ManagedBlock.ts";
+import { readIfPresent } from "./readIfPresent.ts";
 
 /**
  * A single line inside a file this tool does not own outright — `/etc/hosts`,
@@ -125,6 +126,25 @@ export class LineInFileMalformed extends Data.TaggedError("LineInFileMalformed")
   }
 }
 
+/**
+ * Raised when {@link LineInFileProps.path} cannot be read at all — a
+ * permissions problem, an I/O error — as distinct from "the file does not
+ * exist yet", which is an ordinary state to converge from (no line yet, so
+ * `apply` inserts one). `LineInFile` exists specifically for files this tool
+ * does not own outright — `/etc/hosts`, a lone line in `~/.zshrc` — so
+ * collapsing an unreadable file into "empty" would make `apply` insert its
+ * line into what it treats as a fresh file, discarding everything already
+ * there that it simply could not see.
+ */
+export class LineInFileUnreadable extends Data.TaggedError("LineInFileUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
+  override get message() {
+    return `Could not read "${this.path}": ${this.cause.reason._tag}.`;
+  }
+}
+
 /** Splits file content into lines, dropping exactly one trailing newline if present. */
 const splitLines = (content: string): string[] => {
   if (content.length === 0) return [];
@@ -221,7 +241,11 @@ export const renderLine = (
 };
 
 export const makeLineInFileReconciler: Effect.Effect<
-  Reconciler<LineInFileProps, LineInFileState, PlatformError | LineInFileMalformed>,
+  Reconciler<
+    LineInFileProps,
+    LineInFileState,
+    PlatformError | LineInFileMalformed | LineInFileUnreadable
+  >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Crypto.Crypto
 > = Effect.gen(function* () {
@@ -231,7 +255,7 @@ export const makeLineInFileReconciler: Effect.Effect<
   const sha256 = yield* makeSha256;
 
   const readFileOrEmpty = (target: string) =>
-    fs.readFileString(target).pipe(Effect.orElseSucceed(() => ""));
+    readIfPresent(fs, target, (cause) => new LineInFileUnreadable({ path: target, cause }));
 
   return {
     address: (props) => paths.expand(props.path),

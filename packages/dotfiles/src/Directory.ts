@@ -1,4 +1,4 @@
-import { MachinePaths } from "@machine-run/core";
+import { isNotFound, MachinePaths } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -80,9 +80,6 @@ export type DirectoryState = typeof DirectoryState.Type;
 export interface Directory extends Resource<"Machine.Directory", DirectoryProps, DirectoryState> {}
 
 export const Directory = Resource<Directory>("Machine.Directory");
-
-/** Effect's `PlatformError` carries a normalised reason, so this is a field read. */
-const isNotFound = (error: PlatformError) => error.reason._tag === "NotFound";
 
 export const makeDirectoryReconciler: Effect.Effect<
   Reconciler<

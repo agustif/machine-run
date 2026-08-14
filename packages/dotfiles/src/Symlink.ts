@@ -1,4 +1,4 @@
-import { MachinePaths } from "@machine-run/core";
+import { isNotFound, MachinePaths } from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -66,9 +66,6 @@ export type SymlinkState = typeof SymlinkState.Type;
 export interface Symlink extends Resource<"Machine.Symlink", SymlinkProps, SymlinkState> {}
 
 export const Symlink = Resource<Symlink>("Machine.Symlink");
-
-/** Effect's `PlatformError` carries a normalised reason, so this is a field read. */
-const isNotFound = (error: PlatformError) => error.reason._tag === "NotFound";
 
 export const makeSymlinkReconciler: Effect.Effect<
   Reconciler<

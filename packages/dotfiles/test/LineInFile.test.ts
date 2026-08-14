@@ -8,6 +8,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import {
   LineInFileMalformed,
+  LineInFileUnreadable,
   makeLineInFileReconciler,
   readLine,
   renderLine,
@@ -254,4 +255,81 @@ it.effect("apply fails with LineInFileMalformed rather than writing over an ambi
     // to guess, rather than clobbering one of the two candidates.
     expect(yield* fs.readFileString(target)).toBe("127.0.0.1 one.local\n127.0.0.1 two.local\n");
   }).pipe(Effect.provide(layer)),
+);
+
+/**
+ * `/etc/hosts`, a lone `export` in `~/.zshrc` — the files `LineInFile` exists
+ * for — carry hand-written lines this tool does not own. A permission change
+ * must never be mistaken for "the file has nothing in it yet"
+ * (MUST_CLEANUP.md 0.3).
+ *
+ * `0o200` (write-only, no read) rather than the `chmod 0000`-on-a-directory
+ * technique used elsewhere in this suite: that would also block the write
+ * this test needs to succeed in order to prove the file survives, and real
+ * permission drift can easily leave write access intact while removing read
+ * access.
+ */
+it.effect("observe raises LineInFileUnreadable, not absence, when the file cannot be read", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeLineInFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "hosts");
+
+    yield* fs.writeFileString(target, "127.0.0.1 example.local\n");
+    yield* fs.chmod(target, 0o200);
+
+    // Restored with `Effect.ensuring` rather than `finally`, so it still runs
+    // if the assertion fails or the fiber is interrupted.
+    const failure = yield* reconciler
+      .observe(
+        { path: target, match: "^127\\.0\\.0\\.1 ", line: "127.0.0.1 example.local" },
+        observeCtx,
+      )
+      .pipe(
+        Effect.flip,
+        Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+      );
+
+    expect(failure).toBeInstanceOf(LineInFileUnreadable);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "apply raises LineInFileUnreadable instead of inserting a line into content it could not read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeLineInFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "hosts");
+
+      const original = "127.0.0.1 already-here.local\n# hand-written comment\n";
+      yield* fs.writeFileString(target, original);
+      yield* fs.chmod(target, 0o200);
+
+      const props: LineInFileProps = {
+        path: target,
+        match: "^10\\.0\\.0\\.1 ",
+        line: "10.0.0.1 new-entry.local",
+      };
+      const desired = yield* reconciler.desired(props);
+
+      const failure = yield* reconciler
+        .apply({ props, observed: undefined, desired }, applyCtx)
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+        );
+      expect(failure).toBeInstanceOf(LineInFileUnreadable);
+
+      // The load-bearing assertion: without the fix, the unreadable content
+      // is silently treated as "", `renderLine` treats the file as empty, and
+      // the new line is inserted as if it were the only content — discarding
+      // the original lines, which the write-only permission would still
+      // allow it to overwrite.
+      expect(yield* fs.readFileString(target)).toBe(original);
+    }).pipe(Effect.provide(layer)),
 );

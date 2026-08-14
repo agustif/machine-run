@@ -1,6 +1,30 @@
+import { MachinePathsLive } from "@machine-run/core";
+import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
+import * as Path from "effect/Path";
 import * as Result from "effect/Result";
-import { beginMarker, endMarker, readBlock, renderFile } from "../src/ManagedBlock.ts";
+import {
+  beginMarker,
+  endMarker,
+  makeManagedBlockReconciler,
+  ManagedBlockFileUnreadable,
+  readBlock,
+  renderFile,
+  type ManagedBlockProps,
+} from "../src/ManagedBlock.ts";
+
+const layer = Layer.mergeAll(MachinePathsLive(), NodeCrypto.layer).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
+
+const applyCtx = {
+  exec: () => Effect.die("not used"),
+  snapshot: () => Effect.succeed(undefined),
+};
+const observeCtx = { exec: () => Effect.die("not used") };
 
 /** Unwraps a render that is expected to succeed. */
 const render = (
@@ -159,3 +183,73 @@ it("still replaces a single well-formed region in place", () => {
     expect(result.success).toContain("# hand-written below");
   }
 });
+
+/**
+ * `~/.zshrc`, `~/.gitconfig`, `~/.ssh/config` — the files `ManagedBlock`
+ * exists for — carry substantial hand-written content this tool does not
+ * own. A permission change on one of them must never be mistaken for "the
+ * file has nothing in it yet" (MUST_CLEANUP.md 0.2).
+ *
+ * `0o200` (write-only, no read) rather than the `chmod 0000`-on-a-directory
+ * technique used elsewhere in this suite: that would also block the write
+ * this test needs to succeed in order to prove the file survives, and real
+ * permission drift can easily leave write access intact while removing read
+ * access (a stricter ACL, a `chattr`-style flag, a mid-flight `chmod`).
+ */
+it.effect("observe raises ManagedBlockFileUnreadable, not absence, when the file cannot be read", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeManagedBlockReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, ".zshrc");
+
+    yield* fs.writeFileString(target, "# hand-written setup\nexport FOO=bar\n");
+    yield* fs.chmod(target, 0o200);
+
+    // Restored with `Effect.ensuring` rather than `finally`, so it still runs
+    // if the assertion fails or the fiber is interrupted.
+    const failure = yield* reconciler
+      .observe({ path: target, marker: "example", content: "export A=1" }, observeCtx)
+      .pipe(
+        Effect.flip,
+        Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+      );
+
+    expect(failure).toBeInstanceOf(ManagedBlockFileUnreadable);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect(
+  "apply raises ManagedBlockFileUnreadable instead of writing the marker block over content it could not read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeManagedBlockReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, ".zshrc");
+
+      const original = "# hand-written setup, not managed by this tool\nexport FOO=bar\n";
+      yield* fs.writeFileString(target, original);
+      yield* fs.chmod(target, 0o200);
+
+      const props: ManagedBlockProps = { path: target, marker: "example", content: "export A=1" };
+      const desired = yield* reconciler.desired(props);
+
+      const failure = yield* reconciler
+        .apply({ props, observed: undefined, desired }, applyCtx)
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+        );
+      expect(failure).toBeInstanceOf(ManagedBlockFileUnreadable);
+
+      // The load-bearing assertion: without the fix, the unreadable content
+      // is silently treated as "", `renderFile` treats the file as empty, and
+      // the marker block is written straight over the hand-written original
+      // — permanently, since `write`-only permission means the write itself
+      // succeeds even though the read that should have preceded it did not.
+      expect(yield* fs.readFileString(target)).toBe(original);
+    }).pipe(Effect.provide(layer)),
+);
