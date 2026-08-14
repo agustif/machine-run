@@ -1,7 +1,14 @@
-import { Sh } from "@machine-run/core";
+import { type VersionSpec, Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
-import { firstTokens, lines } from "../../parse.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  NO_VERSION_SUPPORT,
+  rejectUnsupportedVersionSpec,
+  type PackageEntry,
+  type PackageManagerBackend,
+} from "../../Backend.ts";
+import { lines } from "../../parse.ts";
 
 /**
  * Mac App Store CLI. A package's `name` here is the numeric App Store ID
@@ -26,7 +33,10 @@ import { firstTokens, lines } from "../../parse.ts";
  * padding varies per column with the widest value, but the id is always the
  * first whitespace-delimited token once the line is trimmed, so
  * `firstTokens`/`lines` need no bespoke filtering the way `Winget.ts`'s
- * fixed-width table does.
+ * fixed-width table does. The trailing `(<version>)` is a real, stable
+ * column too — `parseMasList` now also reports it, for observability only:
+ * `mas` has no way to *request* a version at all (see `versions` below), so
+ * nothing here ever compares against it.
  *
  * `install` was *not* run here, on a second look as well as the first:
  * unlike every other backend verified by actually installing something
@@ -44,17 +54,53 @@ import { firstTokens, lines } from "../../parse.ts";
  * ago, and nothing here should try to automate that (see `AGENTS.md` rule
  * 8's "never automate authentication" for the same principle applied to
  * secrets).
+ *
+ * `versions` is {@link NO_VERSION_SUPPORT}: `mas install` takes an App Store
+ * id and nothing else — there is no flag, and no second CLI, for "give me
+ * an older release of this app". A recipe naming a `version` for `mas`
+ * fails loudly with `UnsupportedVersionSpec` rather than the pin being
+ * silently dropped.
  */
+export const parseMasList = (stdout: string): PackageEntry[] => {
+  const entries: PackageEntry[] = [];
+  for (const line of lines(stdout)) {
+    const id = line.split(/\s+/)[0];
+    if (id === undefined || id.length === 0) continue;
+    const versionMatch = line.match(/\(([^()]+)\)\s*$/);
+    if (versionMatch === null) {
+      entries.push({ name: id });
+      continue;
+    }
+    entries.push({ name: id, version: versionMatch[1] });
+  }
+  return entries;
+};
+
 export const makeMasBackend = (): PackageManagerBackend => ({
   id: "mas",
+  versions: NO_VERSION_SUPPORT,
   list: (exec) =>
     exec({ command: Sh.sh("mas", "list") }).pipe(
-      Effect.map((result) => firstTokens(lines(result.stdout))),
+      Effect.map((result) => parseMasList(result.stdout)),
     ),
-  install: (name, exec) =>
-    exec({
-      command: Sh.sh("sudo", "mas", "install", name),
-      shell: true,
-      timeout: "10 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version: VersionSpec | undefined, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.sh("sudo", "mas", "install", name),
+          shell: true,
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec: VersionSpec) => {
+        const reject = rejectUnsupportedVersionSpec("mas", NO_VERSION_SUPPORT);
+        return Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Exact: (s) => reject(s),
+            AtLeast: (s) => reject(s),
+            Channel: (s) => reject(s),
+            Digest: (s) => reject(s),
+          }),
+        );
+      },
+    }),
 });

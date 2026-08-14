@@ -1,7 +1,9 @@
+import { type VersionSpec } from "@machine-run/core";
 import type { CommandError } from "alchemy/Command";
 import type { Exec } from "@machine-run/engine";
+import * as Boolean from "effect/Boolean";
 import * as Data from "effect/Data";
-import type * as Effect from "effect/Effect";
+import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 export class BackendParseError extends Data.TaggedError("BackendParseError")<{
@@ -13,7 +15,156 @@ export class BackendParseError extends Data.TaggedError("BackendParseError")<{
   }
 }
 
+/**
+ * Raised when `install` is asked to pin a {@link VersionSpec} tag a manager's
+ * own capability declaration (`PackageManagerBackend.versions.accepts`) does
+ * not include — `snap` asked for `Exact`, `mas` asked for anything at all.
+ * Every backend's own `install` is written as an exhaustive `Match` over the
+ * full `VersionSpec` union (see e.g. `backends/macos/Mas.ts`), so an
+ * unsupported tag reaches this error at the one call site that noticed,
+ * rather than silently reaching the underlying CLI as a bare, unpinned
+ * install — the same class of bug rule 0b names for a cast to `unknown`.
+ */
+export class UnsupportedVersionSpec extends Data.TaggedError("UnsupportedVersionSpec")<{
+  manager: string;
+  spec: VersionSpec;
+  accepts: ReadonlySet<VersionSpec["_tag"]>;
+}> {
+  override get message() {
+    const accepted = Boolean.match(this.accepts.size === 0, {
+      onTrue: () => "no VersionSpec at all",
+      onFalse: () => [...this.accepts].join(", "),
+    });
+    return `"${this.manager}" cannot pin by ${this.spec._tag} — it accepts ${accepted}. See PackageVersionSupport in Backend.ts for what this manager can actually honour.`;
+  }
+}
+
+/**
+ * Raised by `Package.ts`'s `apply`, before ever calling a backend's
+ * `install`, when {@link PackageVersionSupport.canDowngrade} says this
+ * manager cannot move backward and either of two things is true:
+ *
+ * - `direction: "Ahead"` — `core`'s `compareVersions` positively established
+ *   the live version is newer than the pin (both sides parsed as dotted-
+ *   numeric). This is the ordinary case: we know it would be a downgrade.
+ * - `direction: "Unknown"` — `compareVersions` could not order the two
+ *   strings at all (an AUR package's `r1234.deadbeef` VCS version, most real
+ *   package-manager version strings once a release/epoch suffix is involved)
+ *   *and* the pin is a `VersionSpec.Exact`/`AtLeast` (a fixed target, not a
+ *   `Channel`/`Digest`, where "ahead/behind" isn't the right question at
+ *   all — see `Package.ts`'s `apply` for exactly which specs this applies
+ *   to). Refusing here fails safe: this manager cannot undo a wrong guess,
+ *   so an un-orderable mismatch is treated the same as a confirmed one
+ *   rather than optimistically attempted.
+ *
+ * Failing here, loudly and before running anything, is the alternative to
+ * letting the underlying CLI fail with whatever confusing text it happens to
+ * print for "I don't do that" (or, worse, silently no-op) — see rule 11 in
+ * `AGENTS.md`.
+ */
+export class CannotDowngrade extends Data.TaggedError("CannotDowngrade")<{
+  manager: string;
+  name: string;
+  installed: string;
+  desired: string;
+  direction: "Ahead" | "Unknown";
+}> {
+  override get message() {
+    const comparison = Boolean.match(this.direction === "Ahead", {
+      onTrue: () => `is installed at "${this.installed}", which is newer than the pinned "${this.desired}"`,
+      onFalse: () =>
+        `is installed at "${this.installed}", which cannot be ordered against the pinned "${this.desired}"`,
+    });
+    return `"${this.name}" (${this.manager}) ${comparison} — this manager cannot downgrade a package (see PackageVersionSupport.canDowngrade). Uninstall it by hand first if you genuinely want the older version, or drop the pin.`;
+  }
+}
+
 export type BackendError = CommandError | BackendParseError;
+
+/**
+ * One installed package as a manager's own listing reports it — a name, and
+ * a version/channel string when that listing can report one at all. Several
+ * cannot (`mas`'s `list` has no reason to and none of the others below
+ * bother parsing it either, until this type gave `matches` something to
+ * compare `version` against): `version` stays absent there rather than a
+ * placeholder value, the same "genuinely doesn't have one, not merely
+ * skipped" distinction {@link PackageState}'s own `version` field carries
+ * through to `Package.ts`'s `matches`.
+ */
+export interface PackageEntry {
+  readonly name: string;
+  readonly version?: string;
+}
+
+/**
+ * Which {@link VersionSpec} tags a manager's `install` can actually honour,
+ * and whether, having pinned forward, it can also be pinned backward.
+ *
+ * This is the "say so in the type" half of version pinning (rule 0b) for
+ * `System.Package`: every backend below declares one of these, and every
+ * backend's own `install` is written as a `Match.tagsExhaustive` over the
+ * *complete* `VersionSpec` union (see e.g. `backends/linux/Snap.ts`), so a
+ * tag this struct's `accepts` doesn't include is not silently accepted by a
+ * backend that happens not to look at it — it is a compile-time-forced
+ * decision inside that backend to fail with {@link UnsupportedVersionSpec}.
+ *
+ * ## Why this is a field, not a per-manager `Props` tagged union
+ *
+ * `System.Repo`'s `RepoSpec` (this same file) is a tagged union nested in
+ * `RepoProps.repo` precisely because a brew tap, an apt PPA, a dnf COPR
+ * project and a Flatpak remote are *different fields entirely* — `tap` vs.
+ * `ppa` vs. `project` vs. `name`+`location` — so a manager and a
+ * wrong-shaped repo value could type-check as a pair before `RepoSpec`
+ * existed. A package manager's version request has no such problem: every
+ * manager that can pin at all takes the exact same shape, a `VersionSpec` on
+ * a package by that manager's own name. What varies is only *which tags of
+ * that one shared shape* a given manager's `install` can act on — a
+ * constraint on one field's legal values, not a difference in which fields
+ * exist. `RuntimeToolProps` (`runtimes/src/Tool.ts`) is the closer precedent
+ * for that situation, and it *is* a tagged union — but there, `Rustup`'s
+ * `channel` field is not merely a narrower `version`, it is a conceptually
+ * different question (a moving target vs. a fixed one), which earns it a
+ * different field name, not just a different accepted value. `System.Package`
+ * has no such distinct concept per manager to carry.
+ *
+ * A full `PackageProps` tagged union keyed by manager (19 cases, one per
+ * `PackageManagerId`) was considered and rejected for this reason: it would
+ * buy compile-time-checked narrowing of `version`'s type at the one dispatch
+ * site in `Package.ts`, at the cost of renaming every existing recipe/test
+ * call site's `{ manager: "brew", name }` to a `_tag`-keyed case (mirroring
+ * `RuntimeToolProps`'s `Mise`/`Asdf`/`Rustup`/`Uv` — see that module's own
+ * doc comment for why `Props`, unlike `Attributes`, is even allowed to be a
+ * union under Alchemy's `Resource<>`), for a distinction (which values are
+ * legal, not which fields exist) that this struct plus an exhaustive
+ * `Match` inside each backend already makes impossible to silently get
+ * wrong. If a future manager's version request turns out to need its own
+ * distinct *field* (not just a narrower set of legal `VersionSpec` tags),
+ * that is the signal to revisit this decision — the same signal
+ * `RuntimeToolProps.Rustup.channel` was for `Runtime.Tool`.
+ */
+export interface PackageVersionSupport {
+  readonly accepts: ReadonlySet<VersionSpec["_tag"]>;
+  readonly canDowngrade: boolean;
+}
+
+/** A manager that cannot pin a version at all — `mas`, whose `install` takes only an App Store id. */
+export const NO_VERSION_SUPPORT: PackageVersionSupport = {
+  accepts: new Set(),
+  canDowngrade: false,
+};
+
+/**
+ * The one-line failure every backend's `install` reaches for a
+ * {@link VersionSpec} tag its own {@link PackageVersionSupport.accepts}
+ * doesn't include — a shared helper so raising {@link UnsupportedVersionSpec}
+ * is exactly as easy as ignoring the tag would have been, which is the whole
+ * point: nothing here should be tempted to fall through to an unpinned
+ * install just because writing the rejection by hand felt like more code.
+ */
+export const rejectUnsupportedVersionSpec =
+  (manager: string, versions: PackageVersionSupport) =>
+  (spec: VersionSpec): Effect.Effect<never, UnsupportedVersionSpec> =>
+    Effect.fail(new UnsupportedVersionSpec({ manager, spec, accepts: versions.accepts }));
 
 /**
  * The shared shape every package manager backend implements. This is the
@@ -37,8 +188,33 @@ export type BackendError = CommandError | BackendParseError;
  */
 export interface PackageManagerBackend {
   readonly id: string;
-  readonly list: (exec: Exec) => Effect.Effect<string[], BackendError>;
-  readonly install: (name: string, exec: Exec) => Effect.Effect<void, BackendError>;
+  /** See {@link PackageVersionSupport}. */
+  readonly versions: PackageVersionSupport;
+  readonly list: (exec: Exec) => Effect.Effect<PackageEntry[], BackendError>;
+  /**
+   * `version` is always the full `VersionSpec | undefined` a recipe wrote —
+   * never pre-filtered by `versions.accepts` — so every implementation is
+   * forced (via `Match.tagsExhaustive`) to decide what happens for every tag,
+   * not just the ones it planned for. `undefined` means "no pin requested":
+   * install whatever the manager resolves as current, the same as before
+   * this type existed.
+   */
+  readonly install: (
+    name: string,
+    version: VersionSpec | undefined,
+    exec: Exec,
+  ) => Effect.Effect<void, BackendError | UnsupportedVersionSpec>;
+  /**
+   * Refreshes this manager's local package index/metadata cache before an
+   * install that needs it — real, not hypothetical: `apt-get install` and
+   * `pacman -S` both fail outright ("Unable to locate package"/"target not
+   * found") against a stale or absent local index, and neither refreshes it
+   * on its own. Absent for managers that talk to a live registry per-command
+   * and keep no local index to go stale (`cargo`, `npm`, `pipx`, `uv tool`,
+   * `gem`, `go install`), or where refreshing is a real, separate,
+   * unaddressed gap — see each backend's own doc comment.
+   */
+  readonly refreshIndex?: (exec: Exec) => Effect.Effect<void, BackendError>;
 }
 
 /**

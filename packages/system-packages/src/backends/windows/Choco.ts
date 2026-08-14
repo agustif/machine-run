@@ -1,7 +1,38 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
-import { firstTokens, lines } from "../../parse.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  type PackageEntry,
+  type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
+} from "../../Backend.ts";
+import { lines } from "../../parse.ts";
+
+/**
+ * `choco install <name> --version <version> -y` — Chocolatey's own
+ * documented pin syntax (`choco install --help`, `choco -?`), unchanged
+ * since this file's original verification pass. **UNVERIFIED here**: no
+ * Windows target exists in this session either (the same limitation this
+ * file's own `install`/`--local-only` flags already carry) — this is the
+ * repo's existing documented-but-unrun convention for Windows
+ * (`docs/TASKS.md`'s open `winget install` item), not new to this change.
+ *
+ * `--allow-downgrade` is Chocolatey's own documented flag for the direction
+ * `--version` alone refuses (installing an older build over a newer one) —
+ * added unconditionally alongside `--version` for the same reason `Apt.ts`
+ * always adds `--allow-downgrades`: harmless when the requested version is
+ * not actually older, necessary when it is. `canDowngrade: true` reflects
+ * that flag's documented existence, not an independent confirmation that it
+ * behaves as documented.
+ */
+export const chocoVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Exact"]),
+  canDowngrade: true,
+};
+
+const rejectSpec = rejectUnsupportedVersionSpec("choco", chocoVersionSupport);
 
 /**
  * Chocolatey. Same PowerShell-quoting rationale as Winget.ts.
@@ -20,24 +51,52 @@ import { firstTokens, lines } from "../../parse.ts";
  */
 export const makeChocoBackend = (): PackageManagerBackend => ({
   id: "choco",
+  versions: chocoVersionSupport,
   list: (exec) =>
     exec({
       command: Sh.pwsh("choco", "list", "--local-only", "--limit-output"),
       shell: "powershell.exe",
     }).pipe(
       Effect.map((result) =>
-        // Each line is "name|version" — split on "|" and take the name,
-        // never the raw first whitespace-token (a display name could
-        // contain spaces).
-        firstTokens(lines(result.stdout).map((line) => line.split("|").join(" "))),
+        lines(result.stdout).map((line): PackageEntry => {
+          const bar = line.indexOf("|");
+          return bar === -1
+            ? { name: line }
+            : { name: line.slice(0, bar), version: line.slice(bar + 1) };
+        }),
       ),
     ),
-  install: (name, exec) =>
-    exec({
-      // `-y` / `--yes` skips the confirmation prompt Chocolatey shows by
-      // default; widely documented but UNVERIFIED here.
-      command: Sh.pwsh("choco", "install", name, "-y"),
-      shell: "powershell.exe",
-      timeout: "10 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          // `-y` / `--yes` skips the confirmation prompt Chocolatey shows by
+          // default; widely documented but UNVERIFIED here.
+          command: Sh.pwsh("choco", "install", name, "-y"),
+          shell: "powershell.exe",
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Exact: (v) =>
+              exec({
+                command: Sh.pwsh(
+                  "choco",
+                  "install",
+                  name,
+                  "--version",
+                  v.version,
+                  "--allow-downgrade",
+                  "-y",
+                ),
+                shell: "powershell.exe",
+                timeout: "10 minutes",
+              }).pipe(Effect.asVoid),
+            AtLeast: rejectSpec,
+            Channel: rejectSpec,
+            Digest: rejectSpec,
+          }),
+        ),
+    }),
 });

@@ -1,7 +1,37 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  type PackageEntry,
+  type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
+} from "../../Backend.ts";
 import { lines } from "../../parse.ts";
+
+/**
+ * `winget install --id <id> --version <version> --exact ...` — winget's own
+ * documented pin syntax (`winget install --help`). **UNVERIFIED here**: no
+ * Windows target exists in this session, the same limitation every other
+ * flag in this file already carries (see the module doc comment below).
+ *
+ * `--force` is added unconditionally alongside `--version`: winget is
+ * documented to refuse a plain `install` when the id is already present
+ * (its ordinary path for changing an installed version is `winget upgrade`,
+ * not `install`), the same shape `Pipx.ts` confirmed for real this session
+ * (a bare re-`install` silently no-ops rather than changing the pinned
+ * version). `--force` is winget's own documented escape from that refusal;
+ * not independently confirmed against a real `winget` binary, so
+ * `canDowngrade: true` reflects the flag's documented existence, not a
+ * verified behaviour.
+ */
+export const wingetVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Exact"]),
+  canDowngrade: true,
+};
+
+const rejectSpec = rejectUnsupportedVersionSpec("winget", wingetVersionSupport);
 
 /**
  * Parses `winget list`'s human-readable table into package IDs.
@@ -38,8 +68,16 @@ import { lines } from "../../parse.ts";
  * winget itself is idempotent, so nothing breaks, but the plan is not empty.
  * The real fix is `winget export`, which emits JSON with untruncated
  * identifiers — see docs/TASKS.md.
+ *
+ * The `Version` column (immediately right of `Id` in the same fixture) is
+ * read the identical way — sliced by the next column's start offset, dropped
+ * if it contains the same truncating ellipsis. A row whose `Id` survives but
+ * whose `Version` is truncated still reports `{ name }` with no `version`
+ * rather than being dropped outright: the id alone is enough for membership,
+ * and an absent version is the same "can't compare" signal `PackageEntry`
+ * already uses elsewhere, not a reason to also lose the id.
  */
-export const parseWingetList = (stdout: string): string[] => {
+export const parseWingetList = (stdout: string): PackageEntry[] => {
   const rows = lines(stdout);
   const separatorIndex = rows.findIndex((row) => /^-{3,}$/.test(row.replace(/\s/g, "")));
   const header = separatorIndex > 0 ? rows[separatorIndex - 1] : undefined;
@@ -51,12 +89,18 @@ export const parseWingetList = (stdout: string): string[] => {
   );
   const idStart = starts[1];
   const idEnd = starts[2];
+  const versionEnd = starts[3];
   if (idStart === undefined || idEnd === undefined) return [];
 
-  return rows
-    .slice(separatorIndex + 1)
-    .map((row) => row.slice(idStart, idEnd).trim())
-    .filter((id) => id.length > 0 && !id.includes("…") && !/^(?:ARP|MSIX)\\/.test(id));
+  const entries: PackageEntry[] = [];
+  for (const row of rows.slice(separatorIndex + 1)) {
+    const id = row.slice(idStart, idEnd).trim();
+    if (id.length === 0 || id.includes("…") || /^(?:ARP|MSIX)\\/.test(id)) continue;
+    const rawVersion = versionEnd === undefined ? row.slice(idEnd) : row.slice(idEnd, versionEnd);
+    const version = rawVersion.trim();
+    entries.push(version.length === 0 || version.includes("…") ? { name: id } : { name: id, version });
+  }
+  return entries;
 };
 
 /**
@@ -72,25 +116,56 @@ export const parseWingetList = (stdout: string): string[] => {
  */
 export const makeWingetBackend = (): PackageManagerBackend => ({
   id: "winget",
+  versions: wingetVersionSupport,
   list: (exec) =>
     exec({
       command: Sh.pwsh("winget", "list", "--accept-source-agreements"),
       shell: "powershell.exe",
     }).pipe(Effect.map((result) => parseWingetList(result.stdout))),
-  install: (name, exec) =>
-    exec({
-      command: Sh.pwsh(
-        "winget",
-        "install",
-        "--id",
-        name,
-        "--exact",
-        "--accept-package-agreements",
-        "--accept-source-agreements",
-        "--silent",
-        "--disable-interactivity",
-      ),
-      shell: "powershell.exe",
-      timeout: "10 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.pwsh(
+            "winget",
+            "install",
+            "--id",
+            name,
+            "--exact",
+            "--accept-package-agreements",
+            "--accept-source-agreements",
+            "--silent",
+            "--disable-interactivity",
+          ),
+          shell: "powershell.exe",
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Exact: (v) =>
+              exec({
+                command: Sh.pwsh(
+                  "winget",
+                  "install",
+                  "--id",
+                  name,
+                  "--version",
+                  v.version,
+                  "--exact",
+                  "--force",
+                  "--accept-package-agreements",
+                  "--accept-source-agreements",
+                  "--silent",
+                  "--disable-interactivity",
+                ),
+                shell: "powershell.exe",
+                timeout: "10 minutes",
+              }).pipe(Effect.asVoid),
+            AtLeast: rejectSpec,
+            Channel: rejectSpec,
+            Digest: rejectSpec,
+          }),
+        ),
+    }),
 });

@@ -1,0 +1,13 @@
+android-commandlinetools 15859902
+ghostree 0.3.23
+ghostty 1.3.1
+jdownloader latest
+macterm 1.20.10
+markedit 1.33.1
+mori 0.7.0
+muxy 1.3.0
+orbstack 2.2.1,20628
+slack 4.51.185
+stolendata-mpv 0.40.0
+transmission 4.1.3
+visual-studio-code 1.133.0

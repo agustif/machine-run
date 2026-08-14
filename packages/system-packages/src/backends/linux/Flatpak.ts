@@ -1,13 +1,57 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as UndefinedOr from "effect/UndefinedOr";
 import {
   BackendParseError,
   type FlatpakRepo,
+  type PackageEntry,
   type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
   type RepoBackend,
 } from "../../Backend.ts";
-import { firstTokens, lines } from "../../parse.ts";
+import { lines } from "../../parse.ts";
+
+/**
+ * `flatpak install <id>//<branch>` — the double-slash branch suffix is
+ * flatpak's own, long-stable syntax for naming which branch to install (e.g.
+ * `org.gnome.Platform//45`), documented in `flatpak install`'s own manual
+ * page and unchanged across every flatpak release this ecosystem has
+ * shipped. A flatpak app has no semver-style version history a client can
+ * request the way a `.deb`/`.rpm` archive holds one — what a recipe can
+ * actually pin is *which branch* an app-id resolves from (`stable`, or a
+ * runtime's own version-shaped branch like `45`), which is `VersionSpec`'s
+ * `Channel` case, not `Exact` — the identical reasoning `Snap.ts` already
+ * documents for its own `--channel`.
+ *
+ * **The branch/install interaction is not independently re-verified this
+ * session.** `list`/`install` (unbranched) were already real,
+ * container-verified below; extending that same container to also install a
+ * *second* branch of an already-installed app-id needs `org.gnome.Platform`
+ * or a similarly sizeable runtime actually downloaded, and this session's
+ * attempts to even get `flatpak install --help`/`flatpak list --help`'s
+ * exact column names — let alone a full branch install — did not finish:
+ * `apt-get install flatpak` on `ubuntu:24.04` pulls in ~200 packages
+ * (systemd, GTK, ostree, PolicyKit, …) and repeated attempts, up to a 500
+ * second timeout, still had not finished unpacking when this file was
+ * written (see this session's own repeated `apt-get update` slowness
+ * elsewhere — `Go.ts`/`Apt.ts`'s notes on the same shared-sandbox network).
+ * The `//branch` syntax itself is not in doubt (it is flatpak's one
+ * documented way to do this, with no alternative spelling to get wrong the
+ * way winget's table format turned out to have one) — what is genuinely
+ * unconfirmed is whether installing a second branch over an existing
+ * install of the same app-id just works, needs `--reinstall`, or needs the
+ * first branch removed first. `canDowngrade: false` is the conservative
+ * reading until that is actually observed, matching rule 0c's "unreachable
+ * target" allowance rather than inventing a flag.
+ */
+export const flatpakVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Channel"]),
+  canDowngrade: false,
+};
+
+const rejectSpec = rejectUnsupportedVersionSpec("flatpak", flatpakVersionSupport);
 
 /**
  * `flatpak list --app --columns=application` restricts the listing to one
@@ -28,6 +72,12 @@ import { firstTokens, lines } from "../../parse.ts";
  * but that's inference from the documented behaviour, not a captured
  * fixture the way every other Linux backend here has one.
  *
+ * `--columns=application,branch` is the same, not independently re-run this
+ * session (see this module's own doc comment above for why) — `branch` is
+ * flatpak's own documented column name (`flatpak list --help`'s prior,
+ * already-real `--columns` confirmation), read the same tab-separated way
+ * `makeFlatpakRepoBackend.listRepos` already reads `name`/`url` below.
+ *
  * `install` takes no remote argument, so it only resolves when exactly one
  * configured remote (commonly Flathub) has that app ID — a machine with no
  * remote added yet, or more than one offering the same ID, needs the remote
@@ -37,16 +87,41 @@ import { firstTokens, lines } from "../../parse.ts";
  */
 export const makeFlatpakBackend = (): PackageManagerBackend => ({
   id: "flatpak",
+  versions: flatpakVersionSupport,
   list: (exec) =>
-    exec({ command: Sh.sh("flatpak", "list", "--app", "--columns=application") }).pipe(
-      Effect.map((result) => firstTokens(lines(result.stdout))),
+    exec({ command: Sh.sh("flatpak", "list", "--app", "--columns=application,branch") }).pipe(
+      Effect.map((result) =>
+        lines(result.stdout).map((line): PackageEntry => {
+          const tab = line.indexOf("\t");
+          return tab === -1
+            ? { name: line }
+            : { name: line.slice(0, tab), version: line.slice(tab + 1) };
+        }),
+      ),
     ),
-  install: (name, exec) =>
-    exec({
-      command: Sh.sh("flatpak", "install", "-y", "--noninteractive", name),
-      shell: true,
-      timeout: "10 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.sh("flatpak", "install", "-y", "--noninteractive", name),
+          shell: true,
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Channel: (v) =>
+              exec({
+                command: Sh.sh("flatpak", "install", "-y", "--noninteractive", `${name}//${v.name}`),
+                shell: true,
+                timeout: "10 minutes",
+              }).pipe(Effect.asVoid),
+            Exact: rejectSpec,
+            AtLeast: rejectSpec,
+            Digest: rejectSpec,
+          }),
+        ),
+    }),
 });
 
 /**

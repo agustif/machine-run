@@ -1,7 +1,7 @@
 import * as Cache from "effect/Cache";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
-import type { BackendError, RepoSpec } from "./Backend.ts";
+import type { BackendError, PackageEntry, RepoSpec } from "./Backend.ts";
 
 /**
  * A memoized list cache keyed by an arbitrary string (here, always a
@@ -121,12 +121,12 @@ const makeMemoizedLister = <T>(): Effect.Effect<MemoizedLister<T>> =>
  * `ApplyContext` (checking for `snapshot`, which only the latter has).
  */
 export interface PackageIndex {
-  readonly packages: MemoizedLister<string>;
+  readonly packages: MemoizedLister<PackageEntry>;
   readonly repos: MemoizedLister<RepoSpec>;
 }
 
 export const makePackageIndex: Effect.Effect<PackageIndex> = Effect.gen(function* () {
-  const packages = yield* makeMemoizedLister<string>();
+  const packages = yield* makeMemoizedLister<PackageEntry>();
   const repos = yield* makeMemoizedLister<RepoSpec>();
   return { packages, repos };
 });

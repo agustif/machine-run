@@ -1,7 +1,67 @@
 import { Sh } from "@machine-run/core";
 import * as Effect from "effect/Effect";
-import type { PackageManagerBackend } from "../../Backend.ts";
-import { firstTokens, lines } from "../../parse.ts";
+import * as Match from "effect/Match";
+import * as UndefinedOr from "effect/UndefinedOr";
+import {
+  type PackageEntry,
+  type PackageManagerBackend,
+  type PackageVersionSupport,
+  rejectUnsupportedVersionSpec,
+} from "../../Backend.ts";
+import { lines } from "../../parse.ts";
+
+/**
+ * `snap install <name> --channel=<channel>` / `snap refresh <name>
+ * --channel=<channel>` — snapd's channel grammar (`[<track>/]<risk>[/<branch>]`,
+ * risk ∈ `stable`/`candidate`/`beta`/`edge`) is genuinely not the same concept
+ * `Exact`/`AtLeast` model: there is no server-side history of "revision 6.4"
+ * to request by version string the way a `.deb` archive holds one — a snap
+ * is always installed from whichever revision its channel currently points
+ * at, so `VersionSpec.Channel` (a name, never a semver) is the only tag this
+ * backend accepts, matching `rustup`'s existing `channel` field in
+ * `Runtime.Tool` for the identical reason.
+ *
+ * `--channel` is real, confirmed syntax: `docker run --rm ubuntu:24.04`
+ * (`apt-get install -y snapd`, no daemon boot needed just to read `--help`
+ * text) — `snap install --help` documents `--channel=` as "Use this channel
+ * instead of stable", alongside `--edge`/`--beta`/`--candidate`/`--stable`
+ * shorthand for the same four risk levels.
+ *
+ * That same `--help` output surfaced a real, deliberately-not-modelled
+ * finding: `--revision=` ("Install the given revision of a snap") pins the
+ * exact numeric build in `snap list`'s `Rev` column — genuinely closer to
+ * `Exact` than `Channel` is. It is not used here: the same `--help` text
+ * warns "a later refresh will typically undo the revision override, taking
+ * the snap back to the current revision of the channel it's tracking" — a
+ * revision pin is not durable against anything else on the machine running
+ * `snap refresh`, which makes it a weaker guarantee than every other
+ * `Exact` this package models (apt/dnf/npm/cargo/gem/go's pins all survive
+ * until something *else* explicitly reinstalls over them). Claiming `Exact`
+ * support on a foundation this session found documented as self-reverting
+ * would be exactly the kind of invented certainty rule 0c warns against, so
+ * `snap` accepts only `Channel` below, not `Exact` — a real, stated
+ * limitation, not a gap awaiting more time.
+ *
+ * `install` tries `snap install` first (the fresh-install path this file's
+ * `list` verification below already exercised) and falls back to `snap
+ * refresh` only on a `CommandError` — snapd's own `install --help` says
+ * nothing about an already-installed name, but the ordinary snapd CLI
+ * convention (confirmed for `pipx`'s own `install` this session, see
+ * `Pipx.ts`) is that a manager's plain "install" verb refuses to touch
+ * something already present; `refresh` is snapd's own documented command for
+ * moving an *existing* snap to a different channel. Not independently
+ * confirmed against a live daemon this session (that needs the full
+ * privileged systemd boot below, not just `--help` text) —
+ * `canDowngrade: true` reflects `--channel`'s own symmetry (nothing in the
+ * documented flag grammar distinguishes moving toward `stable` from moving
+ * toward `edge`), not an observed refresh.
+ */
+export const snapVersionSupport: PackageVersionSupport = {
+  accepts: new Set(["Channel"]),
+  canDowngrade: true,
+};
+
+const rejectSpec = rejectUnsupportedVersionSpec("snap", snapVersionSupport);
 
 /**
  * Verified against a genuinely booted `systemd` PID 1 in a container — the
@@ -49,13 +109,21 @@ import { firstTokens, lines } from "../../parse.ts";
  * `firstTokens`, which only ever reads the first column, but both are real
  * shape details now confirmed rather than assumed.
  *
+ * The `Version` column (second) is now also read, alongside the `Tracking`
+ * column (fourth — the channel a snap is actually following, e.g.
+ * `latest/stable`) — `PackageEntry.version` reports `Tracking`, not
+ * `Version`: a channel pin (`VersionSpec.Channel`) is compared against
+ * *which channel a snap follows*, never the numeric release string a
+ * publisher happens to have tagged that revision with, which is what
+ * `Version` reports and is not something a recipe can even ask snap for.
+ *
  * `install` needs root (`snap install` is documented to require it, and
  * historically prompts for `sudo` itself if not already root) —
  * `sudo snap install` is the standard non-interactive form; this session's
  * container ran as root already, so `sudo` itself was not separately
  * exercised.
  */
-export const parseSnapList = (stdout: string): string[] => {
+export const parseSnapList = (stdout: string): PackageEntry[] => {
   const rows = lines(stdout);
   // A fresh install's "no snaps installed" message is real, but it's on
   // stderr — confirmed by capturing stdout and stderr separately against a
@@ -65,19 +133,54 @@ export const parseSnapList = (stdout: string): string[] => {
   if (rows.length === 0) return [];
   // The header's first column is always literally "Name" — drop it and
   // parse everything after.
-  return firstTokens(rows.slice(1));
+  const entries: PackageEntry[] = [];
+  for (const row of rows.slice(1)) {
+    const columns = row.split(/\s+/);
+    const name = columns[0];
+    const tracking = columns[3];
+    if (name === undefined) continue;
+    entries.push(tracking === undefined ? { name } : { name, version: tracking });
+  }
+  return entries;
 };
 
 export const makeSnapBackend = (): PackageManagerBackend => ({
   id: "snap",
+  versions: snapVersionSupport,
   list: (exec) =>
     exec({ command: Sh.sh("snap", "list") }).pipe(
       Effect.map((result) => parseSnapList(result.stdout)),
     ),
-  install: (name, exec) =>
-    exec({
-      command: Sh.sh("sudo", "snap", "install", name),
-      shell: true,
-      timeout: "10 minutes",
-    }).pipe(Effect.asVoid),
+  install: (name, version, exec) =>
+    UndefinedOr.match(version, {
+      onUndefined: () =>
+        exec({
+          command: Sh.sh("sudo", "snap", "install", name),
+          shell: true,
+          timeout: "10 minutes",
+        }).pipe(Effect.asVoid),
+      onDefined: (spec) =>
+        Match.value(spec).pipe(
+          Match.tagsExhaustive({
+            Channel: (v) =>
+              exec({
+                command: Sh.sh("sudo", "snap", "install", name, `--channel=${v.name}`),
+                shell: true,
+                timeout: "10 minutes",
+              }).pipe(
+                Effect.asVoid,
+                Effect.catchTag("CommandError", () =>
+                  exec({
+                    command: Sh.sh("sudo", "snap", "refresh", name, `--channel=${v.name}`),
+                    shell: true,
+                    timeout: "10 minutes",
+                  }).pipe(Effect.asVoid),
+                ),
+              ),
+            Exact: rejectSpec,
+            AtLeast: rejectSpec,
+            Digest: rejectSpec,
+          }),
+        ),
+    }),
 });

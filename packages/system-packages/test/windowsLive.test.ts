@@ -20,7 +20,9 @@ const wingetListFile = process.env["MACHINE_RUN_WINGET_LIST"];
 const chocoListFile = process.env["MACHINE_RUN_CHOCO_LIST"];
 
 it.skipIf(wingetListFile === undefined)("`winget list` still parses on this machine", () => {
-  const ids = parseWingetList(Fs.readFileSync(wingetListFile ?? "", "utf8"));
+  const ids = parseWingetList(Fs.readFileSync(wingetListFile ?? "", "utf8")).map(
+    (entry) => entry.name,
+  );
 
   // A Windows machine always has something installed, so an empty result means
   // the table stopped being found rather than that nothing is there.
