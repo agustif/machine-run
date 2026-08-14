@@ -1,4 +1,11 @@
-import { MachinePaths, makeSha256, readIfPresent } from "@machine-run/core";
+import {
+  detectLineEnding,
+  joinLines,
+  MachinePaths,
+  makeSha256,
+  readIfPresent,
+  splitLines,
+} from "@machine-run/core";
 import { type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -145,19 +152,6 @@ export class LineInFileUnreadable extends Data.TaggedError("LineInFileUnreadable
   }
 }
 
-/** Splits file content into lines, dropping exactly one trailing newline if present. */
-const splitLines = (content: string): string[] => {
-  if (content.length === 0) return [];
-  if (content.endsWith("\n")) return content.slice(0, -1).split("\n");
-  return content.split("\n");
-};
-
-/** Joins lines back into file content, always terminated by a trailing newline (unless there are no lines at all). */
-const joinLines = (lines: ReadonlyArray<string>): string => {
-  if (lines.length === 0) return "";
-  return `${lines.join("\n")}\n`;
-};
-
 /** Every line in `lines` that `matchSource` matches, tested one line at a time. */
 const findMatches = (lines: ReadonlyArray<string>, matchSource: string): ReadonlyArray<string> => {
   const regex = new RegExp(matchSource);
@@ -223,6 +217,12 @@ export const renderLine = (
     });
   }
 
+  // The file's own convention, preserved rather than overwritten — see
+  // `LineEndings.ts`'s doc comment. `existing` being empty (a brand-new file)
+  // reports "lf" here too, which is this module's chosen default for content
+  // created from nothing.
+  const ending = detectLineEnding(existing);
+
   if (found.length === 1) {
     // Replaces by re-testing each line, rather than by an index computed
     // separately, so there is no index arithmetic that could drift from
@@ -231,13 +231,13 @@ export const renderLine = (
       if (regex.test(candidate)) return line;
       return candidate;
     });
-    return Result.succeed(joinLines(updated));
+    return Result.succeed(joinLines(updated, ending));
   }
 
   if (options.position === "prepend") {
-    return Result.succeed(joinLines([line, ...lines]));
+    return Result.succeed(joinLines([line, ...lines], ending));
   }
-  return Result.succeed(joinLines([...lines, line]));
+  return Result.succeed(joinLines([...lines, line], ending));
 };
 
 export const makeLineInFileReconciler: Effect.Effect<

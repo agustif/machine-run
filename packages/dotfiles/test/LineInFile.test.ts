@@ -114,6 +114,74 @@ it("refuses a line that does not itself satisfy match", () => {
   expect(Result.isFailure(result)).toBe(true);
 });
 
+// ---------------------------------------------------------------------------
+// CRLF content — `/etc/hosts`, `~/.zshrc` and the like frequently carry `\r\n`
+// on Windows. A naive `content.split("\n")` leaves a trailing `\r` on every
+// line; that `\r` survives into whatever `match` was anchored with `$`, so a
+// line that is genuinely already there reads as "not found" and gets a
+// duplicate appended on every single run — the most damaging of the three
+// bugs this module's fix addresses (see the task's report for the other two).
+// ---------------------------------------------------------------------------
+
+it("readLine finds an existing CRLF line despite the trailing \\r a naive split would leave", () => {
+  const existing = "# header\r\n127.0.0.1 example.local\r\n";
+  // Anchored with `$`, as a recipe author would to identify the line
+  // unambiguously — exactly the pattern a stray trailing `\r` defeats.
+  const found = readLine(existing, "^127\\.0\\.0\\.1 example\\.local$");
+  expect(Result.isSuccess(found)).toBe(true);
+  if (Result.isSuccess(found)) expect(found.success).toBe("127.0.0.1 example.local");
+});
+
+it("renderLine preserves an existing CRLF file's line endings when replacing the owned line", () => {
+  const existing = "# header\r\n127.0.0.1 old.local\r\n# trailer\r\n";
+  const result = renderLine(existing, "^127\\.0\\.0\\.1 ", "127.0.0.1 new.local");
+  expect(Result.isSuccess(result)).toBe(true);
+  if (Result.isSuccess(result)) {
+    expect(result.success).toBe("# header\r\n127.0.0.1 new.local\r\n# trailer\r\n");
+  }
+});
+
+it.effect(
+  "CRLF file: an already-present, $-anchored line is recognised — not duplicated — across repeated applies",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeLineInFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "hosts");
+
+      // A CRLF file, as a Windows-authored `/etc/hosts` would be.
+      yield* fs.writeFileString(target, "# header\r\n127.0.0.1 example.local\r\n");
+
+      const props: LineInFileProps = {
+        path: target,
+        match: "^127\\.0\\.0\\.1 example\\.local$",
+        line: "127.0.0.1 example.local",
+      };
+      const desired = yield* reconciler.desired(props);
+      const observed = yield* reconciler.observe(props, observeCtx);
+
+      // The load-bearing assertion: before the fix, a naive `content.split("\n")`
+      // leaves this line as `"127.0.0.1 example.local\r"`, which the
+      // `$`-anchored `match` never recognises, so `observe` reports "no line
+      // yet" for a line that is genuinely already there.
+      expect(observed).toBeDefined();
+      expect(reconciler.matches(observed!, desired)).toBe(true);
+
+      yield* reconciler.apply({ props, observed, desired }, applyCtx);
+
+      const content = yield* fs.readFileString(target);
+      const occurrences = content.match(/127\.0\.0\.1 example\.local/g)?.length ?? 0;
+      // Before the fix, `apply` treats the existing line as absent (the same
+      // trailing-`\r` bug) and appends a second copy every time it runs —
+      // the duplicate-on-every-run failure this test exists to catch.
+      expect(occurrences).toBe(1);
+      // And the file's pre-existing CRLF convention survives the write.
+      expect(content).toBe("# header\r\n127.0.0.1 example.local\r\n");
+    }).pipe(Effect.provide(layer)),
+);
+
 it.effect("apply inserts the line, and a second apply with the same props is a no-op", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;

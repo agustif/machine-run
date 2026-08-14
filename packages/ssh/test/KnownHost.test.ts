@@ -79,6 +79,59 @@ it("appendKnownHostLine adds exactly one line, adding a missing trailing newline
 });
 
 // ---------------------------------------------------------------------------
+// CRLF content — Windows OpenSSH writes `known_hosts` with `\r\n`.
+// `parseKnownHosts`'s own field extraction happens to survive a naive
+// `content.split("\n")` because `String.prototype.trim()` strips a lone
+// trailing `\r` as a LineTerminator character — verified directly below —
+// but `appendKnownHostLine` hardcoding a bare `\n` does not survive it: it
+// silently turns a consistently-CRLF file into one whose newest line is the
+// only one not terminated the same way as the rest.
+// ---------------------------------------------------------------------------
+
+it("parseKnownHosts extracts a clean key from a CRLF known_hosts line", () => {
+  const content = "github.com ssh-ed25519 AAAAKEYDATA\r\ngitlab.com ssh-rsa BBBBKEYDATA\r\n";
+  expect(parseKnownHosts(content)).toEqual([
+    { host: "github.com", keyType: "ssh-ed25519", publicKey: "AAAAKEYDATA" },
+    { host: "gitlab.com", keyType: "ssh-rsa", publicKey: "BBBBKEYDATA" },
+  ]);
+});
+
+it("appendKnownHostLine preserves an existing CRLF file's line endings for the newly appended line", () => {
+  const entry = { host: "gitlab.com", keyType: "ssh-ed25519", publicKey: "BBBB" };
+  const existing = "github.com ssh-ed25519 AAAA\r\n";
+  // The load-bearing assertion: before the fix, this produces
+  // `"github.com ssh-ed25519 AAAA\r\ngitlab.com ssh-ed25519 BBBB\n"` — the
+  // pre-existing line stays `\r\n`-terminated but the newly appended one
+  // becomes bare `\n`, a mixed-convention file this tool itself introduced.
+  expect(appendKnownHostLine(existing, entry)).toBe(
+    "github.com ssh-ed25519 AAAA\r\ngitlab.com ssh-ed25519 BBBB\r\n",
+  );
+});
+
+it.effect("CRLF known_hosts: a second entry is appended using the file's own CRLF convention", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeKnownHostReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "known_hosts");
+
+    yield* fs.writeFileString(target, "github.com ssh-ed25519 AAAA\r\n");
+
+    const props = propsFor(target, {
+      host: "gitlab.com",
+      keyType: "ssh-rsa",
+      publicKey: "BBBB",
+    });
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: undefined, desired }, applyCtx);
+
+    const written = yield* fs.readFileString(target);
+    expect(written).toBe("github.com ssh-ed25519 AAAA\r\ngitlab.com ssh-rsa BBBB\r\n");
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+// ---------------------------------------------------------------------------
 // The reconciler, against a real temp file.
 // ---------------------------------------------------------------------------
 
