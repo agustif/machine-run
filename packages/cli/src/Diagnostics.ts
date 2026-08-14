@@ -99,10 +99,10 @@ export const describeExit = <A, E>(
  * exactly what `NodeRuntime.runMain`'s teardown does for any non-zero code.
  * That is `bin.ts`'s job now, not this function's.
  */
-export const withDeadline = <A, E>(
-  effect: Effect.Effect<A, E>,
+export const withDeadline = <A, E, R>(
+  effect: Effect.Effect<A, E, R>,
   deadlineMillis: number,
-): Effect.Effect<A, E | CommandTimedOut> =>
+): Effect.Effect<A, E | CommandTimedOut, R> =>
   effect.pipe(
     Effect.timeout(deadlineMillis),
     Effect.catchTag("TimeoutError", () =>

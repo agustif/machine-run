@@ -12,13 +12,16 @@ Full chain in [docs/notes/plan-blocker-repro.md](../../docs/notes/plan-blocker-r
 
 ## Open
 
-- [ ] **`deploy` and `destroy`.** Only `plan` is exposed. `Alchemy.deploy`/
-      `Alchemy.destroy` (`node_modules/alchemy/lib/Deploy.js`, `Destroy.js`) are
-      one-line wrappers over `Stack.evalStack`, the same shape `Commands.ts`'s
-      `planRecipe` already uses — the missing piece is a `Cli` service
-      (`approvePlan`, `displayPlan`, `startApplySession`) for `Apply.apply` to
-      call into. Alchemy ships `LoggingCli` as a non-TUI reference worth
-      reading first.
+- [x] **`deploy` and `destroy`.** Both exist now (`deployRecipe`/
+      `destroyRecipe` in `Commands.ts`, wired up in `Cli.ts`). Built directly
+      on `Stack.evalStack` + `Plan.make`/`Plan.destroy` + `Apply.apply` — the
+      same shape `Alchemy.deploy`/`Alchemy.destroy` use internally
+      (`node_modules/alchemy/lib/Deploy.js`, `Destroy.js`), rather than calling
+      those exports, since their signatures pin the stack's error type to
+      `ConfigError` and this package's `Recipe` type does not. Both refuse
+      without `--yes`, checked before the recipe is even resolved, so a
+      missing `--yes` never builds `withStackServices`' layer (which creates
+      `.alchemy` on disk as a side effect of merely being provided).
 - [ ] **Report the `Stack()`-with-no-arguments trap upstream.** A call that
       type-checks, silently discards its own arguments, and fails four layers
       away with a message naming neither the recipe nor the call is a
