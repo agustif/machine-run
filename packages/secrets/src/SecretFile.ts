@@ -67,6 +67,17 @@ export const SecretFileState = Schema.Struct({
   mode: Schema.Number,
   /** `icacls <path>`'s listing, on Windows only — see `Machine.Directory`. */
   acl: Schema.optionalKey(Schema.String),
+  /**
+   * Whether the apply that produced this state *created* the file, as opposed to
+   * overwriting something already there.
+   *
+   * This is the marker `unapply` needs and used to lack. `apply` receives the live
+   * state as `observed`, and `Option.none()` means nothing was at the path — so
+   * "we made this file" is knowable at write time rather than guessable at destroy
+   * time. Absent only on state written before this field existed, which `unapply`
+   * treats as "cannot tell" and leaves alone.
+   */
+  created: Schema.optionalKey(Schema.Boolean),
 });
 
 export type SecretFileState = typeof SecretFileState.Type;
@@ -163,6 +174,10 @@ export const makeSecretFileReconciler: Effect.Effect<
     // a resource's first apply, and the first apply after adopting something
     // already present.
     snapshotBeforeApply: true,
+    // A secret file is precisely the hand-placed content worth refusing rather
+    // than silently taking over — an operator's own key at this path is not ours
+    // to overwrite without being told. Same reasoning as `Machine.File`.
+    refuseUnowned: true,
 
     // Presence and permissions only. Reading the file back to compare content
     // would mean holding a secret in memory during planning for no decision it
@@ -222,7 +237,7 @@ export const makeSecretFileReconciler: Effect.Effect<
       return fields;
     },
 
-    apply: ({ props, desired }, ctx) =>
+    apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
         yield* fs.makeDirectory(path.dirname(desired.path), {
           recursive: true,
@@ -249,17 +264,31 @@ export const makeSecretFileReconciler: Effect.Effect<
             ),
         });
 
-        return desired;
+        return { ...desired, created: Option.isNone(observed) };
       }),
 
-    // No `unapply`: `State` carries no marker distinguishing a file this
-    // resource itself wrote from one it merely adopted (an operator's own
-    // key, already matching desired state on first `observe`, so `apply` and
-    // its `snapshotBeforeApply` snapshot never ran). Deleting on `destroy`
-    // would be a safe undo in the first case — the secret still lives in its
-    // store, refetchable — but an unrecoverable, unbacked-up loss of real
-    // credential material in the second, and `unapply` cannot tell them
-    // apart. Retain (no-op) is the honest choice for both.
+    /**
+     * Removes the file, but only one this resource created.
+     *
+     * The distinction is the whole thing. Deleting a file we wrote is a safe undo:
+     * the secret still lives in its store and is refetchable. Deleting one we
+     * merely overwrote — an operator's own key, adopted with `--adopt` — is an
+     * unrecoverable loss of credential material. `apply` records which case it
+     * was, from `observed`, so this does not have to guess.
+     *
+     * `created: false` and a missing `created` both leave the file alone. The
+     * second is state written before that field existed, where "cannot tell" and
+     * "was not ours" deserve the same caution.
+     */
+    unapply: ({ recorded }) =>
+      UndefinedOr.match(recorded.created, {
+        onUndefined: () => Effect.void,
+        onDefined: (created) =>
+          Boolean.match(created, {
+            onFalse: () => Effect.void,
+            onTrue: () => fs.remove(recorded.path).pipe(Effect.orElseSucceed(() => undefined)),
+          }),
+      }),
   };
 });
 

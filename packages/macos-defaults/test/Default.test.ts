@@ -31,6 +31,15 @@ const props = (value: PlistValue): MacDefaultProps => ({
   value,
 });
 
+/** Records every command, always succeeding — the shape the unapply tests need. */
+const capturing = (calls: string[]) => ({
+  exec: (p: { command: string }) => {
+    calls.push(p.command);
+    return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+  },
+  snapshot: () => Effect.succeed(undefined),
+});
+
 it.effect(
   "matches: a structured value (dict + array + data + date) round-trips without reporting false drift when the live dict's keys are stored in a different order",
   () =>
@@ -109,10 +118,89 @@ it.effect(
     }),
 );
 
-it.effect("MacOS.Default has no unapply — no prior value is ever captured to restore", () =>
+/**
+ * `unapply` exists because the prior value is now captured, not because a rule
+ * changed. `Reconciler.unapply`'s doc comment used to cite this resource as the
+ * example of one that cannot honestly reverse itself — the reason was that
+ * `MacDefaultState` carried no prior value, which was a gap in the schema rather
+ * than a fact about `defaults`. `apply` already receives the live value as
+ * `observed`.
+ */
+it.effect("unapply restores the value it overwrote", () =>
   Effect.gen(function* () {
     const reconciler = yield* makeMacDefaultReconciler;
-    expect(reconciler.unapply).toBeUndefined();
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const calls: string[] = [];
+
+    yield* unapply(
+      {
+        props: props(42),
+        observed: { domain: "com.apple.finder", key: "ShowPathbar", xml: "<integer>42</integer>" },
+        recorded: {
+          domain: "com.apple.finder",
+          key: "ShowPathbar",
+          xml: "<integer>42</integer>",
+          previous: { _tag: "Value", xml: "<true/>" },
+        },
+      },
+      capturing(calls),
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("defaults write");
+    expect(calls[0]).toContain("<true/>");
+  }),
+);
+
+it.effect("unapply deletes a key that did not exist before the apply", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeMacDefaultReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const calls: string[] = [];
+
+    yield* unapply(
+      {
+        props: props(42),
+        observed: { domain: "com.apple.finder", key: "ShowPathbar", xml: "<integer>42</integer>" },
+        recorded: {
+          domain: "com.apple.finder",
+          key: "ShowPathbar",
+          xml: "<integer>42</integer>",
+          previous: { _tag: "Absent" },
+        },
+      },
+      capturing(calls),
+    );
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("defaults delete");
+  }),
+);
+
+/**
+ * The case that keeps this honest. State written before `previous` existed has no
+ * capture, and guessing would mean deleting a key the operator may have set
+ * themselves — the worst available outcome.
+ */
+it.effect("unapply does nothing when no prior value was captured", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeMacDefaultReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const calls: string[] = [];
+
+    yield* unapply(
+      {
+        props: props(42),
+        observed: { domain: "com.apple.finder", key: "ShowPathbar", xml: "<integer>42</integer>" },
+        recorded: { domain: "com.apple.finder", key: "ShowPathbar", xml: "<integer>42</integer>" },
+      },
+      capturing(calls),
+    );
+
+    expect(calls).toEqual([]);
   }),
 );
 
@@ -156,7 +244,9 @@ it.effect("apply writes the rendered XML and returns the desired state", () =>
       capturingExec,
     );
 
-    expect(result).toEqual(desired);
+    // `previous` records that the key was absent, which is what `observed:
+    // Option.none()` above means — that capture is what makes `unapply` honest.
+    expect(result).toEqual({ ...desired, previous: { _tag: "Absent" } });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("defaults write");
     expect(calls[0]).toContain("com.apple.finder");

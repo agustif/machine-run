@@ -3,8 +3,10 @@ import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
 import * as Effect from "effect/Effect";
+import * as Match from "effect/Match";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as UndefinedOr from "effect/UndefinedOr";
 import { canonicalXml, PlistDecodeError, PlistValueSchema, render } from "./Value.ts";
 
 export const MacDefaultProps = Schema.Struct({
@@ -40,10 +42,37 @@ export type MacDefaultProps = typeof MacDefaultProps.Type;
  * The value is carried as canonical XML so two spellings of the same
  * property-list value compare equal — see `canonicalXml`.
  */
+/**
+ * What was at this key before the apply that last changed it.
+ *
+ * Tagged rather than an optional string because "the key held no value" and "we
+ * never captured one" are different facts and `unapply` must act differently on
+ * them: the first means delete the key, the second means do nothing. An optional
+ * `previousXml` would collapse them into the same absent field.
+ */
+export const MacDefaultPrevious = Schema.TaggedUnion({
+  /** The key did not exist before this resource wrote it. */
+  Absent: {},
+  /** The key held this value, as canonical XML. */
+  Value: { xml: Schema.String },
+});
+
+export type MacDefaultPrevious = typeof MacDefaultPrevious.Type;
+
 export const MacDefaultState = Schema.Struct({
   domain: Schema.String,
   key: Schema.String,
   xml: Schema.String,
+  /**
+   * Captured by `apply` so `unapply` can restore rather than guess.
+   *
+   * `Reconciler.unapply`'s own doc comment cited this resource as the example of
+   * one that cannot honestly reverse itself, because its state carried no prior
+   * value. That was a gap in this schema rather than a fact about `defaults` —
+   * `apply` already receives the live value as `observed`, so capturing it costs
+   * nothing. Absent only on state written before this field existed.
+   */
+  previous: Schema.optionalKey(MacDefaultPrevious),
 });
 
 export type MacDefaultState = typeof MacDefaultState.Type;
@@ -150,7 +179,7 @@ export const makeMacDefaultReconciler: Effect.Effect<
    * the key instead of restoring it would not be an undo, only a different
    * change nobody asked for.
    */
-  apply: ({ props, desired }, ctx) =>
+  apply: ({ props, observed, desired }, ctx) =>
     Effect.gen(function* () {
       yield* ctx.exec({
         // Every fragment is quoted. Under `shell: true` an unquoted value
@@ -169,7 +198,50 @@ export const makeMacDefaultReconciler: Effect.Effect<
           .pipe(Effect.catchTag("CommandError", () => Effect.void));
       }
 
-      return desired;
+      // Captured from `observed`, which is the live value read immediately
+      // before the write above — so this is what was actually there, not what a
+      // previous run recorded.
+      return {
+        ...desired,
+        previous: Option.match(observed, {
+          onNone: (): MacDefaultPrevious => ({ _tag: "Absent" }),
+          onSome: (state): MacDefaultPrevious => ({ _tag: "Value", xml: state.xml }),
+        }),
+      };
+    }),
+
+  /**
+   * Restores the value this resource overwrote, or removes the key when it wrote
+   * one that had not existed.
+   *
+   * Honest because `apply` captures the live value rather than assuming one: a key
+   * that was absent is deleted, a key that held something gets that something
+   * back. State written before `previous` existed carries no capture, and this
+   * does nothing rather than guessing — `defaults delete` on a key the operator
+   * set themselves would be the worst available outcome.
+   */
+  unapply: ({ recorded }, ctx) =>
+    UndefinedOr.match(recorded.previous, {
+      onUndefined: () => Effect.void,
+      onDefined: (previous) =>
+        Match.value(previous).pipe(
+          Match.tagsExhaustive({
+            Absent: () =>
+              ctx
+                .exec({
+                  command: Sh.sh("defaults", "delete", recorded.domain, recorded.key),
+                  shell: true,
+                })
+                .pipe(Effect.asVoid),
+            Value: ({ xml }) =>
+              ctx
+                .exec({
+                  command: Sh.sh("defaults", "write", recorded.domain, recorded.key, xml),
+                  shell: true,
+                })
+                .pipe(Effect.asVoid),
+          }),
+        ),
     }),
 });
 

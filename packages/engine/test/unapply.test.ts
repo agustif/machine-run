@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
-import { services as coreServices, silentSession } from "@machine-run/core";
+import { Backups, FileLockLive, silentSession } from "@machine-run/core";
 import { CommandExecutor } from "alchemy/Command";
 import { RemovalPolicy } from "alchemy/RemovalPolicy";
 import { Resource } from "alchemy/Resource";
@@ -155,7 +155,26 @@ const CommandExecutorStub = Layer.succeed(CommandExecutor, {
 });
 
 /** Everything `toProvider` itself resolves, for any reconciler under test. */
-const supportLayers = Layer.mergeAll(CommandExecutorStub, coreServices()).pipe(
+const temporaryBackups = Layer.effect(
+  Backups,
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const root = yield* fs.makeTempDirectoryScoped();
+
+    return {
+      root,
+      snapshot: (target: string) =>
+        Effect.gen(function* () {
+          const destination = path.join(root, path.basename(target));
+          yield* fs.copy(target, destination).pipe(Effect.orDie);
+          return destination;
+        }),
+    };
+  }),
+);
+
+const supportLayers = Layer.mergeAll(CommandExecutorStub, FileLockLive(), temporaryBackups).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 

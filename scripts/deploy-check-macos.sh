@@ -78,9 +78,12 @@ note "Re-deploy to converge before destroy"
 
 note "alchemy destroy (retain is the default — the key must survive)"
 "$ALCHEMY" destroy "$RECIPE" --yes 2>&1 | tee "$LOG_DIR/destroy.log"
-# `MacOS.Default` has no `unapply` — its state never captures the prior value, so
-# there is nothing honest to restore. This asserts the value is left alone, which
-# is what retain means and what the absent `unapply` implies.
+# `MacOS.Default` now *has* an `unapply` — it captures the prior value in state, so
+# it can restore rather than guess. This still asserts the value survives, which is
+# the point: retain is the default, so having an `unapply` is not enough to make
+# `destroy` destructive. The `unapply` path itself is covered by unit tests, since
+# exercising it here would need a destroy policy this check deliberately does not
+# pass.
 assert_true "the key still holds its value after destroy" \
   test "$(defaults read "$DOMAIN" sampleKey)" = "expected"
 

@@ -1,4 +1,3 @@
-import * as http from "node:http";
 import { createHash } from "node:crypto";
 import { NodeServices } from "@effect/platform-node";
 import { MachinePathsLive, PlatformLive } from "@machine-run/core";
@@ -8,7 +7,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import {
   DownloadChecksumMismatch,
   DownloadPathIsNotFile,
@@ -18,39 +18,31 @@ import {
   type DownloadState,
 } from "../src/Download.ts";
 
-/**
- * A real HTTP server on a loopback port, not a fake `HttpClient` — the
- * requirement this resource exists to satisfy is "verify a real download
- * before it lands on disk", so the test has to exercise a real fetch over a
- * real socket, not a stand-in that can't lie the way a real server would.
- */
-const withServer = (body: Uint8Array) =>
-  Effect.acquireRelease(
-    Effect.callback<{ server: http.Server; url: string }>((resume) => {
-      const server = http.createServer((_req, res) => {
-        res.writeHead(200);
-        res.end(Buffer.from(body));
-      });
-      server.listen(0, "127.0.0.1", () => {
-        const address = server.address();
-        const port = typeof address === "object" && address !== null ? address.port : 0;
-        resume(Effect.succeed({ server, url: `http://127.0.0.1:${port}/file` }));
-      });
-    }),
-    ({ server }) =>
-      Effect.callback<void>((resume) => {
-        server.close(() => resume(Effect.void));
-      }),
-  );
-
 const sha256Hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), FetchHttpClient.layer).pipe(
-  Layer.provideMerge(NodeServices.layer),
-);
 
 const BODY = new TextEncoder().encode("machine-run test fixture, not a real font");
 const CHECKSUM = sha256Hex(BODY);
+const FIXTURE_URL = "https://fixture.invalid/file";
+
+/**
+ * The default suite must not need a socket, network permission, or a running
+ * server. This client still returns a real `HttpClientResponse`, so checksum,
+ * size, status, and filesystem behavior are exercised through the same seam
+ * production uses without making the test environment part of the contract.
+ */
+const fixtureClient = HttpClient.make((request) =>
+  request.url === FIXTURE_URL
+    ? Effect.succeed(HttpClientResponse.fromWeb(request, new Response(BODY, { status: 200 })))
+    : Effect.die(`unexpected download URL in hermetic test: ${request.url}`),
+);
+
+const layer = Layer.mergeAll(
+  MachinePathsLive(),
+  PlatformLive(),
+  Layer.succeed(HttpClient.HttpClient, fixtureClient),
+).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 it.effect("observe reports nothing for a file that has not been fetched yet", () =>
   Effect.gen(function* () {
@@ -62,7 +54,7 @@ it.effect("observe reports nothing for a file that has not been fetched yet", ()
 
     const observed = yield* reconciler.observe(
       {
-        url: "http://127.0.0.1:1/unreachable",
+        url: FIXTURE_URL,
         path: target,
         checksum: CHECKSUM,
       },
@@ -77,7 +69,7 @@ it.effect("apply fetches, verifies the checksum, and writes the bytes atomically
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "font.ttf");
 
@@ -108,7 +100,7 @@ it.effect("a checksum mismatch fails without ever writing the file", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "font.ttf");
 
@@ -148,7 +140,7 @@ it.effect("observe fails with a typed error when a directory occupies the path",
 
     const error = yield* reconciler
       .observe(
-        { url: "http://127.0.0.1:1/unreachable", path: target, checksum: CHECKSUM },
+        { url: FIXTURE_URL, path: target, checksum: CHECKSUM },
         { exec: () => Effect.die("not used") },
       )
       .pipe(Effect.flip);
@@ -158,14 +150,17 @@ it.effect("observe fails with a typed error when a directory occupies the path",
 
 it.effect("desired never contacts the network — it reads straight from `checksum`", () =>
   Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
     const desired = yield* reconciler.desired({
-      url: "http://127.0.0.1:1/unreachable-and-never-called",
-      path: "/tmp/whatever",
+      url: FIXTURE_URL,
+      path: path.join(dir, "whatever"),
       checksum: CHECKSUM,
     });
     expect(desired.hash).toBe(CHECKSUM);
-  }).pipe(Effect.provide(layer)),
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect("refuses an artifact larger than `maxBytes` instead of holding it in memory", () =>
@@ -176,7 +171,7 @@ it.effect("refuses an artifact larger than `maxBytes` instead of holding it in m
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "big.bin");
 
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
 
     const failure = yield* reconciler
       .apply(
@@ -216,7 +211,7 @@ it.effect(
 
       const failure = yield* reconciler
         .observe(
-          { url: "http://127.0.0.1:1/unused", path: target, checksum: CHECKSUM, maxBytes: 8 },
+          { url: FIXTURE_URL, path: target, checksum: CHECKSUM, maxBytes: 8 },
           { exec: () => Effect.die("not used") },
         )
         .pipe(Effect.flip);
@@ -238,7 +233,7 @@ it.effect("a read-only mode still downloads, and lands read-only", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "pinned.ttf");
 
@@ -262,7 +257,7 @@ it.effect("a download with no mode is left at the platform default", () =>
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "unmoded.ttf");
 
@@ -279,29 +274,33 @@ it.effect("a download with no mode is left at the platform default", () =>
 
 it.effect("drift is empty exactly when matches is true, and names content and mode", () =>
   Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const reconciler = yield* makeDownloadReconciler;
     const drift = reconciler.drift;
     if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const fixturePath = path.join(dir, "font.ttf");
 
     const desired: DownloadState = {
-      path: "/tmp/font.ttf",
+      path: fixturePath,
       hash: CHECKSUM,
       mode: 0o644,
     };
-    const satisfied = { path: "/tmp/font.ttf", hash: CHECKSUM, mode: 0o644 };
+    const satisfied = { path: fixturePath, hash: CHECKSUM, mode: 0o644 };
     expect(reconciler.matches(satisfied, desired)).toBe(true);
     expect(drift(satisfied, desired)).toEqual([]);
 
-    const wrongHash = { path: "/tmp/font.ttf", hash: "0".repeat(64), mode: 0o644 };
+    const wrongHash = { path: fixturePath, hash: "0".repeat(64), mode: 0o644 };
     expect(reconciler.matches(wrongHash, desired)).toBe(false);
     expect(drift(wrongHash, desired).map((f) => f.field)).toEqual(["content"]);
 
-    const wrongMode = { path: "/tmp/font.ttf", hash: CHECKSUM, mode: 0o600 };
+    const wrongMode = { path: fixturePath, hash: CHECKSUM, mode: 0o600 };
     expect(reconciler.matches(wrongMode, desired)).toBe(false);
     expect(drift(wrongMode, desired)).toEqual([
       { field: "mode", observed: "600", desired: "644", direction: "behind" },
     ]);
-  }).pipe(Effect.provide(layer)),
+  }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect("unapply removes the verified file it wrote", () =>
@@ -311,7 +310,7 @@ it.effect("unapply removes the verified file it wrote", () =>
     const reconciler = yield* makeDownloadReconciler;
     const unapply = reconciler.unapply;
     if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
-    const { url } = yield* withServer(BODY);
+    const url = FIXTURE_URL;
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "font.ttf");
 

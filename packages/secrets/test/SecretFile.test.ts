@@ -358,3 +358,86 @@ it.effect("trailingNewline 'strip' also removes a carriage return", () =>
     expect(yield* fs.readFileString(target)).toBe("a-token");
   }).pipe(Effect.provide(layer)),
 );
+
+/**
+ * The distinction `unapply` exists on, and the reason it did not exist before.
+ *
+ * Deleting a file this resource wrote is a safe undo — the secret still lives in
+ * its store and is refetchable. Deleting one it merely overwrote, an operator's
+ * own key adopted with `--adopt`, is an unrecoverable loss of credential material.
+ * `State` used to carry no marker separating the two, which is why there was no
+ * `unapply` at all; `apply` knows from `observed`, so it records it.
+ */
+it.effect("unapply removes a file this resource created", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "token");
+    yield* fs.writeFileString(target, "written-by-us");
+
+    yield* unapply(
+      {
+        props: propsFor(target, "API_TOKEN"),
+        observed: { path: target, mode: 0o600 },
+        recorded: { path: target, mode: 0o600, created: true },
+      },
+      applyCtx,
+    );
+
+    expect(yield* fs.exists(target)).toBe(false);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect("unapply leaves a file it merely overwrote alone", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "token");
+    yield* fs.writeFileString(target, "the operator's own key");
+
+    yield* unapply(
+      {
+        props: propsFor(target, "API_TOKEN"),
+        observed: { path: target, mode: 0o600 },
+        recorded: { path: target, mode: 0o600, created: false },
+      },
+      applyCtx,
+    );
+
+    expect(yield* fs.exists(target)).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+/** State written before `created` existed: "cannot tell" gets the same caution as
+ * "was not ours", because the downside is losing a credential. */
+it.effect("unapply does nothing when it cannot tell who created the file", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const unapply = reconciler.unapply;
+    if (unapply === undefined) return yield* Effect.die("expected unapply to be defined");
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "token");
+    yield* fs.writeFileString(target, "unknown provenance");
+
+    yield* unapply(
+      {
+        props: propsFor(target, "API_TOKEN"),
+        observed: { path: target, mode: 0o600 },
+        recorded: { path: target, mode: 0o600 },
+      },
+      applyCtx,
+    );
+
+    expect(yield* fs.exists(target)).toBe(true);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);

@@ -121,6 +121,7 @@ ecosystem artifact that has its own identity and its own idempotent apply — a
   is used for here, and when not to reach for it
 - [docs/SYSTEM-DESIGN.md](./docs/SYSTEM-DESIGN.md) — why, with the tradeoffs
 - [docs/TASKS.md](./docs/TASKS.md) — the backlog
+- [docs/TESTING.md](./docs/TESTING.md) — the hermetic default/live test contract
 - [AGENTS.md](./AGENTS.md) — rules for anyone (human or agent) changing this
 
 ## License

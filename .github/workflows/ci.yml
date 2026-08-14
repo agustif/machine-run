@@ -51,6 +51,18 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: npm run lint
 
+  live-tests:
+    name: live tests (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - name: live transport tests
+        run: npm run test:live
+
   # Windows gets its own job because it verifies strictly less, and the job
   # name should say so rather than a green `check (windows-latest)` implying
   # the suite passes there. It does not: tests still fail on Windows for two
