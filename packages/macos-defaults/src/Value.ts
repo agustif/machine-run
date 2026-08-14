@@ -4,7 +4,7 @@ import * as DateTime from "effect/DateTime";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import { build, parse } from "plist";
+import { build, parse, type PlistValue as NativePlistValue } from "plist";
 
 /**
  * A property-list value, in a form that survives being persisted as JSON.
@@ -142,7 +142,7 @@ const traverse = <A, B>(
  * Converts the JSON-safe representation into the shapes the plist serializer
  * expects: `Uint8Array` for `<data>`, `Date` for `<date>`.
  */
-const toNative = (value: PlistValue): Result.Result<unknown, PlistDecodeError> => {
+const toNative = (value: PlistValue): Result.Result<NativePlistValue, PlistDecodeError> => {
   const asBinary = asData(value);
   if (Option.isSome(asBinary)) {
     const encoded = asBinary.value.$data;
@@ -168,7 +168,13 @@ const toNative = (value: PlistValue): Result.Result<unknown, PlistDecodeError> =
     );
   }
 
-  if (Array.isArray(value)) return traverse(value, toNative);
+  // Copied into a mutable array rather than passed through: `plist`'s own
+  // `PlistValue` types an array as `PlistValue[]`, and `traverse` produces a
+  // `readonly` one. The copy is what makes that difference explicit instead of
+  // hidden behind an assertion.
+  if (Array.isArray(value)) {
+    return Result.map(traverse(value, toNative), (items) => [...items]);
+  }
 
   if (isRecord(value)) {
     // Dictionary keys are sorted so serialization is deterministic. `defaults`
@@ -215,7 +221,7 @@ const fromNative = (value: unknown): Result.Result<PlistValue, PlistDecodeError>
  * because it validates the whole document against the target format first.
  */
 export const render = (value: PlistValue): Result.Result<string, PlistDecodeError> =>
-  Result.map(toNative(value), (native) => build(native as never));
+  Result.map(toNative(value), (native) => build(native));
 
 /** Reads an XML property list into the JSON-safe representation. */
 export const readXml = (xml: string): Result.Result<PlistValue, PlistDecodeError> =>

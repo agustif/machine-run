@@ -17,11 +17,18 @@ import type { ApplyContext, ObserveContext, Reconciler } from "./Reconciler.ts";
  * a typo is a compile error. A resource needing substantially more than this
  * should call `Provider.effect` directly instead of stretching this shape.
  */
-export interface ProviderOverrides<Res extends ResourceLike, State> {
+export interface ProviderOverrides<Res extends ResourceLike> {
   /** Provider version, for state migrations. */
   readonly version?: number;
-  /** Attributes guaranteed not to change across an update. */
-  readonly stables?: Extract<keyof State, string>[];
+  /**
+   * Attributes guaranteed not to change across an update.
+   *
+   * Keyed on the resource's declared `Attributes` rather than on the
+   * reconciler's `State`. `State` is constrained to extend `Attributes`, so it
+   * may carry extra fields — but a key Alchemy has never been told about
+   * cannot be one it holds stable.
+   */
+  readonly stables?: Extract<keyof Res["Attributes"], string>[];
   /** Runs before creation, for resources whose identity must exist first. */
   readonly precreate?: (input: {
     id: string;
@@ -29,7 +36,7 @@ export interface ProviderOverrides<Res extends ResourceLike, State> {
     news: Res["Props"];
     instanceId: string;
     session: ScopedPlanStatusSession;
-  }) => Effect.Effect<State, never, never>;
+  }) => Effect.Effect<Res["Attributes"], never, never>;
 }
 
 /**
@@ -126,14 +133,14 @@ export interface ProviderOverrides<Res extends ResourceLike, State> {
  * this shape. Both kinds compose in the same stack, because both are just
  * providers.
  */
-export const toProvider = <Res extends ResourceLike, State, E, R>(
+export const toProvider = <Res extends ResourceLike, E, R>(
   cls: ResourceClassLike<Res>,
   /**
    * An effect that builds the reconciler, so it can resolve the services it
    * needs once — the same way a provider resolves its dependencies once,
    * rather than per reconcile.
    */
-  make: Effect.Effect<Reconciler<Res["Props"], State, E>, never, R>,
+  make: Effect.Effect<Reconciler<Res["Props"], Res["Attributes"], E>, never, R>,
   /**
    * Provider members merged over the generated ones.
    *
@@ -147,7 +154,7 @@ export const toProvider = <Res extends ResourceLike, State, E, R>(
    * passed here wins, so a resource can keep the generated `diff`/`reconcile`
    * while replacing one member.
    */
-  overrides?: ProviderOverrides<Res, State>,
+  overrides?: ProviderOverrides<Res>,
 ) =>
   Provider.effect(
     cls,
@@ -196,7 +203,7 @@ export const toProvider = <Res extends ResourceLike, State, E, R>(
         }: {
           news: Res["Props"];
           olds: Res["Props"] | undefined;
-          output: State | undefined;
+          output: Res["Attributes"] | undefined;
           session: ScopedPlanStatusSession;
         }) {
           const ctx = applyCtx(session);
@@ -235,7 +242,7 @@ export const toProvider = <Res extends ResourceLike, State, E, R>(
           session,
         }: {
           olds: Res["Props"];
-          output: State;
+          output: Res["Attributes"];
           session: ScopedPlanStatusSession;
         }) {
           // `None` (no `retain()`/`destroy()` in scope) reads as `"retain"`
@@ -270,6 +277,6 @@ export const toProvider = <Res extends ResourceLike, State, E, R>(
         }),
 
         ...overrides,
-      } as never;
+      } satisfies Provider.ProviderServiceInput<Res>;
     }),
   );

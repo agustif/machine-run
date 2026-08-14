@@ -1,7 +1,20 @@
+import type { AlchemyContext } from "alchemy/AlchemyContext";
+import type { Stage } from "alchemy/Stage";
+import type * as Stack from "alchemy/Stack";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+
+/**
+ * What a recipe file default-exports: the effect `Alchemy.Stack(...)` returns,
+ * which evaluates to a compiled stack.
+ *
+ * Spelled out as Alchemy spells it rather than reduced to `unknown`, so the
+ * shape survives all the way to `Stack.evalStack` and a mismatch is a compile
+ * error here rather than a cast at the call site.
+ */
+export type Recipe = Stack.StackEffect<Stack.CompiledStack, unknown, Stage | AlchemyContext>;
 
 /** The recipe file named on the command line does not exist. */
 export class RecipeNotFound extends Data.TaggedError("RecipeNotFound")<{
@@ -93,7 +106,7 @@ export const resolveRecipePath = (
  */
 export const loadRecipe = (
   absolutePath: string,
-): Effect.Effect<unknown, RecipeImportFailed | RecipeNotAStack> =>
+): Effect.Effect<Recipe, RecipeImportFailed | RecipeNotAStack> =>
   Effect.tryPromise({
     try: () => importRecipeModule(absolutePath),
     catch: (cause) => new RecipeImportFailed({ path: absolutePath, cause }),
@@ -106,6 +119,12 @@ export const loadRecipe = (
       if (typeof exported !== "object" && typeof exported !== "function") {
         return Effect.fail(new RecipeNotAStack({ path: absolutePath, found: typeof exported }));
       }
-      return Effect.succeed(exported);
+      // The single unavoidable narrowing in this package, and it is a genuine
+      // boundary: a compiled stack is an Effect carrying functions and a
+      // service context, so no runtime check — Schema included — can prove a
+      // dynamically imported value is one. What *is* checked above is every
+      // property that can be: present, and of a shape that could be an Effect.
+      // Anything past that is Alchemy's to judge, and it does, loudly.
+      return Effect.succeed(exported as Recipe);
     }),
   );

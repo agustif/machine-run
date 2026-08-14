@@ -1,4 +1,5 @@
 import * as Cause from "effect/Cause";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 
@@ -12,6 +13,20 @@ import * as Exit from "effect/Exit";
  * looking like a slow one.
  */
 export const DEFAULT_DEADLINE_MILLIS = 10 * 60_000;
+
+/**
+ * The program did not settle within its deadline.
+ *
+ * A tagged error rather than an inline shape so a caller can match it, and so
+ * it reads the same way as every other failure in this repo.
+ */
+export class CommandTimedOut extends Data.TaggedError("CommandTimedOut")<{
+  readonly afterMillis: number;
+}> {
+  override get message() {
+    return `No result after ${this.afterMillis}ms. The engine can fail by never settling at all — see docs/V2-PLAN.md.`;
+  }
+}
 
 /**
  * Renders an `Exit` as text, and says which exit code the process should carry.
@@ -32,8 +47,8 @@ export interface CommandOutcome {
   readonly code: number;
 }
 
-export const describeExit = <A>(
-  exit: Exit.Exit<A, unknown>,
+export const describeExit = <A, E>(
+  exit: Exit.Exit<A, E>,
   render: (value: A) => string,
 ): CommandOutcome => {
   if (Exit.isSuccess(exit)) return { text: render(exit.value), code: 0 };
@@ -70,16 +85,14 @@ export const describeExit = <A>(
 export const runToExit = <A, E>(
   effect: Effect.Effect<A, E, never>,
   deadlineMillis: number,
-): Promise<Exit.Exit<A, E | { readonly _tag: "Timeout"; readonly afterMillis: number }>> => {
+): Promise<Exit.Exit<A, E | CommandTimedOut>> => {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<Exit.Exit<never, { _tag: "Timeout"; afterMillis: number }>>(
-    (resolve) => {
-      timer = setTimeout(
-        () => resolve(Exit.fail({ _tag: "Timeout" as const, afterMillis: deadlineMillis })),
-        deadlineMillis,
-      );
-    },
-  );
+  const timeout = new Promise<Exit.Exit<never, CommandTimedOut>>((resolve) => {
+    timer = setTimeout(
+      () => resolve(Exit.fail(new CommandTimedOut({ afterMillis: deadlineMillis }))),
+      deadlineMillis,
+    );
+  });
   return Promise.race([
     Effect.runPromiseExit(effect).finally(() => {
       if (timer !== undefined) clearTimeout(timer);

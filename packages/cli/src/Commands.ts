@@ -1,24 +1,29 @@
+import { ArtifactStore } from "alchemy/Artifacts";
+import { formatPlanLines } from "alchemy/Cli/LoggingCli";
 import * as Plan from "alchemy/Plan";
 import * as Stack from "alchemy/Stack";
+import { State } from "alchemy/State";
 import * as Effect from "effect/Effect";
-import { formatPlanLines } from "alchemy/Cli/LoggingCli";
 import { withStackServices } from "./Engine.ts";
-import { loadRecipe, resolveRecipePath } from "./Recipe.ts";
+import { loadRecipe, type Recipe, resolveRecipePath } from "./Recipe.ts";
 
 /**
- * Builds the plan for an already-loaded recipe.
+ * Drops exactly the two services `Stack.evalStack` supplies internally but does
+ * not subtract from its own signature.
  *
- * The return type is stated here rather than inferred because `evalStack`'s
- * signature does not subtract what it provides: its body pipes the caller's
- * effect through `provideFreshArtifactStore` and `Effect.provide(stack.services)`,
- * so `State` and `ArtifactStore` are supplied at runtime, but they remain in the
- * inferred requirements. Asserting once, here, keeps that imprecision at a
- * single named boundary instead of leaking `never` casts through every command.
+ * Its body pipes the caller's effect through `provideFreshArtifactStore` and
+ * `Effect.provide(stack.services)`, so `State` and `ArtifactStore` are genuinely
+ * present at runtime — but the returned type still lists them, and providing
+ * them a second time from outside would build a second state store.
+ *
+ * The parameter type names the two services exactly, so this cannot silently
+ * absorb a *third* requirement someone adds later: a new service in `R` stops
+ * matching and becomes a compile error here, which is the entire point of
+ * writing it this way rather than asserting at the call site.
  */
-const planned = (recipe: unknown, stage: string): Effect.Effect<unknown, unknown, never> =>
-  Stack.evalStack(recipe as never, (compiled) => Plan.make(compiled as never, {}), {
-    stage,
-  }) as Effect.Effect<unknown, unknown, never>;
+const withoutEvalStackInternals = <A, E>(
+  effect: Effect.Effect<A, E, State | ArtifactStore>,
+): Effect.Effect<A, E, never> => effect as Effect.Effect<A, E, never>;
 
 export interface RunOptions {
   /** Recipe path, or `undefined` to look for a default name in the cwd. */
@@ -26,6 +31,10 @@ export interface RunOptions {
   /** Alchemy stage. Stages keep two deployments of one recipe apart. */
   readonly stage: string;
 }
+
+/** Builds the plan for an already-loaded recipe, requirements intact. */
+const planned = (recipe: Recipe, stage: string) =>
+  Stack.evalStack(recipe, (compiled) => Plan.make(compiled, {}), { stage });
 
 /**
  * Produces the plan for a recipe and renders it.
@@ -36,12 +45,19 @@ export interface RunOptions {
  * wiring the services in an order that works, and reporting a failure rather
  * than exiting quietly.
  */
-export const planRecipe = (options: RunOptions) =>
-  withStackServices(
-    Effect.gen(function* () {
-      const path = yield* resolveRecipePath(options.recipe);
-      const recipe = yield* loadRecipe(path);
-      const plan = yield* planned(recipe, options.stage);
-      return formatPlanLines(plan as never);
-    }),
+export const planRecipe = (options: RunOptions): Effect.Effect<readonly string[], unknown, never> =>
+  // Order matters, and the types enforce it: `withStackServices` supplies
+  // everything that genuinely can be supplied from outside — `AlchemyContext`,
+  // `Cli`, `FileSystem`, `Path` — and only then are the two `evalStack`
+  // provides for itself dropped. Narrowing before that point would have
+  // silently swallowed those four as well.
+  withoutEvalStackInternals(
+    withStackServices(
+      Effect.gen(function* () {
+        const path = yield* resolveRecipePath(options.recipe);
+        const recipe = yield* loadRecipe(path);
+        const plan = yield* planned(recipe, options.stage);
+        return formatPlanLines(plan);
+      }),
+    ),
   );
