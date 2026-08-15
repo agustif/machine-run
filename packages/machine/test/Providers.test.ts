@@ -24,11 +24,17 @@ import { providers } from "../src/index.ts";
  * (This is exactly how `HttpClient` was found to be a real, unmet
  * requirement while writing this test — not a stand-in gap.)
  */
-it.effect("providers() resolves with only what Alchemy's StackServices supplies", () =>
-  Layer.build(providers()).pipe(
-    Effect.asVoid,
-    Effect.scoped,
-    Effect.provide(NodeServices.layer),
-    Effect.provide(FetchHttpClient.layer),
-  ),
+it.effect(
+  "providers() resolves with only what Alchemy's StackServices supplies",
+  () =>
+    Layer.build(providers()).pipe(
+      Effect.asVoid,
+      Effect.scoped,
+      Effect.provide(NodeServices.layer),
+      Effect.provide(FetchHttpClient.layer),
+    ),
+  // This deliberately builds every provider in the repository. On the
+  // Windows runner the real composition takes a little over Vitest's 5s
+  // default, while still being a fast bounded test rather than a live probe.
+  30_000,
 );
