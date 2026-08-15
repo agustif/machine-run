@@ -475,9 +475,9 @@ reasoning and the judgement calls.
       to co-manage a manager the atomic layer also manages.
 ~ P2  Windows breadth — the Platform service and ACL (`icacls`) path are
       implemented for mode-constrained file resources. Registry settings,
-      bootstrap.ps1, and real Windows deploy coverage remain open; the parser
-      and ACL round-trip are still marked unverified until the Windows CI jobs
-      pass.
+      bootstrap.ps1, and real Windows deploy coverage remain open. The parser,
+      ACL round-trip, and default test suite are verified by the Windows CI
+      jobs; this entry remains open for the missing breadth and deploy work.
 ✗ P3  Doctor / drift report — "what no longer matches", without applying
 ✗ P3  Import an existing machine — `list` on System.Package
 ✓ P3  Unmanage decisions recorded (16 of 23 kinds implement `unapply`; the
