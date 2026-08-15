@@ -189,30 +189,32 @@ it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("an unset mode is unconstrained: any observed mode satisfies it", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "unconstrained");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "an unset mode is unconstrained: any observed mode satisfies it",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "unconstrained");
 
-    const props: FileProps = { path: target, content: "x" };
-    const desired = yield* reconciler.desired(props);
-    expect(desired.mode).toBeUndefined();
+      const props: FileProps = { path: target, content: "x" };
+      const desired = yield* reconciler.desired(props);
+      expect(desired.mode).toBeUndefined();
 
-    // A real file with a specific mode the recipe never asked to pin.
-    yield* fs.writeFileString(target, "x", { mode: 0o640 });
-    const observed = yield* reconciler.observe(props, observeCtx);
-    expect(Option.getOrThrow(observed).mode).toBe(0o640);
-    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
+      // A real file with a specific mode the recipe never asked to pin.
+      yield* fs.writeFileString(target, "x", { mode: 0o640 });
+      const observed = yield* reconciler.observe(props, observeCtx);
+      expect(Option.getOrThrow(observed).mode).toBe(0o640);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
-    // Even a very different real mode still satisfies an unconstrained
-    // desired state — only a *pinned* mode should ever cause a rewrite.
-    yield* fs.chmod(target, 0o755);
-    const observedAgain = yield* reconciler.observe(props, observeCtx);
-    expect(reconciler.matches(Option.getOrThrow(observedAgain), desired)).toBe(true);
-  }).pipe(Effect.provide(layer)),
+      // Even a very different real mode still satisfies an unconstrained
+      // desired state — only a *pinned* mode should ever cause a rewrite.
+      yield* fs.chmod(target, 0o755);
+      const observedAgain = yield* reconciler.observe(props, observeCtx);
+      expect(reconciler.matches(Option.getOrThrow(observedAgain), desired)).toBe(true);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("a moved `path` is an independent address: the old file is left untouched", () =>

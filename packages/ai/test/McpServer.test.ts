@@ -65,13 +65,14 @@ const applyCtx = {
  */
 const withHome = (home: string) => {
   const separator = home.includes("\\") ? "\\" : "/";
+  const normalizedHome = home.replaceAll(/[\\/]/g, separator);
   return Layer.succeed(MachinePaths, {
-    home,
+    home: normalizedHome,
     expand: (target: string) => {
-      if (target === "~") return home;
+      if (target === "~") return normalizedHome;
       if (!target.startsWith("~/") && !target.startsWith("~\\")) return target;
       const relative = target.slice(2).replaceAll(/[\\/]/g, separator);
-      return `${home}${home.endsWith(separator) ? "" : separator}${relative}`;
+      return `${normalizedHome}${normalizedHome.endsWith(separator) ? "" : separator}${relative}`;
     },
   });
 };

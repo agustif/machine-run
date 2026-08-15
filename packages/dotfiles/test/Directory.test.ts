@@ -111,33 +111,39 @@ it.effect("observe fails with a typed error when a file occupies the path", () =
 
 it.effect("matches is satisfied by any mode when the recipe does not constrain one", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever" });
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o755 }, desired)).toBe(true);
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target });
+    expect(reconciler.matches({ path: target, mode: 0o755 }, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
 it.effect("matches rejects a mode the recipe does constrain", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever", mode: 0o700 });
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o755 }, desired)).toBe(false);
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o700 }, desired)).toBe(true);
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target, mode: 0o700 });
+    expect(reconciler.matches({ path: target, mode: 0o755 }, desired)).toBe(false);
+    expect(reconciler.matches({ path: target, mode: 0o700 }, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
 it.effect("drift is empty exactly when matches is true, and names mode with a direction", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
     const drift = reconciler.drift;
     if (drift === undefined) return yield* Effect.die("expected drift to be defined");
 
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever", mode: 0o700 });
-    const satisfied = { path: "/tmp/whatever", mode: 0o700 };
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target, mode: 0o700 });
+    const satisfied = { path: target, mode: 0o700 };
     expect(reconciler.matches(satisfied, desired)).toBe(true);
     expect(drift(satisfied, desired)).toEqual([]);
 
-    const looser = { path: "/tmp/whatever", mode: 0o755 };
+    const looser = { path: target, mode: 0o755 };
     expect(reconciler.matches(looser, desired)).toBe(false);
     expect(drift(looser, desired)).toEqual([
       { field: "mode", observed: "755", desired: "700", direction: "ahead" },
