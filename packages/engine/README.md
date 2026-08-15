@@ -108,11 +108,10 @@ by a real `plan` → `deploy` → drift → `destroy` cycle in a container
 - **`delete` never mutates the machine unless a resource opts in.** The
   default `RemovalPolicy` is `"retain"`: removing a resource from a recipe
   must not uninstall software or delete a file nobody asked to remove.
-  `unapply` is only called under an explicit `"destroy"` policy, and across
-  every resource in this repo exactly one — `Shell.Login` — implements it
-  today. See [../../docs/MAP.md](../../docs/MAP.md) §5's closing note on why
-  most resources shouldn't: a half-undo that reports success is worse than a
-  documented no-op.
+  `unapply` is only called under an explicit `"destroy"` policy. Sixteen of the
+  repo's 23 resource kinds implement a safe reverse; the seven deliberate
+  refusals are listed in [../../docs/MAP.md](../../docs/MAP.md) §5. A half-undo
+  that reports success is worse than a documented no-op.
 - **No engine-level caching of `observe` across `diff` and `reconcile`.**
   Considered and rejected — see [TASKS.md](./TASKS.md)'s "Decided against"
   entry: a generic cache would have to rebuild the same plan/apply staleness

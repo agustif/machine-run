@@ -18,6 +18,6 @@ import { PlatformLive } from "./Platform.ts";
  * nothing else would.
  */
 export const services = () =>
-  Layer.mergeAll(BackupsLive(), FileLockLive(), NodeCrypto.layer, PlatformLive()).pipe(
-    Layer.provideMerge(MachinePathsLive()),
-  );
+  Layer.mergeAll(BackupsLive(), FileLockLive(), NodeCrypto.layer)
+    .pipe(Layer.provideMerge(MachinePathsLive()))
+    .pipe(Layer.provideMerge(PlatformLive()));

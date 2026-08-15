@@ -1,5 +1,6 @@
 import {
   detectLineEnding,
+  ensureParentDir,
   LineEndingChars,
   MachinePaths,
   makeSha256,
@@ -431,10 +432,7 @@ export const makeManagedBlockReconciler: Effect.Effect<
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
-        yield* fs.makeDirectory(path.dirname(target), {
-          recursive: true,
-          ...(props.directoryMode !== undefined ? { mode: props.directoryMode } : {}),
-        });
+        yield* ensureParentDir(fs, path, target, props.directoryMode);
 
         const existing = yield* readFileOrEmpty(target);
         const rendered = renderFile(existing, props.marker, props.content, props);

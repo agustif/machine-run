@@ -1,4 +1,11 @@
-import { isNotFound, MachinePaths, Platform, Windows } from "@machine-run/core";
+import {
+  DEFAULT_DIRECTORY_MODE,
+  ensureParentDir,
+  isNotFound,
+  MachinePaths,
+  Platform,
+  Windows,
+} from "@machine-run/core";
 import { type Drift, type DriftField, type Reconciler, toProvider } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
 import * as Data from "effect/Data";
@@ -8,6 +15,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { PlatformError } from "effect/PlatformError";
+import type { CommandError } from "alchemy/Command";
 import * as Redacted from "effect/Redacted";
 import { SecretSource, type SecretError } from "./Backend.ts";
 import { readSecret } from "./Store.ts";
@@ -107,9 +115,16 @@ export class SecretFilePathUnreadable extends Data.TaggedError("SecretFilePathUn
   }
 }
 
-const DEFAULT_MODE = 0o600;
-const DEFAULT_DIRECTORY_MODE = 0o700;
+/** Raised when a directory or other non-file occupies the secret path. */
+export class SecretFilePathIsNotFile extends Data.TaggedError("SecretFilePathIsNotFile")<{
+  path: string;
+}> {
+  override get message() {
+    return `"${this.path}" exists but is not a plain file. Machine.SecretFile will not overwrite it — remove it by hand if a secret file belongs there.`;
+  }
+}
 
+const DEFAULT_MODE = 0o600;
 /** `0o600`-style rendering for a `DriftField`, matching this file's own doc comments. */
 const octal = (mode: number): string => `0o${mode.toString(8).padStart(3, "0")}`;
 
@@ -157,7 +172,12 @@ export const makeSecretFileReconciler: Effect.Effect<
   Reconciler<
     SecretFileProps,
     SecretFileState,
-    PlatformError | SecretError | SecretFilePathUnreadable
+    | PlatformError
+    | CommandError
+    | Windows.IcaclsParseError
+    | SecretError
+    | SecretFilePathIsNotFile
+    | SecretFilePathUnreadable
   >,
   never,
   FileSystem.FileSystem | Path.Path | MachinePaths | Platform
@@ -169,14 +189,15 @@ export const makeSecretFileReconciler: Effect.Effect<
 
   return {
     address: (props) => paths.expand(props.path),
-    // A path a recipe adopts may already hold a hand-placed key or token, and
-    // overwriting one with no copy is unrecoverable. The engine decides when:
-    // a resource's first apply, and the first apply after adopting something
-    // already present.
-    snapshotBeforeApply: true,
     // A secret file is precisely the hand-placed content worth refusing rather
     // than silently taking over — an operator's own key at this path is not ours
     // to overwrite without being told. Same reasoning as `Machine.File`.
+    // `refuseUnowned` stops an ordinary plan before this point; an explicit
+    // `--adopt` still gets the engine's one-time backup before the overwrite.
+    // Backups are not Alchemy state, and BackupsLive keeps their directory/file
+    // modes restrictive so the safety net does not become a world-readable
+    // credential copy.
+    snapshotBeforeApply: true,
     refuseUnowned: true,
 
     // Presence and permissions only. Reading the file back to compare content
@@ -195,6 +216,9 @@ export const makeSecretFileReconciler: Effect.Effect<
             ),
           );
         if (info === undefined) return Option.none();
+        if (info.type !== "File") {
+          return yield* Effect.fail(new SecretFilePathIsNotFile({ path: target }));
+        }
         const acl = yield* Boolean.match(platform.isWindows, {
           onFalse: () => Effect.succeed(Option.none<string>()),
           onTrue: () => Windows.readAcl(ctx.exec, target),
@@ -226,7 +250,15 @@ export const makeSecretFileReconciler: Effect.Effect<
       if (observed.path !== desired.path) {
         fields.push({ field: "path", observed: observed.path, desired: desired.path });
       }
-      if (observed.mode !== desired.mode) {
+      if (!modeSatisfied(platform, observed, desired.mode)) {
+        if (platform.isWindows) {
+          fields.push({
+            field: "mode",
+            observed: "ACL does not satisfy",
+            desired: octal(desired.mode),
+          });
+          return fields;
+        }
         fields.push({
           field: "mode",
           observed: octal(observed.mode),
@@ -239,10 +271,12 @@ export const makeSecretFileReconciler: Effect.Effect<
 
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
-        yield* fs.makeDirectory(path.dirname(desired.path), {
-          recursive: true,
-          mode: props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
-        });
+        yield* ensureParentDir(
+          fs,
+          path,
+          desired.path,
+          props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
+        );
 
         const secret = yield* readSecret(props.source, ctx.exec);
         const content = applyNewline(Redacted.value(secret), props.trailingNewline);
@@ -258,10 +292,7 @@ export const makeSecretFileReconciler: Effect.Effect<
         // established and `matches` reports drift forever.
         yield* Boolean.match(platform.isWindows, {
           onFalse: () => fs.chmod(desired.path, desired.mode),
-          onTrue: () =>
-            Windows.applyMode(ctx.exec, desired.path, desired.mode, "file").pipe(
-              Effect.orElseSucceed(() => undefined),
-            ),
+          onTrue: () => Windows.applyMode(ctx.exec, desired.path, desired.mode, "file"),
         });
 
         return { ...desired, created: Option.isNone(observed) };
@@ -286,7 +317,14 @@ export const makeSecretFileReconciler: Effect.Effect<
         onDefined: (created) =>
           Boolean.match(created, {
             onFalse: () => Effect.void,
-            onTrue: () => fs.remove(recorded.path).pipe(Effect.orElseSucceed(() => undefined)),
+            onTrue: () =>
+              fs
+                .remove(recorded.path)
+                .pipe(
+                  Effect.catchTag("PlatformError", (cause) =>
+                    isNotFound(cause) ? Effect.void : Effect.fail(cause),
+                  ),
+                ),
           }),
       }),
   };

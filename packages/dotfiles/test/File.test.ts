@@ -1,19 +1,21 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
+  FilePathIsNotFile,
   FilePathUnreadable,
   makeFileReconciler,
   type FileProps,
   type FileState,
 } from "../src/File.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -22,6 +24,11 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows' chmod cannot express an unreadable directory/file, so the
+// permission-denied fixtures below are POSIX-only. ACL translation has its own
+// Windows coverage in the core tests.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /** A real `ctx.snapshot`, so `apply`'s own backup capture has something to
  * actually copy — the stub above always reports "nothing to preserve".
@@ -43,7 +50,7 @@ const snapshottingCtx = (fs: FileSystem.FileSystem) => ({
  * see, and would replace the error naming the permission problem with
  * whatever the subsequent write happened to fail with.
  */
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not absence, when the parent directory is unreadable",
   () =>
     Effect.gen(function* () {
@@ -80,7 +87,24 @@ it.effect(
  * regardless of the file's own mode bits, so it still succeeds; the read
  * that follows does not.
  */
-it.effect(
+it.effect("observe raises a typed error when a directory occupies the file path", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "directory-not-file");
+    yield* fs.makeDirectory(target);
+
+    const failure = yield* reconciler
+      .observe({ path: target, content: "x" }, observeCtx)
+      .pipe(Effect.flip);
+
+    expect(failure).toBeInstanceOf(FilePathIsNotFile);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not empty content, when the file itself cannot be read after stat succeeds",
   () =>
     Effect.gen(function* () {
@@ -129,61 +153,68 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("mode participates in matching once the recipe pins one, and apply converges it", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "secret-ish");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "mode participates in matching once the recipe pins one, and apply converges it",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "secret-ish");
 
-    const props: FileProps = { path: target, content: "x", mode: 0o600 };
-    const desired = yield* reconciler.desired(props);
-    const applied = yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
-    expect(applied.mode).toBe(0o600);
+      const props: FileProps = { path: target, content: "x", mode: 0o600 };
+      const desired = yield* reconciler.desired(props);
+      const applied = yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        applyCtx,
+      );
+      expect(applied.mode).toBe(0o600);
 
-    const info = yield* fs.stat(target);
-    expect(Number(info.mode) & 0o777).toBe(0o600);
+      const info = yield* fs.stat(target);
+      expect(Number(info.mode) & 0o777).toBe(0o600);
 
-    // A later recipe pinning a different mode is real drift, not noise.
-    const props2: FileProps = { ...props, mode: 0o644 };
-    const desired2 = yield* reconciler.desired(props2);
-    expect(reconciler.matches(applied, desired2)).toBe(false);
+      // A later recipe pinning a different mode is real drift, not noise.
+      const props2: FileProps = { ...props, mode: 0o644 };
+      const desired2 = yield* reconciler.desired(props2);
+      expect(reconciler.matches(applied, desired2)).toBe(false);
 
-    const applied2 = yield* reconciler.apply(
-      { props: props2, observed: Option.some(applied), desired: desired2 },
-      applyCtx,
-    );
-    expect(applied2.mode).toBe(0o644);
-    const info2 = yield* fs.stat(target);
-    expect(Number(info2.mode) & 0o777).toBe(0o644);
-  }).pipe(Effect.provide(layer)),
+      const applied2 = yield* reconciler.apply(
+        { props: props2, observed: Option.some(applied), desired: desired2 },
+        applyCtx,
+      );
+      expect(applied2.mode).toBe(0o644);
+      const info2 = yield* fs.stat(target);
+      expect(Number(info2.mode) & 0o777).toBe(0o644);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("an unset mode is unconstrained: any observed mode satisfies it", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "unconstrained");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "an unset mode is unconstrained: any observed mode satisfies it",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "unconstrained");
 
-    const props: FileProps = { path: target, content: "x" };
-    const desired = yield* reconciler.desired(props);
-    expect(desired.mode).toBeUndefined();
+      const props: FileProps = { path: target, content: "x" };
+      const desired = yield* reconciler.desired(props);
+      expect(desired.mode).toBeUndefined();
 
-    // A real file with a specific mode the recipe never asked to pin.
-    yield* fs.writeFileString(target, "x", { mode: 0o640 });
-    const observed = yield* reconciler.observe(props, observeCtx);
-    expect(Option.getOrThrow(observed).mode).toBe(0o640);
-    expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
+      // A real file with a specific mode the recipe never asked to pin.
+      yield* fs.writeFileString(target, "x", { mode: 0o640 });
+      const observed = yield* reconciler.observe(props, observeCtx);
+      expect(Option.getOrThrow(observed).mode).toBe(0o640);
+      expect(reconciler.matches(Option.getOrThrow(observed), desired)).toBe(true);
 
-    // Even a very different real mode still satisfies an unconstrained
-    // desired state — only a *pinned* mode should ever cause a rewrite.
-    yield* fs.chmod(target, 0o755);
-    const observedAgain = yield* reconciler.observe(props, observeCtx);
-    expect(reconciler.matches(Option.getOrThrow(observedAgain), desired)).toBe(true);
-  }).pipe(Effect.provide(layer)),
+      // Even a very different real mode still satisfies an unconstrained
+      // desired state — only a *pinned* mode should ever cause a rewrite.
+      yield* fs.chmod(target, 0o755);
+      const observedAgain = yield* reconciler.observe(props, observeCtx);
+      expect(reconciler.matches(Option.getOrThrow(observedAgain), desired)).toBe(true);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("a moved `path` is an independent address: the old file is left untouched", () =>
@@ -279,7 +310,9 @@ it.effect(
       const observed: FileState = { path: "/tmp/x", hash: "aaa" };
       const desired: FileState = { path: "/tmp/x", hash: "aaa", mode: 0o600 };
       expect(reconciler.matches(observed, desired)).toBe(false);
-      expect(drift(observed, desired)).toEqual([{ field: "mode", observed: "unset", desired: "600" }]);
+      expect(drift(observed, desired)).toEqual([
+        { field: "mode", observed: "unset", desired: "600" },
+      ]);
     }).pipe(Effect.provide(layer)),
 );
 

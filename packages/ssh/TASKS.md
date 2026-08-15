@@ -15,15 +15,10 @@ resolving itself either way).
 - [ ] **Agent configuration** — `AddKeysToAgent`, `UseKeychain`, and the
       `ssh-agent` startup story per shell. The shell half probably belongs in
       `@machine-run/shell` rather than here.
-- [ ] **`HashKnownHosts` support.** `KnownHost.ts`'s parser only recognises a
-      literal hostname in `known_hosts`' first field; `HashKnownHosts yes`
-      (macOS's historical default) stores `|1|<salt>|<hash>` instead, which
-      this resource cannot match against a plain `host` prop. Not fixable by
-      reading the file alone — hashing needs the same salt OpenSSH used. See
-      `KnownHost.ts`'s doc comment. Worth deciding whether `Ssh.KnownHost`
-      should refuse to run against a file with `HashKnownHosts` enabled
-      (fail loudly) rather than silently appending possibly-redundant
-      unhashed lines forever.
+- [x] **`HashKnownHosts` support.** `KnownHost.ts` recomputes OpenSSH's
+      stored-salt HMAC-SHA1 form, matches it without exposing the hashed host
+      as a literal state value, and removes the exact hashed line on destroy.
+      Malformed hashed entries fail loudly instead of causing a duplicate pin.
 - [ ] **`ssh-agent` reading `Ssh.Key`'s private key.** Nothing here loads a
       generated key into a running agent — `Ssh.Key` only ever writes the file.
       Depends on the agent-configuration item above.
@@ -35,11 +30,7 @@ resolving itself either way).
       (overlaps with, and duplicates, what `@machine-run/secrets` already
       does for _material_, not passphrases-that-unlock-material — a genuinely
       different shape, not solved here).
-- [ ] **`Ssh.Key`'s `ecdsa` `bits` isn't validated up front.** `-b` for
-      `ecdsa` must be `256`, `384` or `521` — an invalid value currently
-      surfaces only as `ssh-keygen`'s own `CommandError`, which is honest but
-      unfriendly. Could be a `Schema.Literals` instead of `Schema.Number` if
-      narrowed to just `ecdsa`'s valid set — not done here since `rsa`'s
-      modulus length has no comparably small closed set to validate against,
-      and one prop validating conditionally on another felt like it wanted
-      its own pass rather than a rushed addition.
+- [x] **`Ssh.Key` validates ECDSA sizes before side effects.** `ecdsa` accepts
+      only `256`, `384` or `521`; RSA remains numeric because its valid range
+      is tool/version-dependent. Invalid ECDSA input now raises a typed error
+      before `ssh-keygen` or filesystem writes run.

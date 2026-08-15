@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as ConfigProvider from "effect/ConfigProvider";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -9,11 +10,14 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
   makeSecretFileReconciler,
+  SecretFilePathIsNotFile,
   SecretFilePathUnreadable,
   type SecretFileProps,
 } from "../src/SecretFile.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 /** `ctx.exec` is unused by the `env` backend, so a stub that dies if it's ever called keeps that honest. */
 const applyCtx = {
@@ -21,6 +25,10 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows chmod cannot deny directory traversal; the Windows ACL path is
+// tested through the core permission domain rather than this POSIX fixture.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * Installs a fixed `ConfigProvider` for the duration of an effect, so the
@@ -51,7 +59,24 @@ const propsFor = (
  * and `apply` proceeds to fetch the secret from its backend and write it —
  * touching the vault for a fetch whose result may not even be storable.
  */
-it.effect(
+it.effect("observe raises a typed error when a directory occupies the secret path", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeSecretFileReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "directory-not-file");
+    yield* fs.makeDirectory(target);
+
+    const failure = yield* reconciler
+      .observe(propsFor(target, "SECRET"), observeCtx)
+      .pipe(Effect.flip);
+
+    expect(failure).toBeInstanceOf(SecretFilePathIsNotFile);
+  }).pipe(Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises a typed error, not absence, when the parent directory is unreadable",
   () =>
     Effect.gen(function* () {
@@ -168,32 +193,34 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect("mode defaults to 0600, and the directory holding it defaults to 0700", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeSecretFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const nested = path.join(dir, "ssh");
-    const target = path.join(nested, "id_ed25519");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "mode defaults to 0600, and the directory holding it defaults to 0700",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeSecretFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const nested = path.join(dir, "ssh");
+      const target = path.join(nested, "id_ed25519");
 
-    const props = propsFor(target, "SSH_KEY");
-    const desired = yield* reconciler.desired(props);
-    expect(desired.mode).toBe(0o600);
+      const props = propsFor(target, "SSH_KEY");
+      const desired = yield* reconciler.desired(props);
+      expect(desired.mode).toBe(0o600);
 
-    yield* withEnv(
-      { SSH_KEY: "private-key-bytes\n" },
-      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
-    );
+      yield* withEnv(
+        { SSH_KEY: "private-key-bytes\n" },
+        reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
+      );
 
-    const fileInfo = yield* fs.stat(target);
-    expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
-    const dirInfo = yield* fs.stat(nested);
-    expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
-  }).pipe(Effect.provide(layer)),
+      const fileInfo = yield* fs.stat(target);
+      expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
+      const dirInfo = yield* fs.stat(nested);
+      expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("an explicit mode overrides the 0600 default", () =>
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)("an explicit mode overrides the 0600 default", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -215,31 +242,33 @@ it.effect("an explicit mode overrides the 0600 default", () =>
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("observe reports absent before the first write, then presence and mode after it", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeSecretFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "token");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "observe reports absent before the first write, then presence and mode after it",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeSecretFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "token");
 
-    const props = propsFor(target, "API_TOKEN");
-    expect(Option.isNone(yield* reconciler.observe(props, observeCtx))).toBe(true);
+      const props = propsFor(target, "API_TOKEN");
+      expect(Option.isNone(yield* reconciler.observe(props, observeCtx))).toBe(true);
 
-    const desired = yield* reconciler.desired(props);
-    yield* withEnv(
-      { API_TOKEN: "a-token" },
-      reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
-    );
+      const desired = yield* reconciler.desired(props);
+      yield* withEnv(
+        { API_TOKEN: "a-token" },
+        reconciler.apply({ props, observed: Option.none(), desired }, applyCtx),
+      );
 
-    // `observe` never reads the secret's own bytes back — only presence and
-    // mode — so a rotated value behind the same `ref` is undetectable, by
-    // design (see `SecretFileState`'s doc comment). What it must still catch
-    // is the file's permissions being satisfied.
-    const observed = yield* reconciler.observe(props, observeCtx);
-    expect(observed).toEqual(Option.some({ path: target, mode: 0o600 }));
-    expect(Option.isSome(observed) && reconciler.matches(observed.value, desired)).toBe(true);
-  }).pipe(Effect.provide(layer)),
+      // `observe` never reads the secret's own bytes back — only presence and
+      // mode — so a rotated value behind the same `ref` is undetectable, by
+      // design (see `SecretFileState`'s doc comment). What it must still catch
+      // is the file's permissions being satisfied.
+      const observed = yield* reconciler.observe(props, observeCtx);
+      expect(observed).toEqual(Option.some({ path: target, mode: 0o600 }));
+      expect(Option.isSome(observed) && reconciler.matches(observed.value, desired)).toBe(true);
+    }).pipe(Effect.provide(layer)),
 );
 
 it.effect("drift agrees with matches: empty when path and mode both match", () =>

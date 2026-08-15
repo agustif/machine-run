@@ -1,10 +1,13 @@
 import type { AlchemyContext } from "alchemy/AlchemyContext";
 import type { Stage } from "alchemy/Stage";
 import type * as Stack from "alchemy/Stack";
+import { statIfPresent } from "@machine-run/core";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import type { PlatformError } from "effect/PlatformError";
 import { pathToFileURL } from "node:url";
 
 /**
@@ -23,6 +26,16 @@ export class RecipeNotFound extends Data.TaggedError("RecipeNotFound")<{
 }> {
   override get message() {
     return `No recipe at "${this.path}". Pass a path, or run from a directory containing alchemy.run.ts.`;
+  }
+}
+
+/** The recipe path could not be inspected; it is not the same as absence. */
+export class RecipePathUnreadable extends Data.TaggedError("RecipePathUnreadable")<{
+  path: string;
+  cause: PlatformError;
+}> {
+  override get message() {
+    return `Could not inspect recipe path "${this.path}": ${this.cause.message}`;
   }
 }
 
@@ -102,22 +115,34 @@ const DEFAULT_NAMES: readonly ["alchemy.run.ts", "machine.run.ts"] = [
  */
 export const resolveRecipePath = (
   explicit: string | undefined,
-): Effect.Effect<string, RecipeNotFound, FileSystem.FileSystem | Path.Path> =>
+): Effect.Effect<
+  string,
+  RecipeNotFound | RecipePathUnreadable,
+  FileSystem.FileSystem | Path.Path
+> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
     if (explicit !== undefined) {
       const absolute = path.resolve(explicit);
-      const found = yield* fs.exists(absolute).pipe(Effect.orElseSucceed(() => false));
-      if (!found) return yield* Effect.fail(new RecipeNotFound({ path: absolute }));
+      const found = yield* statIfPresent(
+        fs,
+        absolute,
+        (cause) => new RecipePathUnreadable({ path: absolute, cause }),
+      );
+      if (Option.isNone(found)) return yield* Effect.fail(new RecipeNotFound({ path: absolute }));
       return absolute;
     }
 
     for (const name of DEFAULT_NAMES) {
       const candidate = path.resolve(name);
-      const found = yield* fs.exists(candidate).pipe(Effect.orElseSucceed(() => false));
-      if (found) return candidate;
+      const found = yield* statIfPresent(
+        fs,
+        candidate,
+        (cause) => new RecipePathUnreadable({ path: candidate, cause }),
+      );
+      if (Option.isSome(found)) return candidate;
     }
     return yield* Effect.fail(new RecipeNotFound({ path: path.resolve(DEFAULT_NAMES[0]) }));
   });

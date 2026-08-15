@@ -234,32 +234,6 @@ export class SettingWriteNotObserved extends Data.TaggedError("SettingWriteNotOb
 }
 
 /**
- * A `reset` reported success, but reading the key back immediately afterwards
- * still shows the value this resource itself wrote — the identical failure
- * shape `SettingWriteNotObserved` catches for `apply`, applied to `unapply`.
- *
- * Container-verified (see `backends/Gsettings.ts`'s `reset` doc comment):
- * `gsettings reset` shares `gsettings set`'s exact no-session-D-Bus silent
- * no-op. Trusting `reset`'s own exit code would let `unapply` report a
- * successful revert that changed nothing on a headless machine, the same
- * hazard `SettingWriteNotObserved` exists to catch on the way in.
- */
-export class SettingResetNotObserved extends Data.TaggedError("SettingResetNotObserved")<{
-  props: SettingProps;
-  unwanted: string;
-}> {
-  override get message() {
-    const backend = backendIdFor(this.props);
-    const subject = describe(this.props);
-    return (
-      `Reset "${subject}" via ${backend}, but reading it back still returned ` +
-      `"${this.unwanted}" — the value this resource itself wrote, unchanged. ` +
-      adviceFor(backend, subject)
-    );
-  }
-}
-
-/**
  * Everything the shared `observe`/`desired`/`apply`/`unapply` logic below
  * needs from one case of {@link SettingProps}, built once per call by
  * {@link planFor}'s `Match.tagsExhaustive`. Factoring this out is what keeps
@@ -388,7 +362,7 @@ export const makeSettingReconciler: Effect.Effect<
   Reconciler<
     SettingProps,
     SettingState,
-    SettingsError | SettingWriteNotObserved | SettingResetNotObserved
+    SettingsError | SettingWriteNotObserved
   >
 > = Effect.succeed({
   // Unlike `MacOS.Default` (addressed per *domain*, because `defaults`
@@ -460,19 +434,20 @@ export const makeSettingReconciler: Effect.Effect<
    * the tool-provided way back to it, so there is no bespoke "previous value"
    * bookkeeping to add to `SettingState`.
    *
-   * Re-reads after resetting for the same reason `apply` re-reads after
-   * writing — see `SettingResetNotObserved`'s doc comment for the
-   * container-verified silent no-op this guards against.
+   * Re-reads after resetting so a successful command is still followed by a
+   * live observation. It intentionally does not compare that value with
+   * `recorded.value`: a reset is allowed to leave the same value when the
+   * resource had already recorded the backend's default. A successful
+   * command's stderr is checked by the backend and becomes
+   * `SettingResetNotCommitted`, which catches gsettings' known silent
+   * no-session-D-Bus no-op without inventing a false failure for a legitimate
+   * same-value reset.
    */
-  unapply: ({ props, recorded }, ctx) =>
+  unapply: ({ props }, ctx) =>
     Effect.gen(function* () {
       const plan = planFor(props);
       yield* plan.reset(ctx.exec);
-
-      const confirmed = yield* plan.read(ctx.exec);
-      if (confirmed === recorded.value) {
-        return yield* Effect.fail(new SettingResetNotObserved({ props, unwanted: recorded.value }));
-      }
+      yield* plan.read(ctx.exec);
     }),
 });
 

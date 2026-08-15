@@ -3,26 +3,24 @@
   "version": "0.0.0",
   "private": true,
   "license": "UNLICENSED",
-  "type": "module",
-  "engines": {
-    "node": ">=22"
-  },
   "workspaces": [
     "packages/*",
     "examples/*"
   ],
+  "type": "module",
   "scripts": {
-    "build": "tsc -b",
-    "check": "tsc -b && oxlint",
+    "preflight": "node scripts/preflight.mjs",
+    "build": "npm run preflight && tsc -b",
+    "check": "npm run build && oxlint",
     "clean": "rm -rf .tsbuild packages/*/lib examples/*/lib packages/*/tsconfig.tsbuildinfo examples/*/tsconfig.tsbuildinfo tsconfig.tests.tsbuildinfo",
     "format": "oxfmt packages examples",
     "format:check": "oxfmt --check packages examples",
     "lint": "oxlint",
     "patches:check": "bash scripts/apply-patches.sh",
     "postinstall": "bash scripts/apply-patches.sh",
-    "test": "tsc -b && vitest run",
-    "test:hermetic": "tsc -b && node scripts/hermetic-tests.mjs",
-    "test:live": "tsc -b && vitest run --config vitest.live.config.ts"
+    "test": "npm run build && vitest run",
+    "test:hermetic": "npm run build && node scripts/hermetic-tests.mjs",
+    "test:live": "npm run build && vitest run --config vitest.live.config.ts"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.108",
@@ -38,9 +36,12 @@
     "vitest": "^4.1.10"
   },
   "overrides": {
-    "effect": "4.0.0-rc.108",
-    "alchemy": "2.0.0-beta.72",
     "@effect/platform-node": "4.0.0-rc.108",
-    "@effect/vitest": "4.0.0-rc.108"
+    "@effect/vitest": "4.0.0-rc.108",
+    "alchemy": "2.0.0-beta.72",
+    "effect": "4.0.0-rc.108"
+  },
+  "engines": {
+    "node": ">=22"
   }
 }

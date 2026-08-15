@@ -91,9 +91,10 @@ given machine happened to start with.
   path.
 - **Cannot automate TCC/privacy permissions.** Apple deliberately does not make
   these scriptable; this is a real ceiling, not a gap in this package.
-- **No `unapply`.** A default's prior value is not recorded anywhere this
-  reconciler can read back, so there's nothing honest to restore on removal —
-  see [../../docs/MAP.md](../../docs/MAP.md) §5.
+- **Conservative `unapply`.** The live value is captured before each
+  write and restored under an explicit `RemovalPolicy: "destroy"`. Old
+  state written before that capture field existed is left untouched because its
+  prior value cannot be reconstructed safely.
 
 See [TASKS.md](./TASKS.md) for the rest, including the open question of
 generalising this into a `System.Setting` backend alongside `gsettings`/`dconf`.

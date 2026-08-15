@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -10,11 +11,14 @@ import {
   appendKnownHostLine,
   findKnownHostEntry,
   KnownHostKeyMismatch,
+  KnownHostsHashMalformed,
   makeKnownHostReconciler,
   parseKnownHosts,
   removeKnownHostLine,
   type KnownHostProps,
 } from "../src/KnownHost.ts";
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 // ---------------------------------------------------------------------------
 // Pure parsing — real captured shapes, not invented ones. `github.com`'s
@@ -30,6 +34,11 @@ github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okW
 # github.com:22 SSH-2.0-feb815a
 github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQ==
 `;
+
+// Captured from `ssh-keygen -H` applied to the first github.com line above.
+// OpenSSH stores one independently salted HMAC-SHA1 hostname per line.
+const HASHED_GITHUB =
+  "|1|hzrL6k1tG4MUvZfOy5PY5Ztm2ZA=|7rS++odH2vEXi1Z9X0GHFAg643I= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl\n";
 
 it("parses every host/keytype/key line, skipping ssh-keyscan's own `#` comment lines", () => {
   const entries = parseKnownHosts(REAL_GITHUB_KEYSCAN);
@@ -60,6 +69,10 @@ it("skips `@cert-authority` and `@revoked` marker lines rather than mis-parsing 
 
 it("skips a line that has a host and keytype but no key material, rather than inventing an empty key", () => {
   expect(parseKnownHosts("incomplete.example.com ssh-ed25519")).toEqual([]);
+});
+
+it("does not expose hashed host fields as literal hostnames", () => {
+  expect(parseKnownHosts(HASHED_GITHUB)).toEqual([]);
 });
 
 it("findKnownHostEntry matches on host AND keyType — a host with multiple algorithms is not ambiguous", () => {
@@ -153,7 +166,9 @@ it.effect("CRLF known_hosts: a second entry is appended using the file's own CRL
 // The reconciler, against a real temp file.
 // ---------------------------------------------------------------------------
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
 
 const observeCtx = { exec: () => Effect.die("Ssh.KnownHost never runs a command") };
 const applyCtx = { ...observeCtx, snapshot: () => Effect.succeed(undefined) };
@@ -178,7 +193,7 @@ it.effect("observe reports absent for a file that does not exist yet", () =>
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("apply creates the file and writes exactly one line for a brand-new entry", () =>
+it.effect("observe matches an OpenSSH HashKnownHosts entry using its stored salt", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -186,33 +201,99 @@ it.effect("apply creates the file and writes exactly one line for a brand-new en
     const dir = yield* fs.makeTempDirectoryScoped();
     const target = path.join(dir, "known_hosts");
 
-    const props = propsFor(target);
-    const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    yield* fs.writeFileString(target, HASHED_GITHUB);
 
-    const written = yield* fs.readFileString(target);
-    expect(written).toBe(`github.com ssh-ed25519 ${props.publicKey}\n`);
-
-    const info = yield* fs.stat(target);
-    expect(Number(info.mode) & 0o777).toBe(0o644);
+    const observed = yield* reconciler.observe(propsFor(target), observeCtx);
+    expect(observed).toEqual(
+      Option.some({
+        path: target,
+        host: "github.com",
+        keyType: "ssh-ed25519",
+        publicKey: "AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl",
+      }),
+    );
   }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
-it.effect("apply creates ~/.ssh (the file's parent) at 0o700", () =>
+it.effect("matches each hostname when OpenSSH hashes a comma-separated host field separately", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const reconciler = yield* makeKnownHostReconciler;
     const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, ".ssh", "known_hosts");
+    const target = path.join(dir, "known_hosts");
+    yield* fs.writeFileString(target, HASHED_GITHUB);
 
-    const props = propsFor(target);
+    const props = propsFor(target, { host: "github.com,140.82.121.3" });
+    const observed = yield* reconciler.observe(props, observeCtx);
+    expect(observed).toEqual(
+      Option.some({
+        path: target,
+        host: props.host,
+        keyType: props.keyType,
+        publicKey: props.publicKey,
+      }),
+    );
+
     const desired = yield* reconciler.desired(props);
-    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
-
-    const info = yield* fs.stat(path.dirname(target));
-    expect(Number(info.mode) & 0o777).toBe(0o700);
+    yield* reconciler.unapply!({ props, observed: desired, recorded: desired }, applyCtx);
+    expect(yield* fs.readFileString(target)).toBe("");
   }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect("fails loudly on a malformed hashed known_hosts entry", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const reconciler = yield* makeKnownHostReconciler;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, "known_hosts");
+    yield* fs.writeFileString(target, "|1|not-base64|still-not-base64 ssh-ed25519 AAAA\n");
+
+    const error = yield* reconciler.observe(propsFor(target), observeCtx).pipe(Effect.flip);
+    expect(error).toBeInstanceOf(KnownHostsHashMalformed);
+  }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply creates the file and writes exactly one line for a brand-new entry",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKnownHostReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "known_hosts");
+
+      const props = propsFor(target);
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+
+      const written = yield* fs.readFileString(target);
+      expect(written).toBe(`github.com ssh-ed25519 ${props.publicKey}\n`);
+
+      const info = yield* fs.stat(target);
+      expect(Number(info.mode) & 0o777).toBe(0o644);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
+);
+
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply creates ~/.ssh (the file's parent) at 0o700",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeKnownHostReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, ".ssh", "known_hosts");
+
+      const props = propsFor(target);
+      const desired = yield* reconciler.desired(props);
+      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+
+      const info = yield* fs.stat(path.dirname(target));
+      expect(Number(info.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect("a second, unrelated entry appends alongside the first without disturbing it", () =>
@@ -225,7 +306,10 @@ it.effect("a second, unrelated entry appends alongside the first without disturb
 
     const first = propsFor(target);
     const firstDesired = yield* reconciler.desired(first);
-    yield* reconciler.apply({ props: first, observed: Option.none(), desired: firstDesired }, applyCtx);
+    yield* reconciler.apply(
+      { props: first, observed: Option.none(), desired: firstDesired },
+      applyCtx,
+    );
 
     const second = propsFor(target, {
       host: "gitlab.com",
@@ -314,7 +398,10 @@ it.effect("unapply removes the line apply wrote, leaving everything else untouch
 
     const first = propsFor(target);
     const firstDesired = yield* reconciler.desired(first);
-    yield* reconciler.apply({ props: first, observed: Option.none(), desired: firstDesired }, applyCtx);
+    yield* reconciler.apply(
+      { props: first, observed: Option.none(), desired: firstDesired },
+      applyCtx,
+    );
 
     const second = propsFor(target, {
       host: "gitlab.com",

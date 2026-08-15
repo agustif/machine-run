@@ -90,21 +90,16 @@ are the backlog, currently 695 across seven rules:
 Writing [MAP.md](./MAP.md) meant checking claims instead of recalling them, and
 these came out of it. None was tracked anywhere before.
 
-- [ ] **Nine of twenty-three kinds still have no `unapply`.** Fourteen do.
-      The nine are deliberate refusals in most cases, each with its reason
-      recorded next to the resource: `Machine.Exec` (a command is not undoable),
-      `Runtime.Tool` (nothing captures which version was active before),
-      `MacOS.Default` (state never captures the prior value), `Ssh.Key`
-      (deleting a private key is unrecoverable), `Git.Repo` (could destroy
-      uncommitted work), `Tailscale.Connection` (could cut the operator's own
-      access). What is left to decide is `System.Package`, `System.Repo` and
-      `Machine.SecretFile` — the last needing a way to tell a file this resource
-      wrote from one it adopted before deleting a credential is safe.
-- [ ] **Alchemy primitives, audited — three still open.** Read each before
-      deciding; the ones below were checked and the reasoning is recorded so it
-      does not have to be redone.
+- [x] **Sixteen of twenty-three kinds implement `unapply`.** The seven
+      deliberate refusals are documented next to their reconcilers:
+      `Machine.Exec`, `Runtime.Tool`, `System.Package`,
+      `System.Repo`, `Git.Repo`, `Ssh.Key` and
+      `Tailscale.Connection`. Each would need a prior-state guarantee
+      before removal could be honest.
+- [x] **Alchemy primitives audited.** Read each before deciding; the reasoning
+      below is recorded so it does not have to be redone.
 
-      Nothing left open. The last two:
+      The two that required explicit decisions:
       - `Namespace` — `push("laptop", effect)` nests resource ids under a
         namespace, which is exactly the multi-machine scoping this list said was
         missing. It works on our resources unchanged (ambient context at
@@ -148,8 +143,10 @@ these came out of it. None was tracked anywhere before.
       renamed `File` would otherwise plan a create, and the create now *refuses*
       because the file it finds is unowned. Document it, and test that a rename
       migrates the state row.
-- [ ] **`@machine-run/ssh` has a `src/` and no `test/`** — the only package like
-      that. Details in `packages/ssh/TASKS.md`.
+- [x] **`@machine-run/ssh` has direct reconciler tests.** The package's
+      key, known-host and composition seams are covered under
+      `packages/ssh/test/`; real `ssh-keygen` transport remains in the
+      opt-in live tier where applicable.
 - [ ] **The two least-verified seams are `secrets` (5 backends) and `ai` (12).**
       Between them that is 17 of the repo's 48 backend implementations that have
       never run against the real tool. `secrets` matters more: it writes
@@ -169,8 +166,9 @@ these came out of it. None was tracked anywhere before.
 
 CI runs on `ubuntu`, `macos` and `windows` runners, which removed the last
 "unreachable target" excuses. Every unchecked item below is a backend whose doc
-comment still says *unverified*. The Windows runner type-checks only — see
-"Windows" under P2 for the 16 tests that fail there and why.
+comment still says *unverified*. Windows now runs the default suite; its
+POSIX-only permission fixtures skip explicitly, and real ACL/tool checks remain
+in the dedicated verification job.
 
 - [x] **`winget export` instead of `winget list`.** Inventory now uses the
       real nested `Sources[].Packages[]` JSON shape through a typed temporary
@@ -223,54 +221,32 @@ this repo already owns.
 Each follows the established shape: one interface, one module per
 implementation, dispatched from inside one generic resource.
 
-  - [ ] **Not folded into `@machine-run/machine`'s aggregate `providers()`**,
-        by the deliberate scope boundary of the change that added the
-        package (`packages/machine` was left untouched). `examples/complete-machine`
-        works around this today by merging `SystemServices.providers()`
-        directly into its stack's `providers:` field alongside
-        `Machine.providers()` (see `alchemy.run.ts`) — which does type-check
-        and would resolve for real, unlike a version that only *looked*
-        wired up. Folding it into the aggregate itself is still the right
-        end state, so every future recipe gets it for free: add
-        `SystemServices.providers()` to `packages/machine/src/Providers.ts`'s
-        `Layer.mergeAll` list, add `@machine-run/system-services` to that
-        package's `dependencies`, add `packages/system-services` to its
-        `tsconfig.json` `references` — the three edits that file's own doc
-        comment already calls for.
+- [x] **`System.Service` is included in `@machine-run/machine`'s aggregate.**
+      The provider list, package dependency and TypeScript reference are wired;
+      `AggregateCompleteness.test.ts` covers the package inventory.
 - [ ] **Manifest resources** — `Brew.Bundle`, `Mise.Toml`,
       `Asdf.ToolVersions`, `Nix.Flake`. Atomic and manifest layers are
       complementary (V1-PLAN §3), but a manifest resource must refuse to
       co-manage a manager the atomic layer is also managing.
 - [ ] **`ssh` breadth** — `Ssh.KnownHost`, `Ssh.Key` (generate via Alchemy's
       `KeyPair` or materialise from a vault), agent configuration.
-- [ ] **Windows** — `Platform` service in `core`, registry `SettingsBackend`,
-      `bootstrap.ps1`, and an audit of path handling for `/` assumptions.
+- [ ] **Windows breadth** — registry `SettingsBackend`, `bootstrap.ps1`,
+      and a full real-machine deploy check remain open. The shared `Platform`
+      service and ACL path are implemented.
 
-      The repo now **type-checks** on Windows (`typecheck (windows)` in CI) but
-      the test suite does not pass there: 16 tests across 7 files fail, for
-      three distinct reasons. This is the concrete work list.
+      The repo now builds and runs the default suite on Windows in CI. POSIX-only
+      permission fixtures skip explicitly because Windows `chmod 0o000` cannot
+      create an unreadable parent; real ACL and tool behavior is checked by the
+      dedicated verification job.
 
       *Platform truth — POSIX modes are not representable.* Node reports `0o666`
       (`438`) for every file on Windows and `chmod` only toggles the read-only
-      bit, so a pinned `mode` can never be observed back and `matches` reports
-      drift forever. Affects `Directory` (4), `File` (2), `SecretFile` (3),
-      `Download` (1). **Researched and designed** —
-      [docs/notes/windows-permissions.md](./notes/windows-permissions.md) is
-      the full evidence trail (Node/libuv source, Microsoft's own `icacls` and
-      well-known-SID docs, a real captured `icacls` transcript) and the
-      decision: translate `mode` → an ACL *intent* on apply, and compare
-      "granted no broader than `mode` allows" (not exact equality) on observe,
-      via a `FilePermissions` domain type in `core`. **Built and unit-tested,
-      not yet wired in**: `packages/core/src/windows/{FilePermissions,
-      Icacls}.ts` is the pure translation and the `icacls`-output parser,
-      pinned by `packages/core/test/windows/*.test.ts` and — once a Windows CI
-      run has actually exercised it — `IcaclsLive.test.ts` (`verify-windows`
-      in `.github/workflows/ci.yml`). None of `Directory`/`File`/`SecretFile`/
-      `Download` calls into it yet; the notes doc's §7 lists exactly what that
-      follow-up change needs (a `Platform` service, each resource's
-      `observe`/`apply` branching to the `icacls` path on Windows, and a
-      decision on the `isNoBroaderThan` comparison's known asymmetry — it
-      cannot detect a principal granted *fewer* rights than `mode` allows).
+      Node's `chmod`/`stat` mode bits are not expressive there. The mode
+      intent is now translated through `FilePermissions`/`icacls` and compared
+      against the live ACL by `Directory`, `File`, `SecretFile`,
+      `Download` and delegated `Template` paths. The comparison requires
+      every managed right and rejects broader grants; unmanaged SYSTEM/admin
+      entries remain outside the POSIX owner/group/other approximation.
 
       *Platform truth — `chmod 0o000` does not make a directory unreadable.*
       Three tests build an unreadable-parent fixture that way to prove
@@ -292,8 +268,8 @@ implementation, dispatched from inside one generic resource.
       with `UNC` so `\\server\share` cannot collide with a local
       `server/share`. Pinned by `packages/core/test/Backups.test.ts`.
 
-      *Also unverified on Windows:* `git clone`/`remote` behaviour — three
-      `Git.Repo` `apply` tests fail and the cause has not been read yet.
+      *Still unverified on Windows:* real `git clone`/`remote` behavior and a
+      full Alchemy deploy against a Windows home remain external checks.
 
 **Breadth before depth is the standing risk.** `deploy-check.sh` exercises 7 of
 23 kinds; the other 16 have an `observe`/`apply` the engine has still never run.
@@ -305,9 +281,10 @@ implementation, dispatched from inside one generic resource.
 - [ ] **Doctor / drift report** — answer "what no longer matches" without
       applying. Meaningful now that `diff` observes live state.
 - [ ] **Import an existing machine** — implement `list` on `System.Package`.
-- [ ] **Finish the unmanage story** — the mechanism exists and two resources
-      implement `unapply`; which of the remaining ~18 can honestly reverse
-      themselves is still open (V1-PLAN §5).
+- [ ] **Finish the unmanage story** — the mechanism exists and 16 resources
+      implement `unapply`; the remaining seven deliberate refusals are
+      documented, but future resources may add honest reversals as they gain
+      prior-state guarantees (V1-PLAN §5).
 - [ ] **License.** `UNLICENSED` with no `LICENSE` file blocks any release.
 - [ ] **Nine high-severity advisories, none of them reachable — decide what to
       say about it.** `npm audit` reports 9 high and 5 moderate; GitHub counts 43

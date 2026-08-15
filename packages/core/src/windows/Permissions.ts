@@ -1,9 +1,10 @@
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
+import type { CommandError } from "alchemy/Command";
 import * as Sh from "../Sh.ts";
 import { fromPosixMode, toIcaclsArgv, toWindowsAclPlan, type PermissionsTarget } from "./FilePermissions.ts";
-import { matchesMode } from "./Icacls.ts";
+import { matchesMode, parseIcacls, type IcaclsParseError } from "./Icacls.ts";
 
 /**
  * The two halves a resource needs to keep a POSIX `mode` meaningful on Windows,
@@ -20,24 +21,31 @@ import { matchesMode } from "./Icacls.ts";
  * `core` depending on `engine` to say so. */
 type RunCommand = (props: {
   readonly command: Sh.ShellCommand;
-  readonly shell: boolean;
-}) => Effect.Effect<{ readonly stdout: string }, unknown>;
+  readonly shell: boolean | string;
+}) => Effect.Effect<{ readonly stdout: string }, CommandError>;
 
 /**
  * `icacls <path>`'s raw listing, for a resource to carry in its own state so a
  * synchronous `matches` can consult it later.
  *
- * `Option.none()` when the listing could not be read, which callers must treat as
- * "cannot confirm" — converging by re-applying — rather than as satisfied.
+ * `Option.none()` when the command itself could not read the listing, which
+ * callers must treat as "cannot confirm" — converging by re-applying — rather
+ * than as satisfied. A successful command whose output no longer parses is a
+ * typed {@link IcaclsParseError}: that is format drift, not an absent ACL, and
+ * must not be papered over by retrying a write.
  */
 export const readAcl = (
   exec: RunCommand,
   path: string,
-): Effect.Effect<Option.Option<string>, never> =>
-  exec({ command: Sh.pwsh("icacls", path), shell: true }).pipe(
-    Effect.map((result) => Option.some(result.stdout)),
-    Effect.orElseSucceed(() => Option.none<string>()),
-    Effect.catchCause(() => Effect.succeed(Option.none<string>())),
+): Effect.Effect<Option.Option<string>, IcaclsParseError> =>
+  exec({ command: Sh.pwsh("icacls", path), shell: "powershell.exe" }).pipe(
+    Effect.flatMap((result) =>
+      Result.match(parseIcacls(result.stdout, path), {
+        onFailure: Effect.fail,
+        onSuccess: () => Effect.succeed(Option.some(result.stdout)),
+      }),
+    ),
+    Effect.catchTag("CommandError", () => Effect.succeed(Option.none<string>())),
   );
 
 /**
@@ -64,8 +72,8 @@ export const applyMode = (
   path: string,
   mode: number,
   target: PermissionsTarget,
-): Effect.Effect<void, unknown> =>
+): Effect.Effect<void, CommandError> =>
   exec({
     command: Sh.pwsh(...toIcaclsArgv(path, toWindowsAclPlan(fromPosixMode(mode, target)))),
-    shell: true,
+    shell: "powershell.exe",
   }).pipe(Effect.asVoid);

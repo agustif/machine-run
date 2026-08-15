@@ -1,11 +1,18 @@
+import { PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import type { ApplyContext, Exec, ObserveContext, ExecutionContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
-import { makeLoginReconcilerAt, parseEtcShells } from "../src/Login.ts";
+import { makeLoginReconcilerAt, parseEtcShells, ShellsFileUnreadable } from "../src/Login.ts";
+
+// Keep the command-dispatch tests deterministic on every CI runner. The
+// Windows branch is tested explicitly below, and macOS has its own dscl case;
+// the default fixture exercises Linux's real `getent` shape.
+const services = Layer.mergeAll(NodeServices.layer, PlatformFor("linux"));
 
 // Real captured `/etc/shells` content — macOS (read directly off this host)
 // and Ubuntu 24.04 (via `docker run --rm ubuntu:24.04 cat /etc/shells`), not
@@ -101,20 +108,12 @@ const applyCtx = (
 });
 
 /**
- * `readLoginShell` dispatches on the real `process.platform` the test process
- * is running under rather than an injectable seam — the same constraint
- * `system-packages`' `detect.ts` has — so the fixture has to match whichever
- * branch this host will actually take. Both shapes are real captured output:
- * `dscl . -read /Users/<me> UserShell` on macOS, and `getent passwd <user>`
- * (a `passwd(5)` record whose 7th colon-separated field is the shell) on
- * Linux.
- *
- * Selecting the fixture by platform is what makes this suite meaningful on
- * every runner instead of only the author's machine; a fixed `dscl` fixture
- * passes on macOS and silently exercises nothing on Linux.
+ * The default fixture is real captured Ubuntu `getent passwd <user>` output —
+ * a `passwd(5)` record whose seventh colon-separated field is the shell. The
+ * macOS `dscl` shape is exercised separately with `PlatformFor("darwin")`, so
+ * neither branch depends on the host running the test.
  */
-const LOGIN_SHELL_OUTPUT =
-  process.platform === "darwin" ? "UserShell: /bin/zsh\n" : "me:x:501:20::/home/me:/bin/zsh\n";
+const LOGIN_SHELL_OUTPUT = "me:x:501:20::/home/me:/bin/zsh\n";
 
 it.effect("Login reconciler observe reads the live shell via the platform's own tool", () =>
   Effect.gen(function* () {
@@ -124,7 +123,29 @@ it.effect("Login reconciler observe reads the live shell via the platform's own 
       planCtx(fakeLoginExec("me", LOGIN_SHELL_OUTPUT)),
     );
     expect(observed).toEqual(Option.some({ shell: "/bin/zsh" }));
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
+);
+
+it.effect("Login reconciler dispatches macOS reads to dscl", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeLoginReconcilerAt("/etc/shells");
+    const observed = yield* reconciler.observe(
+      { shell: "/bin/bash" },
+      planCtx(fakeLoginExec("me", "UserShell: /bin/zsh\n")),
+    );
+    expect(observed).toEqual(Option.some({ shell: "/bin/zsh" }));
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, PlatformFor("darwin")))),
+);
+
+it.effect("Login reconciler refuses Windows instead of invoking the Unix getent path", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeLoginReconcilerAt("/etc/shells");
+    const failure = yield* reconciler
+      .observe({ shell: "pwsh.exe" }, planCtx(fakeLoginExec("me", "unused")))
+      .pipe(Effect.flip);
+
+    expect(failure._tag).toBe("LoginShellUnsupportedPlatform");
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, PlatformFor("win32")))),
 );
 
 it.effect(
@@ -144,7 +165,7 @@ it.effect(
       if (result._tag === "ShellNotAllowed") {
         expect(result.allowed).toEqual(parseEtcShells(UBUNTU_ETC_SHELLS));
       }
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(services)),
 );
 
 it.effect("Login reconciler desired succeeds for a shell /etc/shells does list", () =>
@@ -158,18 +179,17 @@ it.effect("Login reconciler desired succeeds for a shell /etc/shells does list",
     const reconciler = yield* makeLoginReconcilerAt(shellsPath);
     const desired = yield* reconciler.desired({ shell: "/bin/bash" });
     expect(desired).toEqual({ shell: "/bin/bash" });
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 it.effect(
-  "Login reconciler desired treats a missing /etc/shells as allowing nothing, not as unconstrained",
+  "Login reconciler desired fails with a typed error when /etc/shells is unreadable",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeLoginReconcilerAt("/does/not/exist/shells");
       const result = yield* Effect.flip(reconciler.desired({ shell: "/bin/bash" }));
-      expect(result._tag).toBe("ShellNotAllowed");
-      if (result._tag === "ShellNotAllowed") expect(result.allowed).toEqual([]);
-    }).pipe(Effect.provide(NodeServices.layer)),
+      expect(result).toBeInstanceOf(ShellsFileUnreadable);
+    }).pipe(Effect.provide(services)),
 );
 
 it("Login reconciler matches ignores previousShell — it's bookkeeping, not desired state", () => {
@@ -189,7 +209,7 @@ it.effect("Login reconciler drift is empty exactly when matches is true, ignorin
 
     expect(reconciler.matches(observed, desired)).toBe(true);
     expect(reconciler.drift?.(observed, desired)).toEqual([]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 it.effect("Login reconciler drift reports a 'shell' field, with no direction, for a differing shell", () =>
@@ -202,7 +222,7 @@ it.effect("Login reconciler drift reports a 'shell' field, with no direction, fo
     expect(reconciler.drift?.(observed, desired)).toEqual([
       { field: "shell", observed: "/bin/zsh", desired: "/bin/bash" },
     ]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior shell", () =>
@@ -229,7 +249,7 @@ it.effect("Login reconciler apply runs chsh -s <shell> and captures the prior sh
 
     expect(result).toEqual({ shell: "/bin/bash", previousShell: "/bin/zsh" });
     expect(calls).toEqual(["id -un", "chsh -s /bin/bash"]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 it.effect("Login reconciler unapply restores the captured previous shell", () =>
@@ -247,7 +267,7 @@ it.effect("Login reconciler unapply restores the captured previous shell", () =>
     );
 
     expect(calls).toEqual(["id -un", "chsh -s /bin/zsh"]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 it.effect("Login reconciler unapply is a no-op when nothing was ever captured", () =>
@@ -264,7 +284,7 @@ it.effect("Login reconciler unapply is a no-op when nothing was ever captured", 
     );
 
     expect(calls).toEqual([]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );
 
 /**
@@ -301,5 +321,5 @@ it.effect("under sudo, chsh names the user rather than changing root's shell", (
     );
 
     expect(calls).toEqual(["id -un", "sudo chsh -s /bin/bash me"]);
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(services)),
 );

@@ -61,7 +61,7 @@ yield *
 
 ## Verification status
 
-42 tests across `test/Host.test.ts`, `test/Key.test.ts`, `test/KnownHost.test.ts`
+48 tests across `test/Host.test.ts`, `test/Key.test.ts`, `test/KnownHost.test.ts`
 — `sshHost`'s rendering (option ordering, `~` expansion, the `0o700` directory
 mode, the prepend invariant against a real hand-written catch-all), both new
 reconcilers against real temp directories, and a real `ssh-keygen` invocation
@@ -87,14 +87,13 @@ resource kinds actually exercised by `scripts/deploy-check.sh` — see
   band; a mismatch against an existing line raises `KnownHostKeyMismatch`
   rather than guessing which side is stale or silently overwriting a
   previously-trusted entry.
-- **`Ssh.KnownHost` does not support `HashKnownHosts yes`** (macOS's
-  historical default, `|1|<salt>|<hash>` lines) — its parser only recognises a
-  literal hostname, and there's no way to recompute the same hash without the
-  original salt. See [TASKS.md](./TASKS.md).
+- **`Ssh.KnownHost` supports `HashKnownHosts yes`** by using the salt stored in
+  each `|1|<salt>|<hash>` field. It fails on malformed hashed entries rather
+  than appending a duplicate literal pin.
 - **No agent configuration.** `AddKeysToAgent`, `UseKeychain`, and loading a
   generated key into a running `ssh-agent` are unimplemented.
 - **`Ssh.Key` always generates without a passphrase** (`-N ""`) — there is no
   human present during an unattended `deploy` to type one.
 
-See [TASKS.md](./TASKS.md) for the rest, including the still-open
-`ecdsa` bits validation and per-repo agent-startup story.
+See [TASKS.md](./TASKS.md) for the still-open exact `ssh -G` verification and
+per-repo agent-startup story.

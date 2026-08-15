@@ -35,13 +35,15 @@ See [../../docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md).
       entry after `apply`, not the whole cache). Shipping a subtly-unsafe
       generic version would be worse than not shipping one.
 
-- [ ] **Bridge `Action`** for side effects that are not state: `killall Dock`
-      after a `defaults write` batch, `brew update`. Today `MacOS.Default` runs
-      `killall` inside its own apply, so eight dock settings can restart the
-      Dock eight times.
-- [ ] **Finish `RemovalPolicy`.** The mechanism exists; the policy does not.
-      Decide per resource whether it can honestly reverse itself, and make the
-      ones that cannot say so rather than silently doing nothing.
+- [x] **Action was audited and deliberately declined.** An imperative one-shot
+      has no observe/idempotence boundary; `Machine.Exec` covers the stateful
+      form through an explicit guard. `MacOS.Default` keeps its optional
+      best-effort app restart local to the write it makes, rather than exposing
+      a graph node that can fire on every deploy.
+- [x] **RemovalPolicy decisions are recorded per resource.** The adapter only
+      invokes `unapply` for explicit `destroy`, and the current 16/23 split is
+      documented in each reconciler; the seven refusals are intentional because
+      no exact or safe reverse exists. New resources must make the same choice.
 - [ ] **`address` collision audit.** Two resources sharing an address serialise
       against each other, which is correct for contention but wrong if the
       addresses collide by accident. Nothing detects that today.

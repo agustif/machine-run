@@ -210,26 +210,13 @@ export const grantedRights = (listing: IcaclsListing, principal: string): Readon
   new Set(listing.aces.filter((ace) => ace.principal === principal).flatMap((ace) => ace.rights));
 
 /**
- * `matches`'s Windows-specific question, per the design in
- * docs/notes/windows-permissions.md §6: is what a principal was actually
- * granted **no broader** than what `desired` allows, rather than "does it
- * equal `desired` exactly". Exact equality is unreachable — an object
- * adopted from outside this tool, or one Administrators/SYSTEM still hold
- * ACEs on (see `FilePermissions.ts`'s header comment), will always carry
- * rights `toWindowsAclPlan` never asked for. Asking only "no broader" means
- * those unavoidable, unmanaged extras never register as drift, while a
- * principal gaining a right `desired` withheld — the actual security-relevant
- * case, e.g. `Everyone` gaining `WD` on a file meant to be owner-only — still
- * does.
- *
- * The asymmetry this accepts, stated plainly rather than left implicit: a
- * principal granted *fewer* rights than `desired` allows also reads as
- * "matches" here, so this cannot by itself detect a `SecretFile` that has
- * become unreadable by its own owner. That is a real gap, not an oversight —
- * closing it means reconstructing a comparable `FilePermissions` from
- * `observed` and comparing per-class equality instead, which is follow-up
- * work for whoever wires this into a resource's `matches`, not a decision
- * this pure comparison can make unilaterally.
+ * This is the one-sided primitive used by the composite permission check
+ * below: a managed principal must not receive a right the desired mode
+ * withholds. Exact equality is not the right question for this primitive —
+ * objects adopted from outside this tool, or ones where SYSTEM/Administrators
+ * still hold ACEs, can carry rights `toWindowsAclPlan` never asked for. The
+ * composite check adds the other bound for the principals this tool manages,
+ * so a lost owner grant cannot report a secret file as converged.
  */
 export const isNoBroaderThan = (
   granted: ReadonlySet<string>,
@@ -238,6 +225,23 @@ export const isNoBroaderThan = (
   const allowedSet = new Set(allowed);
   return [...granted].every((right) => allowedSet.has(right));
 };
+
+/**
+ * Whether a managed principal has exactly the rights this mode grants.
+ *
+ * `isNoBroaderThan` is useful as a one-sided primitive, but using it alone for
+ * reconciliation would accept a principal that lost every required right:
+ * the empty set is a subset of every allowed set. A mode is satisfied only
+ * when the live grant is both no broader and no narrower than the intent. ACEs
+ * for principals this module does not manage (for example SYSTEM or
+ * Administrators) remain deliberately ignored; they are outside the
+ * owner/group/other approximation and cannot be removed safely.
+ */
+const rightsMatchIntent = (
+  granted: ReadonlySet<string>,
+  allowed: readonly string[],
+): boolean =>
+  isNoBroaderThan(granted, allowed) && allowed.every((right) => granted.has(right));
 
 const PERMISSION_CLASS_KEYS: ReadonlyArray<"owner" | "group" | "other"> = [
   "owner",
@@ -263,17 +267,16 @@ const grantedRightsForClass = (
  * Does a parsed ACL satisfy a `mode`'s intent? Applies {@link isNoBroaderThan}
  * per class (owner/group/other), against each class's well-known principal —
  * the composite check `observe` needs, as opposed to `isNoBroaderThan`'s
- * one-principal building block. Carries the same accepted asymmetry: a
- * principal granted fewer rights than `permissions` promises still reads as
- * satisfied (see `isNoBroaderThan`'s doc comment and
- * docs/notes/windows-permissions.md §6-§7).
+ * one-principal building block. A managed principal must have every right the
+ * mode promises and no right it withholds; otherwise a lost owner grant could
+ * incorrectly report a secret file as converged.
  */
 export const permissionsSatisfied = (
   listing: IcaclsListing,
   permissions: FilePermissions,
 ): boolean =>
   PERMISSION_CLASS_KEYS.every((key) =>
-    isNoBroaderThan(grantedRightsForClass(listing, key), rightsForClass(permissions[key])),
+    rightsMatchIntent(grantedRightsForClass(listing, key), rightsForClass(permissions[key])),
   );
 
 /**

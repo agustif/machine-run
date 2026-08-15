@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -17,7 +18,7 @@ import {
   type LineInFileProps,
 } from "../src/LineInFile.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -26,6 +27,10 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// Windows cannot express a write-only file through chmod; ACL semantics are
+// covered by the Windows permission-domain tests instead.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * Unwraps a render that is expected to succeed, throwing the real
@@ -337,34 +342,36 @@ it.effect("apply fails with LineInFileMalformed rather than writing over an ambi
  * permission drift can easily leave write access intact while removing read
  * access.
  */
-it.effect("observe raises LineInFileUnreadable, not absence, when the file cannot be read", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeLineInFileReconciler;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "hosts");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "observe raises LineInFileUnreadable, not absence, when the file cannot be read",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeLineInFileReconciler;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "hosts");
 
-    yield* fs.writeFileString(target, "127.0.0.1 example.local\n");
-    yield* fs.chmod(target, 0o200);
+      yield* fs.writeFileString(target, "127.0.0.1 example.local\n");
+      yield* fs.chmod(target, 0o200);
 
-    // Restored with `Effect.ensuring` rather than `finally`, so it still runs
-    // if the assertion fails or the fiber is interrupted.
-    const failure = yield* reconciler
-      .observe(
-        { path: target, match: "^127\\.0\\.0\\.1 ", line: "127.0.0.1 example.local" },
-        observeCtx,
-      )
-      .pipe(
-        Effect.flip,
-        Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
-      );
+      // Restored with `Effect.ensuring` rather than `finally`, so it still runs
+      // if the assertion fails or the fiber is interrupted.
+      const failure = yield* reconciler
+        .observe(
+          { path: target, match: "^127\\.0\\.0\\.1 ", line: "127.0.0.1 example.local" },
+          observeCtx,
+        )
+        .pipe(
+          Effect.flip,
+          Effect.ensuring(fs.chmod(target, 0o644).pipe(Effect.orElseSucceed(() => undefined))),
+        );
 
-    expect(failure).toBeInstanceOf(LineInFileUnreadable);
-  }).pipe(Effect.provide(layer)),
+      expect(failure).toBeInstanceOf(LineInFileUnreadable);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "apply raises LineInFileUnreadable instead of inserting a line into content it could not read",
   () =>
     Effect.gen(function* () {

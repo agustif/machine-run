@@ -18,7 +18,7 @@ commitment.
 | Area | Missing |
 |---|---|
 | Identity & auth | GPG keyring/trust management; ssh-agent config; cloud profiles (aws/gcloud/az); kubeconfig contexts |
-| Software | Nix/home-manager; `composer`; container runtimes (docker/orbstack/colima); pacman/COPR repo management (apt, dnf and flatpak have it) |
+| Software | Nix/home-manager; `composer`; container runtimes (docker/orbstack/colima); pacman/AUR repository management (apt, dnf and flatpak have repository resources) |
 | Shell & terminal | prompt (starship/p10k); completions; terminal emulator config (ghostty/wezterm/kitty/iterm); multiplexer (tmux/zellij) |
 | Editors & dev tooling | VS Code/Cursor settings + extensions; JetBrains/neovim; direnv; EditorConfig |
 | OS settings | macOS: hostname, pmset, firewall, keyboard remap (hidutil), login items — none go through `defaults`, so the generic `System.Setting` backend doesn't reach them; Linux: sysctl, udev; Windows: registry |
@@ -67,11 +67,10 @@ writers race.
   values `matches` becomes "contains" rather than "equals" — a different
   reconciler contract than everywhere else. Needs an explicit `mode` prop
   rather than a silent merge.
-- **Reversibility (`unapply`) is implemented for 3 of 23 resource kinds**
-  (`Shell.Login`, `Git.Maintenance`, `System.Setting`). The remaining 20
-  don't: reverting a `defaults` key has no defined "before" if the original
-  was never recorded, and restoring a backup is only right if the backup is
-  still the right answer.
+- **Reversibility (`unapply`) is implemented for 16 of 23 resource kinds.**
+  The seven deliberate refusals are command execution, tool/package/repository
+  ownership, generated private keys, and tailnet membership; each resource
+  documents why removing it cannot honestly reverse the machine change.
 - **Resource type naming has nine conventions** (`Machine.*`, `System.*`,
   `MacOS.*`, `Tailscale.*`, `Git.*`, `Ai.*`, `Runtime.*`, `Shell.*`, `Ssh.*`)
   and no rule for when something is `Machine` versus `System`. Renaming is no
@@ -83,13 +82,16 @@ writers race.
 
 ## Known limitations
 
-- `sudo` is hardcoded at 10 call sites (Snap 3, Pacman 3, Dnf 3, Mas 1),
-  absent from Flatpak; runs even when already root.
-- No `LC_ALL`/`LANG` anywhere, while many backends parse localised CLI output.
-- 57 hardcoded timeout literals across 6 distinct values.
+- Privilege, locale and the default timeout are carried by the engine's
+  `ExecutionContext`. Backends add `sudo` only when that context requests it,
+  and the provider boundary injects `LC_ALL`/`LANG` plus the default timeout.
+  Package-manager-specific operation budgets live in `core/Timeouts.ts` and
+  are declared by each backend. Direct unit tests deliberately use a fake
+  `Exec`, so they do not imply a host shell or environment.
 - `matches` returns a bare `boolean`, `address` a bare `string` — the engine
   knows *that* something drifted, never how or in which direction.
-- Windows: 16 tests across 7 files fail. Node reports `0o666` for every file
-  and `chmod` only toggles read-only, so a pinned `mode` can never be observed
-  back. Design decided in [notes/windows-permissions.md](./notes/windows-permissions.md),
-  not built.
+- Windows permissions use an ACL seam. Node's `chmod`/`stat` mode bits are
+  not expressive there, so mode-constrained resources now translate intent
+  through `icacls` and compare the live ACL. The pure seam and the
+  resource wiring are covered locally; real Windows round-tripping remains
+  explicitly CI-verified rather than inferred from a Mac.

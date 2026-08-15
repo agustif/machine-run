@@ -1,5 +1,6 @@
 import {
   detectLineEnding,
+  ensureParentDir,
   joinLines,
   MachinePaths,
   makeSha256,
@@ -312,7 +313,11 @@ export const makeLineInFileReconciler: Effect.Effect<
           );
         }
         if (found.success === undefined) return Option.none();
-        return Option.some({ path: target, match: props.match, hash: yield* sha256(found.success) });
+        return Option.some({
+          path: target,
+          match: props.match,
+          hash: yield* sha256(found.success),
+        });
       }),
 
     desired: (props) =>
@@ -357,10 +362,7 @@ export const makeLineInFileReconciler: Effect.Effect<
     apply: ({ props, desired }) =>
       Effect.gen(function* () {
         const target = desired.path;
-        yield* fs.makeDirectory(path.dirname(target), {
-          recursive: true,
-          ...(props.directoryMode !== undefined ? { mode: props.directoryMode } : {}),
-        });
+        yield* ensureParentDir(fs, path, target, props.directoryMode);
 
         const existing = yield* readFileOrEmpty(target);
         const rendered = renderLine(existing, props.match, props.line, props);

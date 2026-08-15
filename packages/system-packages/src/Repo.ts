@@ -8,6 +8,7 @@ import {
   toProvider,
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
+import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -109,146 +110,171 @@ const repoEquals = (a: RepoSpec, b: RepoSpec): boolean =>
 const isApplyPhase = (ctx: ObserveContext): ctx is ApplyContext => "snapshot" in ctx;
 
 /**
+ * A repository command exited successfully, but a fresh manager listing still
+ * cannot find the requested repo. Recording `desired` in that case would make
+ * the state file claim a repo exists when the next plan immediately disproves
+ * it.
+ */
+export class RepoNotConverged extends Data.TaggedError("RepoNotConverged")<{
+  props: RepoProps;
+}> {
+  override get message() {
+    return `Repository (${this.props.repo._tag}) was reported added, but a fresh manager listing does not contain it.`;
+  }
+}
+
+/**
  * The provider body, exported separately from `RepoProvider` — same
  * rationale as `makePackageReconciler` in `Package.ts`.
  */
-export const makeRepoReconciler: Effect.Effect<Reconciler<RepoProps, RepoState, BackendError>> =
-  Effect.gen(function* () {
-    const brew = makeBrewRepoBackend();
-    const apt = makeAptRepoBackend();
-    const dnf = makeDnfRepoBackend();
-    const flatpak = makeFlatpakRepoBackend();
+export const makeRepoReconciler: Effect.Effect<
+  Reconciler<RepoProps, RepoState, BackendError | RepoNotConverged>
+> = Effect.gen(function* () {
+  const brew = makeBrewRepoBackend();
+  const apt = makeAptRepoBackend();
+  const dnf = makeDnfRepoBackend();
+  const flatpak = makeFlatpakRepoBackend();
 
-    // Shared with `Package.ts`'s notion of "one memoized listing per manager
-    // per phase" — see PackageIndex.ts and `Package.ts`'s `planIndex`/
-    // `applyIndex` doc comment for why a plan-phase and an apply-phase cache
-    // must be independent instances. `repos` is a distinct keyspace from
-    // `packages` (both live inside the one `PackageIndex` each of these is) so
-    // a "brew" *repo* listing (taps) can never satisfy a "brew" *package*
-    // listing lookup or vice versa.
-    const planIndex = yield* makePackageIndex;
-    const applyIndex = yield* makePackageIndex;
+  // Shared with `Package.ts`'s notion of "one memoized listing per manager
+  // per phase" — see PackageIndex.ts and `Package.ts`'s `planIndex`/
+  // `applyIndex` doc comment for why a plan-phase and an apply-phase cache
+  // must be independent instances. `repos` is a distinct keyspace from
+  // `packages` (both live inside the one `PackageIndex` each of these is) so
+  // a "brew" *repo* listing (taps) can never satisfy a "brew" *package*
+  // listing lookup or vice versa.
+  const planIndex = yield* makePackageIndex;
+  const applyIndex = yield* makePackageIndex;
 
-    const observe = (props: RepoProps, ctx: ObserveContext) =>
-      Effect.gen(function* () {
-        const index = isApplyPhase(ctx) ? applyIndex : planIndex;
-        const existing = yield* index.repos.get(props.repo._tag, () =>
-          Match.value(props.repo).pipe(
-            Match.tagsExhaustive({
-              Brew: () => brew.listRepos(ctx.exec),
-              Apt: () => apt.listRepos(ctx.exec),
-              Dnf: () => dnf.listRepos(ctx.exec),
-              Flatpak: () => flatpak.listRepos(ctx.exec),
-            }),
-          ),
-        );
-        if (!existing.some((entry) => repoEquals(entry, props.repo))) return Option.none();
-        // Every field this resource tracks about a repo lives in `props`
-        // itself — unlike `Ai.McpServer`'s state, there is nothing an
-        // observation resolves that props didn't already say, so the state
-        // this returns is exactly the spec that was found.
-        return Option.some(props);
-      });
-
-    return {
-      // Same reasoning as `Package.ts`: `brew tap`/`add-apt-repository` touch
-      // the same per-manager global state (and, for apt, the same dpkg lock)
-      // that installing a package does, so a repo add serialises with every
-      // other `System.Repo`/`System.Package` on that manager rather than
-      // racing them. The tag is a stable, distinct-per-manager string by
-      // construction — no separate manager id is needed to build this.
-      address: (props) => props.repo._tag,
-
-      /**
-       * Every extra repository each manager on this machine reports.
-       *
-       * Enumerates across all four rather than one: a machine can carry both a
-       * Homebrew tap and an apt PPA, and covering one would be an incomplete
-       * inventory presented as complete. Availability is not probed here the way
-       * `System.Package.list` probes it — a manager that is absent fails its
-       * `listRepos` and that failure propagates, because unlike a package listing
-       * there is no useful "this manager has no repos" answer to distinguish from
-       * "this manager is not installed". A short inventory is worse than none.
-       */
-      list: (ctx) => {
-        // Annotated to the union: each backend's `listRepos` returns its own arm
-        // of `RepoSpec`, and an unannotated array literal infers from whichever
-        // element comes first, making the other three type errors.
-        const listers: ReadonlyArray<
-          () => Effect.Effect<readonly RepoSpec[], BackendError>
-        > = [
-          () => brew.listRepos(ctx.exec),
-          () => apt.listRepos(ctx.exec),
-          () => dnf.listRepos(ctx.exec),
-          () => flatpak.listRepos(ctx.exec),
-        ];
-        return Effect.forEach(listers, (listRepos) => listRepos(), {
-          concurrency: 4,
-        }).pipe(Effect.map((perManager) => perManager.flat().map((repo) => ({ repo }))));
-      },
-
-      observe,
-
-      desired: (props) => Effect.succeed(props),
-
-      matches: (observed, desired) => repoEquals(observed.repo, desired.repo),
-
-      // Must agree with `matches`: empty exactly when it returns true. Every
-      // `RepoSpec` tag names a different field (`tap`/`ppa`/`project`/
-      // `name`+`location`), none ordered, so `direction` never applies here.
-      drift: (observed, desired): Drift => {
-        const o = observed.repo;
-        const d = desired.repo;
-        if (repoEquals(o, d)) return [];
-        return Match.value(d).pipe(
+  const observe = (props: RepoProps, ctx: ObserveContext) =>
+    Effect.gen(function* () {
+      const index = isApplyPhase(ctx) ? applyIndex : planIndex;
+      const existing = yield* index.repos.get(props.repo._tag, () =>
+        Match.value(props.repo).pipe(
           Match.tagsExhaustive({
-            Brew: (spec) => [
-              { field: "tap", observed: o._tag === "Brew" ? o.tap : "", desired: spec.tap },
-            ],
-            Apt: (spec) => [
-              { field: "ppa", observed: o._tag === "Apt" ? o.ppa : "", desired: spec.ppa },
-            ],
-            Dnf: (spec) => [
-              { field: "project", observed: o._tag === "Dnf" ? o.project : "", desired: spec.project },
-            ],
-            Flatpak: (spec) => {
-              const fields: DriftField[] = [];
-              if (!(o._tag === "Flatpak" && o.name === spec.name)) {
-                fields.push({
-                  field: "name",
-                  observed: o._tag === "Flatpak" ? o.name : "",
-                  desired: spec.name,
-                });
-              }
-              // No `location` field, deliberately: `matches` above compares
-              // Flatpak remotes on `name` alone (see `repoEquals`), and `drift`
-              // must be empty exactly when `matches` is true. Reporting a
-              // location difference here would claim drift the plan then says
-              // nothing about, and that `apply` could not fix in any case.
-              return fields;
+            Brew: () => brew.listRepos(ctx.exec),
+            Apt: () => apt.listRepos(ctx.exec),
+            Dnf: () => dnf.listRepos(ctx.exec),
+            Flatpak: () => flatpak.listRepos(ctx.exec),
+          }),
+        ),
+      );
+      if (!existing.some((entry) => repoEquals(entry, props.repo))) return Option.none();
+      // Every field this resource tracks about a repo lives in `props`
+      // itself — unlike `Ai.McpServer`'s state, there is nothing an
+      // observation resolves that props didn't already say, so the state
+      // this returns is exactly the spec that was found.
+      return Option.some(props);
+    });
+
+  return {
+    // Same reasoning as `Package.ts`: `brew tap`/`add-apt-repository` touch
+    // the same per-manager global state (and, for apt, the same dpkg lock)
+    // that installing a package does, so a repo add serialises with every
+    // other `System.Repo`/`System.Package` on that manager rather than
+    // racing them. The tag is a stable, distinct-per-manager string by
+    // construction — no separate manager id is needed to build this.
+    address: (props) => props.repo._tag,
+
+    /**
+     * Every extra repository each manager on this machine reports.
+     *
+     * Enumerates across all four rather than one: a machine can carry both a
+     * Homebrew tap and an apt PPA, and covering one would be an incomplete
+     * inventory presented as complete. Availability is not probed here the way
+     * `System.Package.list` probes it — a manager that is absent fails its
+     * `listRepos` and that failure propagates, because unlike a package listing
+     * there is no useful "this manager has no repos" answer to distinguish from
+     * "this manager is not installed". A short inventory is worse than none.
+     */
+    list: (ctx) => {
+      // Annotated to the union: each backend's `listRepos` returns its own arm
+      // of `RepoSpec`, and an unannotated array literal infers from whichever
+      // element comes first, making the other three type errors.
+      const listers: ReadonlyArray<() => Effect.Effect<readonly RepoSpec[], BackendError>> = [
+        () => brew.listRepos(ctx.exec),
+        () => apt.listRepos(ctx.exec),
+        () => dnf.listRepos(ctx.exec),
+        () => flatpak.listRepos(ctx.exec),
+      ];
+      return Effect.forEach(listers, (listRepos) => listRepos(), {
+        concurrency: 4,
+      }).pipe(Effect.map((perManager) => perManager.flat().map((repo) => ({ repo }))));
+    },
+
+    observe,
+
+    desired: (props) => Effect.succeed(props),
+
+    matches: (observed, desired) => repoEquals(observed.repo, desired.repo),
+
+    // Must agree with `matches`: empty exactly when it returns true. Every
+    // `RepoSpec` tag names a different field (`tap`/`ppa`/`project`/
+    // `name`+`location`), none ordered, so `direction` never applies here.
+    drift: (observed, desired): Drift => {
+      const o = observed.repo;
+      const d = desired.repo;
+      if (repoEquals(o, d)) return [];
+      return Match.value(d).pipe(
+        Match.tagsExhaustive({
+          Brew: (spec) => [
+            { field: "tap", observed: o._tag === "Brew" ? o.tap : "", desired: spec.tap },
+          ],
+          Apt: (spec) => [
+            { field: "ppa", observed: o._tag === "Apt" ? o.ppa : "", desired: spec.ppa },
+          ],
+          Dnf: (spec) => [
+            {
+              field: "project",
+              observed: o._tag === "Dnf" ? o.project : "",
+              desired: spec.project,
             },
+          ],
+          Flatpak: (spec) => {
+            const fields: DriftField[] = [];
+            if (!(o._tag === "Flatpak" && o.name === spec.name)) {
+              fields.push({
+                field: "name",
+                observed: o._tag === "Flatpak" ? o.name : "",
+                desired: spec.name,
+              });
+            }
+            // No `location` field, deliberately: `matches` above compares
+            // Flatpak remotes on `name` alone (see `repoEquals`), and `drift`
+            // must be empty exactly when `matches` is true. Reporting a
+            // location difference here would claim drift the plan then says
+            // nothing about, and that `apply` could not fix in any case.
+            return fields;
+          },
+        }),
+      );
+    },
+
+    apply: ({ props }, ctx) =>
+      Effect.gen(function* () {
+        const execution = executionOf(ctx);
+        yield* Match.value(props.repo).pipe(
+          Match.tagsExhaustive({
+            Brew: (p) => brew.addRepo(p, ctx.exec, execution),
+            Apt: (p) => apt.addRepo(p, ctx.exec, execution),
+            Dnf: (p) => dnf.addRepo(p, ctx.exec, execution),
+            Flatpak: (p) => flatpak.addRepo(p, ctx.exec, execution),
           }),
         );
-      },
+        // Same reasoning as `Package.ts`: the cached repo listing for this
+        // manager is now stale, so the next `System.Repo` resource on the
+        // same manager must not see the pre-add snapshot.
+        yield* applyIndex.repos.invalidate(props.repo._tag);
 
-      apply: ({ props, desired }, ctx) =>
-        Effect.gen(function* () {
-          const execution = executionOf(ctx);
-          yield* Match.value(props.repo).pipe(
-            Match.tagsExhaustive({
-              Brew: (p) => brew.addRepo(p, ctx.exec, execution),
-              Apt: (p) => apt.addRepo(p, ctx.exec, execution),
-              Dnf: (p) => dnf.addRepo(p, ctx.exec, execution),
-              Flatpak: (p) => flatpak.addRepo(p, ctx.exec, execution),
-            }),
-          );
-          // Same reasoning as `Package.ts`: the cached repo listing for this
-          // manager is now stale, so the next `System.Repo` resource on the
-          // same manager must not see the pre-add snapshot.
-          yield* applyIndex.repos.invalidate(props.repo._tag);
-          return desired;
-        }),
-    };
-  });
+        // As with package installation, the command's exit code is not a
+        // read-after-write guarantee. Confirm through the same listing path
+        // planning uses before recording a successful state.
+        const confirmed = yield* observe(props, ctx);
+        if (Option.isNone(confirmed)) {
+          return yield* Effect.fail(new RepoNotConverged({ props }));
+        }
+        return confirmed.value;
+      }),
+  };
+});
 
 export const RepoProvider = () => toProvider(Repo, makeRepoReconciler);

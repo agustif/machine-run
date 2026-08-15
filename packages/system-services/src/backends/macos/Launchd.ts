@@ -1,9 +1,10 @@
-import { Sh } from "@machine-run/core";
+import { Sh, statIfPresent } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import * as Boolean from "effect/Boolean";
 import * as Effect from "effect/Effect";
 import type * as FileSystem from "effect/FileSystem";
 import * as Match from "effect/Match";
+import * as Option from "effect/Option";
 import type * as Path from "effect/Path";
 import type { ServiceBackend, ServiceBackendError, ServiceObservation } from "../../Backend.ts";
 
@@ -147,7 +148,7 @@ export const makeLaunchdBackend = (deps: {
   const observe: ServiceBackend["observe"] = (name, explicitPath, exec) =>
     Effect.gen(function* () {
       const resolved = resolvePath(name, explicitPath);
-      const installed = yield* fs.exists(resolved);
+      const installed = Option.isSome(yield* statIfPresent(fs, resolved, (cause) => cause));
       const loaded = yield* observeLoaded(name, exec);
       return { installed, ...loaded } satisfies ServiceObservation;
     });

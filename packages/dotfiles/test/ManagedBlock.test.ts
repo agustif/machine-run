@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeCrypto, NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -18,7 +19,7 @@ import {
   type ManagedBlockProps,
 } from "../src/ManagedBlock.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), NodeCrypto.layer).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux"), NodeCrypto.layer).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
 
@@ -27,6 +28,10 @@ const applyCtx = {
   snapshot: () => Effect.succeed(undefined),
 };
 const observeCtx = { exec: () => Effect.die("not used") };
+
+// A Windows read-only attribute cannot create the POSIX write-only fixture
+// these tests use to prove that existing content is preserved.
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * Unwraps a render that is expected to succeed, throwing the real
@@ -260,7 +265,7 @@ it.effect("CRLF file: the reconciler reports no drift after writing the same con
  * permission drift can easily leave write access intact while removing read
  * access (a stricter ACL, a `chattr`-style flag, a mid-flight `chmod`).
  */
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "observe raises ManagedBlockFileUnreadable, not absence, when the file cannot be read",
   () =>
     Effect.gen(function* () {
@@ -286,7 +291,7 @@ it.effect(
     }).pipe(Effect.provide(layer)),
 );
 
-it.effect(
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
   "apply raises ManagedBlockFileUnreadable instead of writing the marker block over content it could not read",
   () =>
     Effect.gen(function* () {
@@ -339,35 +344,33 @@ it("removeBlock refuses a duplicated marker rather than guessing which pair to s
   expect(Result.isFailure(removeBlock(corrupted, "shell-path"))).toBe(true);
 });
 
-it.effect(
-  "drift is empty exactly when matches is true, and names path, marker and content",
-  () =>
-    Effect.gen(function* () {
-      const reconciler = yield* makeManagedBlockReconciler;
-      const drift = reconciler.drift;
-      if (drift === undefined) return yield* Effect.die("expected drift to be defined");
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const dir = yield* fs.makeTempDirectoryScoped();
-      const target = path.join(dir, ".zshrc");
+it.effect("drift is empty exactly when matches is true, and names path, marker and content", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeManagedBlockReconciler;
+    const drift = reconciler.drift;
+    if (drift === undefined) return yield* Effect.die("expected drift to be defined");
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const dir = yield* fs.makeTempDirectoryScoped();
+    const target = path.join(dir, ".zshrc");
 
-      const props: ManagedBlockProps = { path: target, marker: "example", content: "export A=1" };
-      const desired = yield* reconciler.desired(props);
-      yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
-      const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
+    const props: ManagedBlockProps = { path: target, marker: "example", content: "export A=1" };
+    const desired = yield* reconciler.desired(props);
+    yield* reconciler.apply({ props, observed: Option.none(), desired }, applyCtx);
+    const observed = Option.getOrThrow(yield* reconciler.observe(props, observeCtx));
 
-      expect(reconciler.matches(observed, desired)).toBe(true);
-      expect(drift(observed, desired)).toEqual([]);
+    expect(reconciler.matches(observed, desired)).toBe(true);
+    expect(drift(observed, desired)).toEqual([]);
 
-      const changedProps: ManagedBlockProps = { ...props, content: "export A=2" };
-      const changedDesired = yield* reconciler.desired(changedProps);
-      expect(reconciler.matches(observed, changedDesired)).toBe(false);
-      expect(drift(observed, changedDesired).map((f) => f.field)).toEqual(["content"]);
+    const changedProps: ManagedBlockProps = { ...props, content: "export A=2" };
+    const changedDesired = yield* reconciler.desired(changedProps);
+    expect(reconciler.matches(observed, changedDesired)).toBe(false);
+    expect(drift(observed, changedDesired).map((f) => f.field)).toEqual(["content"]);
 
-      const renamedDesired = yield* reconciler.desired({ ...props, marker: "renamed" });
-      expect(reconciler.matches(observed, renamedDesired)).toBe(false);
-      expect(drift(observed, renamedDesired).map((f) => f.field)).toEqual(["marker"]);
-    }).pipe(Effect.provide(layer)),
+    const renamedDesired = yield* reconciler.desired({ ...props, marker: "renamed" });
+    expect(reconciler.matches(observed, renamedDesired)).toBe(false);
+    expect(drift(observed, renamedDesired).map((f) => f.field)).toEqual(["marker"]);
+  }).pipe(Effect.provide(layer)),
 );
 
 it.effect("unapply removes just this resource's own region, leaving the rest of the file", () =>

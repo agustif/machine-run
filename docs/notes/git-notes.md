@@ -41,6 +41,11 @@ already exists — mirroring the one precedence rule verified against real git
 otherwise falls back to `~/.gitconfig`). See `Config.ts`'s
 `resolveGlobalConfigPath` doc comment for the full verification.
 
+Inspection failures are no longer converted into "the XDG file is absent":
+the candidate is retained conservatively, so the subsequent `git config`
+operation reports the real command/I/O failure instead of choosing the fallback
+path on an unreadable filesystem entry.
+
 This can diverge from the file git actually touches if something creates the
 XDG file mid-run, or if git's own precedence changes in a future version.
 The failure mode if it does diverge is a *weakening* of `FileLock` exclusion

@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import {
+  KeyEcdsaBitsInvalid,
   KeyPairIncomplete,
   makeKeyReconciler,
   parseFingerprint,
@@ -69,6 +70,16 @@ it("parseFingerprint reports undefined for output with no SHA256 field where exp
 
 const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive(), CommandExecutorLive()).pipe(
   Layer.provideMerge(NodeServices.layer),
+);
+
+it.effect("rejects an invalid ECDSA curve size before running ssh-keygen", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeKeyReconciler;
+    const error = yield* reconciler
+      .desired({ path: "/tmp/id_ecdsa", algorithm: "ecdsa", bits: 255 })
+      .pipe(Effect.flip);
+    expect(error).toBeInstanceOf(KeyEcdsaBitsInvalid);
+  }).pipe(Effect.provide(layer)),
 );
 
 /** The real executor, wired the way `toProvider` wires it for apply/observe. */
@@ -292,10 +303,11 @@ it.effect(
       // could ever pass) — proving the private key never surfaces regardless
       // of which comparison is made, not just that it happens not to today.
       const againstDesired = reconciler.drift?.(Option.getOrThrow(observed), desired) ?? [];
-      const againstDifferentProps = reconciler.drift?.(
-        Option.getOrThrow(observed),
-        yield* reconciler.desired(propsFor(target, { algorithm: "rsa", comment: "different" })),
-      ) ?? [];
+      const againstDifferentProps =
+        reconciler.drift?.(
+          Option.getOrThrow(observed),
+          yield* reconciler.desired(propsFor(target, { algorithm: "rsa", comment: "different" })),
+        ) ?? [];
 
       for (const fields of [againstDesired, againstDifferentProps]) {
         expect(fields).toEqual([]);

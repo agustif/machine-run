@@ -1,4 +1,4 @@
-import { expandHome, MachinePaths, MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { expandHome, MachinePaths, PlatformFor, Sh } from "@machine-run/core";
 import type { Exec } from "@machine-run/engine";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
@@ -16,7 +16,16 @@ import {
   makeGitMaintenanceReconciler,
 } from "../src/Maintenance.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(Layer.provideMerge(NodeServices.layer));
+const testPaths = Layer.succeed(MachinePaths, {
+  home: "/home/test",
+  expand: (target: string) => target,
+});
+
+const layer = Layer.mergeAll(testPaths, PlatformFor("linux")).pipe(
+  Layer.provideMerge(NodeServices.layer),
+);
+
+const expectedGit = (...argv: readonly string[]): string => Sh.sh("git", ...argv);
 
 /** A `MachinePaths` whose home is a fixed temp directory — mirrors `Config.test.ts`. */
 const withHome = (home: string, path: Path.Path) =>
@@ -146,7 +155,11 @@ it.effect(
       // is unchanged, it just belongs where the work actually cannot proceed.
       const error = yield* reconciler
         .apply(
-          { props: { repo: "/not-a-repo" }, observed: Option.none(), desired: { repo: "/not-a-repo" } },
+          {
+            props: { repo: "/not-a-repo" },
+            observed: Option.none(),
+            desired: { repo: "/not-a-repo" },
+          },
           applyCtx(notARepoExec),
         )
         .pipe(Effect.flip);
@@ -219,7 +232,7 @@ it.effect("apply runs `git maintenance start` against the repo and returns desir
     );
 
     expect(result).toEqual({ repo: "/repo" });
-    expect(calls).toEqual(["git -C /repo maintenance start"]);
+    expect(calls).toEqual([expectedGit("-C", "/repo", "maintenance", "start")]);
   }).pipe(Effect.provide(layer)),
 );
 
@@ -281,8 +294,8 @@ it.effect(
         applyCtx(capturingExec(calls)),
       );
 
-      expect(calls).toEqual(["git -C /repo maintenance unregister --force"]);
-      expect(calls.some((call) => call.includes(" stop"))).toBe(false);
+      expect(calls).toEqual([expectedGit("-C", "/repo", "maintenance", "unregister", "--force")]);
+      expect(calls.some((call) => call.includes("stop"))).toBe(false);
     }).pipe(Effect.provide(layer)),
 );
 
@@ -346,7 +359,10 @@ it.effect("observes as absent when the repository does not exist yet", () =>
     const reconciler = yield* makeGitMaintenanceReconciler;
     const observed = yield* reconciler.observe(
       { repo: "/nonexistent/not-cloned-yet" },
-      { exec: notARepoExec, execution: { privilege: "none", locale: "C", defaultTimeout: "1 minute" } },
+      {
+        exec: notARepoExec,
+        execution: { privilege: "none", locale: "C", defaultTimeout: "1 minute" },
+      },
     );
     expect(Option.isNone(observed)).toBe(true);
   }).pipe(Effect.provide(layer)),

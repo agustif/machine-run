@@ -63,17 +63,12 @@ this note records what could and could not be verified.
 
 `Backups`' directory is stamped fresh every run (`Clock`-derived, per
 `packages/core/src/Backups.ts`), so a `destroy` invocation's own `Backups`
-service has no way to find a backup taken during some earlier `deploy` — that
-information only survives between runs if a resource's own `State` carries
-it, round-tripped through Alchemy's state file. `ApplyContext.snapshot` now
-returns the backup path (previously discarded) specifically so a future
-resource *could* capture it into its `State` and read it back via
-`unapply`'s `recorded` parameter — but no resource in this repo does that
-yet. That is a per-resource change, owned by whoever writes that resource,
-not something `toProvider` can fabricate on their behalf. Proven only
-against a small `Test.Engine.File` reconciler defined in
-`packages/engine/test/unapply.test.ts`, per the brief for this work (not
-against a real package's resource — those are other agents' files).
+service has no way to find a backup taken during some earlier `deploy` unless a
+resource persists its path. `Machine.File` does persist its `backupPath` and
+uses it to restore an adopted file; `Machine.SecretFile` intentionally does
+not, because secret-derived material and durable secret bookkeeping must not
+enter Alchemy state. Other resources still need an explicit, resource-specific
+decision before they can honestly restore anything.
 
 ---
 

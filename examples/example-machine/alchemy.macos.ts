@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 const providers = MacOsDefaults.providers().pipe(
-  Layer.provideMerge(Core.services()),
+  Layer.provide(Core.services()),
   Layer.provide(CommandExecutorLive()),
 );
 

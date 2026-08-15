@@ -1,6 +1,7 @@
-import { MachinePathsLive, PlatformFor, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -12,9 +13,11 @@ import {
   type DirectoryProps,
 } from "../src/Directory.ts";
 
-const layer = Layer.mergeAll(MachinePathsLive(), PlatformLive()).pipe(
+const layer = Layer.mergeAll(MachinePathsLive(), PlatformFor("linux")).pipe(
   Layer.provideMerge(NodeServices.layer),
 );
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /** Builds a reconciler and hands it a real temp directory to work in. */
 const withTempDir = <A, E>(
@@ -45,45 +48,49 @@ it.effect("observe reports nothing for a directory that does not exist yet", () 
   ).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply creates the directory with the requested mode", () =>
-  withTempDir((reconciler, target) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const desired = yield* reconciler.desired(props(target, 0o700));
-      const result = yield* reconciler.apply(
-        { props: props(target, 0o700), observed: Option.none(), desired },
-        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-      );
-      expect(result.mode).toBe(0o700);
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply creates the directory with the requested mode",
+  () =>
+    withTempDir((reconciler, target) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const desired = yield* reconciler.desired(props(target, 0o700));
+        const result = yield* reconciler.apply(
+          { props: props(target, 0o700), observed: Option.none(), desired },
+          { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+        );
+        expect(result.mode).toBe(0o700);
 
-      const info = yield* fs.stat(target);
-      expect(info.type).toBe("Directory");
-      expect(Number(info.mode) & 0o777).toBe(0o700);
-    }),
-  ).pipe(Effect.provide(layer)),
+        const info = yield* fs.stat(target);
+        expect(info.type).toBe("Directory");
+        expect(Number(info.mode) & 0o777).toBe(0o700);
+      }),
+    ).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply chmods a directory that already exists with a different mode", () =>
-  withTempDir((reconciler, target) =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      // Pre-create the directory at a mode the recipe does not ask for —
-      // `mkdir`'s `mode` option only applies at creation, so converging an
-      // *existing* directory to a new mode has to be a real code path, not
-      // just the happy path where `makeDirectory` does the whole job.
-      yield* fs.makeDirectory(target, { recursive: true, mode: 0o755 });
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply chmods a directory that already exists with a different mode",
+  () =>
+    withTempDir((reconciler, target) =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        // Pre-create the directory at a mode the recipe does not ask for —
+        // `mkdir`'s `mode` option only applies at creation, so converging an
+        // *existing* directory to a new mode has to be a real code path, not
+        // just the happy path where `makeDirectory` does the whole job.
+        yield* fs.makeDirectory(target, { recursive: true, mode: 0o755 });
 
-      const desired = yield* reconciler.desired(props(target, 0o700));
-      const result = yield* reconciler.apply(
-        { props: props(target, 0o700), observed: Option.none(), desired },
-        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-      );
-      expect(result.mode).toBe(0o700);
+        const desired = yield* reconciler.desired(props(target, 0o700));
+        const result = yield* reconciler.apply(
+          { props: props(target, 0o700), observed: Option.none(), desired },
+          { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+        );
+        expect(result.mode).toBe(0o700);
 
-      const info = yield* fs.stat(target);
-      expect(Number(info.mode) & 0o777).toBe(0o700);
-    }),
-  ).pipe(Effect.provide(layer)),
+        const info = yield* fs.stat(target);
+        expect(Number(info.mode) & 0o777).toBe(0o700);
+      }),
+    ).pipe(Effect.provide(layer)),
 );
 
 it.effect("observe fails with a typed error when a file occupies the path", () =>
@@ -104,33 +111,39 @@ it.effect("observe fails with a typed error when a file occupies the path", () =
 
 it.effect("matches is satisfied by any mode when the recipe does not constrain one", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever" });
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o755 }, desired)).toBe(true);
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target });
+    expect(reconciler.matches({ path: target, mode: 0o755 }, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
 it.effect("matches rejects a mode the recipe does constrain", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever", mode: 0o700 });
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o755 }, desired)).toBe(false);
-    expect(reconciler.matches({ path: "/tmp/whatever", mode: 0o700 }, desired)).toBe(true);
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target, mode: 0o700 });
+    expect(reconciler.matches({ path: target, mode: 0o755 }, desired)).toBe(false);
+    expect(reconciler.matches({ path: target, mode: 0o700 }, desired)).toBe(true);
   }).pipe(Effect.provide(layer)),
 );
 
 it.effect("drift is empty exactly when matches is true, and names mode with a direction", () =>
   Effect.gen(function* () {
+    const path = yield* Path.Path;
     const reconciler = yield* makeDirectoryReconciler;
     const drift = reconciler.drift;
     if (drift === undefined) return yield* Effect.die("expected drift to be defined");
 
-    const desired = yield* reconciler.desired({ path: "/tmp/whatever", mode: 0o700 });
-    const satisfied = { path: "/tmp/whatever", mode: 0o700 };
+    const target = path.resolve("/tmp/whatever");
+    const desired = yield* reconciler.desired({ path: target, mode: 0o700 });
+    const satisfied = { path: target, mode: 0o700 };
     expect(reconciler.matches(satisfied, desired)).toBe(true);
     expect(drift(satisfied, desired)).toEqual([]);
 
-    const looser = { path: "/tmp/whatever", mode: 0o755 };
+    const looser = { path: target, mode: 0o755 };
     expect(reconciler.matches(looser, desired)).toBe(false);
     expect(drift(looser, desired)).toEqual([
       { field: "mode", observed: "755", desired: "700", direction: "ahead" },
@@ -200,7 +213,7 @@ it.effect(
  * pins — owner-only rights, which is what 0o700 intends.
  */
 const OWNER_ONLY_ACL =
-  "C:\\data OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
+  "C:\\data OWNER RIGHTS:(RD,REA,RA,RC,S,WD,AD,WEA,WA,X)\n\nSuccessfully processed 1 files; Failed processing 0 files\n";
 
 const windowsLayer = Layer.mergeAll(MachinePathsLive(), PlatformFor("win32")).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -225,9 +238,19 @@ it.effect("on Windows a mode is satisfied by the ACL, not by comparing mode bits
     const broadened = {
       path: "C:\\data",
       mode: 0o666,
-      acl: OWNER_ONLY_ACL.replace("OWNER RIGHTS:(RD", "Everyone:(WD,AD)\nC:\\data OWNER RIGHTS:(RD"),
+      acl: OWNER_ONLY_ACL.replace(
+        "OWNER RIGHTS:(RD",
+        "Everyone:(WD,AD)\nC:\\data OWNER RIGHTS:(RD",
+      ),
     };
     expect(reconciler.matches(broadened, desired)).toBe(false);
+
+    // Node's synthetic 0o666 mode must not leak into drift output when the ACL
+    // already satisfies the requested intent.
+    expect(reconciler.drift?.(withAcl, desired)).toEqual([]);
+    expect(reconciler.drift?.(withoutAcl, desired)).toEqual([
+      { field: "mode", observed: "ACL does not satisfy", desired: "700" },
+    ]);
   }).pipe(Effect.provide(windowsLayer)),
 );
 

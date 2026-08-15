@@ -1,4 +1,4 @@
-import { MachinePaths, Sh } from "@machine-run/core";
+import { MachinePaths, Platform, statIfPresent } from "@machine-run/core";
 import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -11,6 +11,7 @@ import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import { isExitCode } from "./exitCode.ts";
+import { gitCommand } from "./command.ts";
 
 /**
  * One global `git config` key, holding one or more values in the order git
@@ -235,12 +236,10 @@ export const splitNulTerminated = (stdout: string): readonly string[] => {
 const getAll = (
   key: string,
   type: GitConfigProps["type"],
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<readonly string[] | undefined, GitConfigCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "config", "--global", "--get-all", "-z", ...typeFlag(type), key),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "config", "--global", "--get-all", "-z", ...typeFlag(type), key)).pipe(
     Effect.map((result) => splitNulTerminated(result.stdout)),
     Effect.catch((error) =>
       isExitCode(error, 1)
@@ -260,11 +259,12 @@ const getAll = (
  * here specifically because `--unset-all` (not a bare `--unset`) never
  * declines to act just because there were several values.
  */
-const unsetAll = (key: string, exec: Exec): Effect.Effect<void, GitConfigCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "config", "--global", "--unset-all", key),
-    shell: true,
-  }).pipe(
+const unsetAll = (
+  key: string,
+  platform: typeof Platform.Service,
+  exec: Exec,
+): Effect.Effect<void, GitConfigCommandFailed> =>
+  exec(gitCommand(platform, "config", "--global", "--unset-all", key)).pipe(
     Effect.asVoid,
     Effect.catch((error) =>
       isExitCode(error, 5)
@@ -278,12 +278,10 @@ const addOne = (
   key: string,
   type: GitConfigProps["type"],
   value: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<void, GitConfigCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "config", "--global", ...typeFlag(type), "--add", key, value),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "config", "--global", ...typeFlag(type), "--add", key, value)).pipe(
     Effect.asVoid,
     Effect.catch((error) => Effect.fail(new GitConfigCommandFailed({ key, cause: error }))),
   );
@@ -326,18 +324,27 @@ export const resolveGlobalConfigPath = (
     );
     const xdgBase = Option.getOrElse(xdgConfigHome, () => path.join(paths.home, ".config"));
     const xdgConfig = path.join(xdgBase, "git", "config");
-    const xdgExists = yield* fs.exists(xdgConfig).pipe(Effect.orElseSucceed(() => false));
+    // If the candidate is genuinely absent, git falls back to ~/.gitconfig.
+    // If inspection itself fails, keep the candidate instead of silently
+    // selecting the fallback: the subsequent git command will surface the
+    // actual permission/I/O failure through GitConfigCommandFailed, and a
+    // successful command still writes the same file git selected.
+    const xdgExists = yield* statIfPresent(fs, xdgConfig, (cause) => cause).pipe(
+      Effect.map(Option.isSome),
+      Effect.catchTag("PlatformError", () => Effect.succeed(true)),
+    );
     return xdgExists ? xdgConfig : path.join(paths.home, ".gitconfig");
   });
 
 export const makeGitConfigReconciler: Effect.Effect<
   Reconciler<GitConfigProps, GitConfigState, GitConfigError>,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths
+  FileSystem.FileSystem | Path.Path | MachinePaths | Platform
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
+  const platform = yield* Platform;
   const globalConfigPath = yield* resolveGlobalConfigPath(fs, path, paths);
 
   /** Canonicalises `values` the same way `--type=bool` would on read, for `desired`. */
@@ -370,7 +377,7 @@ export const makeGitConfigReconciler: Effect.Effect<
 
     observe: (props, ctx) =>
       Effect.gen(function* () {
-        const values = yield* getAll(props.key, props.type, ctx.exec);
+        const values = yield* getAll(props.key, props.type, platform, ctx.exec);
         if (values === undefined) return Option.none();
         return Option.some({ key: props.key, values });
       }),
@@ -413,9 +420,9 @@ export const makeGitConfigReconciler: Effect.Effect<
 
     apply: ({ props, desired }, ctx) =>
       Effect.gen(function* () {
-        yield* unsetAll(props.key, ctx.exec);
+        yield* unsetAll(props.key, platform, ctx.exec);
         for (const value of desired.values) {
-          yield* addOne(props.key, props.type, value, ctx.exec);
+          yield* addOne(props.key, props.type, value, platform, ctx.exec);
         }
         return desired;
       }),
@@ -427,7 +434,7 @@ export const makeGitConfigReconciler: Effect.Effect<
     // including the first, already unsets before adding — see this module's
     // "Convergence, not patching" section), so there is nothing truthful to
     // restore, only this resource's own contribution to remove.
-    unapply: ({ recorded }, ctx) => unsetAll(recorded.key, ctx.exec),
+    unapply: ({ recorded }, ctx) => unsetAll(recorded.key, platform, ctx.exec),
   };
 });
 

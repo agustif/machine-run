@@ -1,4 +1,9 @@
-# Test findings
+# Historical write-ups
+
+The sections below preserve the original evidence and reproduction steps for
+the three findings. They describe the pre-fix behavior; the table above is the
+current status. The tests now assert the corrected behavior, so these notes
+are audit history rather than an open bug list.
 
 Bugs surfaced by writing reconciler-level tests against the real exported
 logic. **All three below have since been fixed**, and each pinning test was

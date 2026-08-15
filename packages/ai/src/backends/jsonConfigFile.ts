@@ -1,5 +1,10 @@
-import { CREDENTIAL_DIRECTORY_MODE, writeCredentialFileString } from "@machine-run/core";
+import {
+  CREDENTIAL_DIRECTORY_MODE,
+  statIfPresent,
+  writeCredentialFileString,
+} from "@machine-run/core";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import { AiToolConfigMalformed, type AiToolContext, type AiToolError, type AiToolId } from "../Backend.ts";
@@ -51,8 +56,8 @@ export const readJsonDocument = (
   fallback: JsonConfigDocument,
 ): Effect.Effect<JsonConfigDocument, AiToolError> =>
   Effect.gen(function* () {
-    const present = yield* ctx.fs.exists(configPath);
-    if (!present) return fallback;
+    const present = yield* statIfPresent(ctx.fs, configPath, (cause) => cause);
+    if (Option.isNone(present)) return fallback;
     const text = yield* ctx.fs.readFileString(configPath);
     return yield* decodeDocument(text).pipe(
       Effect.catchTag(

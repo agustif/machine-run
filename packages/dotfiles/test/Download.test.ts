@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { platform as nodePlatform } from "node:os";
 import { NodeServices } from "@effect/platform-node";
-import { MachinePathsLive, PlatformLive } from "@machine-run/core";
+import { MachinePathsLive, PlatformFor } from "@machine-run/core";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -23,6 +24,7 @@ const sha256Hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).dige
 const BODY = new TextEncoder().encode("machine-run test fixture, not a real font");
 const CHECKSUM = sha256Hex(BODY);
 const FIXTURE_URL = "https://fixture.invalid/file";
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 /**
  * The default suite must not need a socket, network permission, or a running
@@ -38,11 +40,9 @@ const fixtureClient = HttpClient.make((request) =>
 
 const layer = Layer.mergeAll(
   MachinePathsLive(),
-  PlatformLive(),
+  PlatformFor("linux"),
   Layer.succeed(HttpClient.HttpClient, fixtureClient),
-).pipe(
-  Layer.provideMerge(NodeServices.layer),
-);
+).pipe(Layer.provideMerge(NodeServices.layer));
 
 it.effect("observe reports nothing for a file that has not been fetched yet", () =>
   Effect.gen(function* () {
@@ -64,35 +64,37 @@ it.effect("observe reports nothing for a file that has not been fetched yet", ()
   }).pipe(Effect.provide(layer)),
 );
 
-it.effect("apply fetches, verifies the checksum, and writes the bytes atomically", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeDownloadReconciler;
-    const url = FIXTURE_URL;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "font.ttf");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "apply fetches, verifies the checksum, and writes the bytes atomically",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeDownloadReconciler;
+      const url = FIXTURE_URL;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "font.ttf");
 
-    const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o644 };
-    const desired = yield* reconciler.desired(props);
-    const result = yield* reconciler.apply(
-      { props, observed: Option.none(), desired },
-      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-    );
+      const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o644 };
+      const desired = yield* reconciler.desired(props);
+      const result = yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+      );
 
-    expect(result.hash).toBe(CHECKSUM);
-    expect(result.mode).toBe(0o644);
+      expect(result.hash).toBe(CHECKSUM);
+      expect(result.mode).toBe(0o644);
 
-    const written = yield* fs.readFile(target);
-    expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
+      const written = yield* fs.readFile(target);
+      expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
 
-    // A later plan reads the file back and finds it already converged.
-    const observedAfter = yield* reconciler.observe(props, {
-      exec: () => Effect.die("not used"),
-    });
-    expect(Option.isSome(observedAfter)).toBe(true);
-    expect(reconciler.matches(Option.getOrThrow(observedAfter), desired)).toBe(true);
-  }).pipe(Effect.scoped, Effect.provide(layer)),
+      // A later plan reads the file back and finds it already converged.
+      const observedAfter = yield* reconciler.observe(props, {
+        exec: () => Effect.die("not used"),
+      });
+      expect(Option.isSome(observedAfter)).toBe(true);
+      expect(reconciler.matches(Option.getOrThrow(observedAfter), desired)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 it.effect("a checksum mismatch fails without ever writing the file", () =>
@@ -228,26 +230,28 @@ it.effect(
  * otherwise. Asserting a read-only download still succeeds is what keeps that
  * ordering from regressing.
  */
-it.effect("a read-only mode still downloads, and lands read-only", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const reconciler = yield* makeDownloadReconciler;
-    const url = FIXTURE_URL;
-    const dir = yield* fs.makeTempDirectoryScoped();
-    const target = path.join(dir, "pinned.ttf");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "a read-only mode still downloads, and lands read-only",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const reconciler = yield* makeDownloadReconciler;
+      const url = FIXTURE_URL;
+      const dir = yield* fs.makeTempDirectoryScoped();
+      const target = path.join(dir, "pinned.ttf");
 
-    const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o444 };
-    const desired = yield* reconciler.desired(props);
-    const result = yield* reconciler.apply(
-      { props, observed: Option.none(), desired },
-      { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
-    );
+      const props: DownloadProps = { url, path: target, checksum: CHECKSUM, mode: 0o444 };
+      const desired = yield* reconciler.desired(props);
+      const result = yield* reconciler.apply(
+        { props, observed: Option.none(), desired },
+        { exec: () => Effect.die("not used"), snapshot: () => Effect.succeed(undefined) },
+      );
 
-    expect(result.mode).toBe(0o444);
-    const written = yield* fs.readFile(target);
-    expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
-  }).pipe(Effect.scoped, Effect.provide(layer)),
+      expect(result.mode).toBe(0o444);
+      const written = yield* fs.readFile(target);
+      expect(Buffer.from(written).equals(Buffer.from(BODY))).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(layer)),
 );
 
 /** A download that expresses no opinion about mode keeps the platform

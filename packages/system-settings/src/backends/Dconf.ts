@@ -49,7 +49,6 @@ export const DconfBackend: SettingsBackend<DconfIdentity> = {
       Effect.flatMap((checked) =>
         exec({ command: Sh.sh("dconf", "read", checked), shell: true }).pipe(
           Effect.map((result) => result.stdout.trim()),
-          Effect.orElseSucceed(() => ""),
         ),
       ),
       Effect.map((trimmed) => (trimmed === "" ? undefined : trimmed)),

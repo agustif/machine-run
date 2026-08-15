@@ -70,13 +70,10 @@ print-disabled`), which survives unload/reboot and can make a future
       should reject that combination early with a typed error instead of
       letting a real command fail — currently it does the latter.
 
-- [ ] **No `unapply`.** Same conservative default as 19 of the other 22
-      resource kinds in this repo — only `Shell.Login`, `Git.Maintenance` and
-      `System.Setting` have one. Disabling and stopping a service someone
-      else may depend on is not obviously the right response to a recipe
-      line being removed. `brew services stop`/`launchctl unload`/
-      `systemctl --user disable` are all real, honest reversals a future
-      `unapply` could use.
+- [x] **Conservative removal behavior.** `System.Service` implements an
+      explicit `unapply` for the `"destroy"` policy, using the backend's
+      own stop/disable operations. The default remains retain, so removing a
+      recipe line does not stop a service unless the caller opts into destroy.
 
 ## Smaller, lower-priority
 

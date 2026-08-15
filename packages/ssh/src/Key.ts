@@ -1,4 +1,11 @@
-import { isNotFound, MachinePaths, Sh, Timeouts } from "@machine-run/core";
+import {
+  DEFAULT_DIRECTORY_MODE,
+  ensureParentDir,
+  isNotFound,
+  MachinePaths,
+  Platform,
+  Timeouts,
+} from "@machine-run/core";
 import { type Drift, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -9,6 +16,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import { PlatformError, systemError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
+import { sshCommand } from "./command.ts";
 
 /**
  * `ssh-keygen -t` algorithm names — the ones this resource knows how to
@@ -143,13 +151,29 @@ export class KeyFingerprintUnparseable extends Data.TaggedError("KeyFingerprintU
   }
 }
 
+/**
+ * `ssh-keygen -b` accepts only the three named NIST curve sizes for ECDSA.
+ * Validate this before creating a directory or invoking the command so a bad
+ * recipe fails at planning time with a stable, typed error rather than a
+ * backend-specific stderr string.
+ */
+export class KeyEcdsaBitsInvalid extends Data.TaggedError("KeyEcdsaBitsInvalid")<{
+  bits: number;
+  allowed: readonly [256, 384, 521];
+}> {
+  override get message() {
+    return `Ssh.Key algorithm "ecdsa" requires bits to be one of ${this.allowed.join(", ")}; received ${this.bits}.`;
+  }
+}
+
 export type KeyError =
   | PlatformError
   | CommandError
   | KeyPathUnreadable
   | KeyPairIncomplete
   | KeyPublicKeyMalformed
-  | KeyFingerprintUnparseable;
+  | KeyFingerprintUnparseable
+  | KeyEcdsaBitsInvalid;
 
 /**
  * The public half of a keypair, as `<path>.pub` actually spells it:
@@ -193,8 +217,6 @@ export const parseFingerprint = (output: string): string | undefined => {
 };
 
 const DEFAULT_MODE = 0o600;
-const DEFAULT_DIRECTORY_MODE = 0o700;
-
 /**
  * Generates and manages one SSH keypair on this machine.
  *
@@ -259,11 +281,25 @@ const DEFAULT_DIRECTORY_MODE = 0o700;
 export const makeKeyReconciler: Effect.Effect<
   Reconciler<KeyProps, KeyState, KeyError>,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths
+  FileSystem.FileSystem | Path.Path | MachinePaths | Platform
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
+  const platform = yield* Platform;
+
+  const validate = (props: KeyProps) => {
+    const algorithm = props.algorithm ?? "ed25519";
+    const allowed: readonly [256, 384, 521] = [256, 384, 521];
+    if (
+      algorithm === "ecdsa" &&
+      props.bits !== undefined &&
+      !allowed.some((allowedBits) => allowedBits === props.bits)
+    ) {
+      return new KeyEcdsaBitsInvalid({ bits: props.bits, allowed });
+    }
+    return undefined;
+  };
 
   const exists = (target: string) =>
     fs.stat(target).pipe(
@@ -324,10 +360,7 @@ export const makeKeyReconciler: Effect.Effect<
         const found = yield* readKeyState(privatePath, publicPath);
         if (found === undefined) return Option.none();
 
-        const fingerprintOutput = yield* ctx.exec({
-          command: Sh.sh("ssh-keygen", "-lf", found.publicPath),
-          shell: true,
-        });
+        const fingerprintOutput = yield* ctx.exec(sshCommand(platform, "-lf", found.publicPath));
         const fingerprint = parseFingerprint(fingerprintOutput.stdout);
         if (fingerprint === undefined) {
           return yield* Effect.fail(
@@ -351,11 +384,15 @@ export const makeKeyReconciler: Effect.Effect<
     // default of `""` is knowable ahead of generation, but recording it here
     // would suggest it participates in the comparison below, which it never
     // does — see "Why `matches` always reports convergence" above.
-    desired: (props) =>
-      Effect.succeed({
-        path: paths.expand(props.path),
-        publicKeyPath: `${paths.expand(props.path)}.pub`,
-      }),
+    desired: (props) => {
+      const invalid = validate(props);
+      return invalid === undefined
+        ? Effect.succeed({
+            path: paths.expand(props.path),
+            publicKeyPath: `${paths.expand(props.path)}.pub`,
+          })
+        : Effect.fail(invalid);
+    },
 
     // See this module's doc comment, "Why `matches` always reports
     // convergence" — this is the resource-level guarantee that an existing
@@ -373,20 +410,29 @@ export const makeKeyReconciler: Effect.Effect<
 
     apply: ({ props, observed, desired }, ctx) =>
       Effect.gen(function* () {
+        const invalid = validate(props);
+        if (invalid !== undefined) return yield* Effect.fail(invalid);
+
         // `matches` above guarantees the engine only reaches here when
         // `observed` is `Option.none()` — this branch is unreachable in
         // practice, but returning the untouched state is the honest answer
         // if it were ever reached some other way, not a defect to raise.
         if (Option.isSome(observed)) return observed.value;
 
-        yield* fs.makeDirectory(path.dirname(desired.path), {
-          recursive: true,
-          mode: props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
-        });
+        yield* ensureParentDir(
+          fs,
+          path,
+          desired.path,
+          props.directoryMode ?? DEFAULT_DIRECTORY_MODE,
+        );
 
         const algorithm = props.algorithm ?? "ed25519";
         const comment = props.comment ?? "";
-        const argv = ["ssh-keygen", "-t", algorithm, "-f", desired.path, "-C", comment, "-N", ""];
+        // `sshCommand` supplies the executable itself; keep this list as the
+        // arguments only. Passing `ssh-keygen` here too would produce
+        // `ssh-keygen ssh-keygen ...`, which OpenSSH rejects as "Too many
+        // arguments" on every supported platform.
+        const argv = ["-t", algorithm, "-f", desired.path, "-C", comment, "-N", ""];
         // `-b` is only meaningful for "rsa" (modulus length) and "ecdsa"
         // (curve size); OpenSSH silently ignores it for "ed25519" (verified
         // above), but omitting it there keeps the command honest about what
@@ -395,7 +441,7 @@ export const makeKeyReconciler: Effect.Effect<
           argv.push("-b", String(props.bits));
         }
 
-        yield* ctx.exec({ command: Sh.sh(...argv), shell: true, timeout: Timeouts.quickCommand });
+        yield* ctx.exec({ ...sshCommand(platform, ...argv), timeout: Timeouts.quickCommand });
         yield* fs.chmod(desired.path, props.mode ?? DEFAULT_MODE);
 
         const generated = yield* readKeyState(desired.path, desired.publicKeyPath);
@@ -416,10 +462,9 @@ export const makeKeyReconciler: Effect.Effect<
           );
         }
 
-        const fingerprintOutput = yield* ctx.exec({
-          command: Sh.sh("ssh-keygen", "-lf", desired.publicKeyPath),
-          shell: true,
-        });
+        const fingerprintOutput = yield* ctx.exec(
+          sshCommand(platform, "-lf", desired.publicKeyPath),
+        );
         const fingerprint = parseFingerprint(fingerprintOutput.stdout);
         if (fingerprint === undefined) {
           return yield* Effect.fail(

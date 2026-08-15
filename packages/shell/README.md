@@ -8,7 +8,7 @@ five interactive shells with genuinely different syntax.
 
 | Resource      | Reconciles                                                                        |
 | ------------- | --------------------------------------------------------------------------------- |
-| `Shell.Login` | the login shell (`chsh`), including its own `unapply` — one of three in this repo |
+| `Shell.Login` | the login shell (`chsh`), including its own `unapply` |
 
 | Composition               | What it does                                                                                                                                        |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -23,12 +23,6 @@ Every composition is a plain function over `@machine-run/dotfiles`'s
 `Machine.ManagedBlock`, not a `Resource` of its own — `shell` is a required
 prop on each rather than inferred, because `export FOO=bar` in zsh is
 `set -gx FOO bar` in fish and `$env.FOO = "bar"` in nu.
-
-**Note on `docs/MAP.md`:** its §3 compositions table lists `envVar · pathEntry
-· alias · hook · ensureLoginShellLoadsRc` but omits `func`, which is a real,
-exported composition (`src/Profile.ts`) with its own backend-seam method
-(`ShellBackend.renderFunction`) and its own tests. It is also not yet
-exercised in `examples/complete-machine`. Worth fixing in both places.
 
 ## Example
 
@@ -79,8 +73,7 @@ Windows, where its profile path differs (`Documents\PowerShell` vs.
 
 ## What it deliberately does not do
 
-- **`Shell.Login` is one of three resources in this repo with `unapply`**
-  (with `Git.Maintenance` and `System.Setting`). It restores whatever shell
+- **`Shell.Login` has a conservative `unapply`.** It restores whatever shell
   `observe` recorded before this resource's first apply. `plan`/`deploy`/
   `destroy` all work against a real Alchemy engine now, but `Shell.Login`
   is not among the resource kinds `scripts/deploy-check.sh` exercises, so

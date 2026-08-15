@@ -1,14 +1,12 @@
 # Windows permissions: research, design, and a pure prototype
 
-This is the record behind the "Windows properly" item in `docs/TASKS.md` P2,
-specifically: `Machine.File`, `Machine.Directory`, `Machine.Download`,
-`Machine.SecretFile`, and `Machine.ManagedBlock`'s `directoryMode` all take a
-POSIX `mode` prop, and that prop is meaningless on Windows as currently
-implemented — 10 of the 16 tests failing on the Windows CI runner trace back
-to it (`docs/TASKS.md`'s "Windows" entry has the count). The question this
-file answers, with evidence, before any code changes anything: **does Windows
-have its own mode-like abstraction this repo should share, or translate to, or
-give up and ignore?**
+This is the research record behind the Windows permission seam in
+`docs/TASKS.md` P2. `Machine.File`, `Machine.Directory`,
+`Machine.Download`, `Machine.SecretFile` and delegated
+`Machine.Template` paths accept a POSIX-style `mode` prop, but Node
+cannot represent those classes on Windows. The ACL translation, read-back
+comparison and resource wiring now exist; this document records the evidence,
+the unavoidable approximation, and the remaining real-run verification.
 
 Everything below was checked against a primary source — Microsoft's own
 documentation, Node's own docs, libuv's own source, or a real, independently
@@ -419,25 +417,14 @@ and recode the same nine bits); `toWindowsAclPlan`/`toIcaclsArgv` render the
 Windows side (lossy, and honestly documented as such in the module's own
 header comment, citing exactly which parts don't survive per §4).
 
-**Why (a)'s `matches` question is "no broader", not "equals exactly".** An
-exact round-trip is provably impossible (§2: `fs.stat().mode` reports `0o666`
-for every writable file, full stop) — but that observation was about
-`fs.stat`, not about `icacls`. Once `observe` reads the *ACL* instead of
-`stat().mode`, exact equality becomes theoretically possible **except** for
-the unavoidable extras §4 names: Administrators/SYSTEM ACEs this repo never
-asked for and cannot suppress without real risk (locking out the operator's
-own admin account), and any ACE an object legitimately picked up before this
-tool touched it. Comparing for exact equality would report those as
-permanent, unfixable drift. Comparing "is what's granted a subset of what
-`mode` allows" (`Icacls.ts`'s `isNoBroaderThan`) treats those as noise
-correctly, at a real and stated cost: it cannot detect a principal that was
-granted **fewer** rights than `mode` says — e.g. a `SecretFile` whose owner
-somehow lost read access would still read as "matches". This asymmetry is
-named explicitly in `isNoBroaderThan`'s own doc comment rather than left
-implicit, and closing it (comparing per-class equality against a
-reconstructed `FilePermissions` instead of a raw subset check) is left as
-follow-up work for whoever wires this into a resource, not resolved here —
-see §7.
+**Why the comparison requires both bounds.** An exact round-trip is still
+impossible for unmanaged SYSTEM/Administrators entries this repo cannot safely
+remove, but the managed owner/group/other principals must have every right the
+intent grants and no right it withholds. `permissionsSatisfied` now rejects
+both a broader grant and a lost required right. Explicit deny ACEs remain a
+separate gap because plain `icacls <path>` output does not expose ACE type;
+SDDL from `icacls /save` is the correct future seam if effective denies
+need to be modeled.
 
 ---
 
@@ -450,8 +437,8 @@ see §7.
   ACL-intent translation from §3, with every gap from §4 documented at the
   point it applies).
 - `Icacls.ts` — `parseIcacls` (the read-back parser from §5),
-  `grantedRights` (unions across repeated-principal ACEs), `isNoBroaderThan`
-  (the `matches` primitive from §6).
+  `grantedRights` (unions across repeated-principal ACEs), and
+  `permissionsSatisfied` (the exact managed-intent comparison).
 
 **Verified:**
 
@@ -483,38 +470,15 @@ see §7.
   `toIcaclsArgv` is checked for shape only (`FilePermissions.test.ts`); no
   `/grant:r`/`/inheritance:r` invocation built by this module has been run
   against a real file, on any OS.
-- **`isNoBroaderThan`'s "matches" semantics have not been exercised against
-  a real Windows object's actual ACL**, only against synthetic sets in
-  `Icacls.test.ts`.
+- **The ACL write/read-back round trip has not been exercised against a real
+  Windows object by this checkout yet**, only against synthetic sets in
+  `Icacls.test.ts`. The dedicated Windows CI job is the verification
+  boundary for that claim.
 
-**What the follow-up change — wiring this into `Machine.File` /
-`Machine.SecretFile` / `Machine.Directory` / `Machine.Download` — would
-still need, none of which this change attempts:**
-
-1. A `Platform` service (already tracked, `packages/core/TASKS.md`) so each
-   resource's `observe`/`apply` can branch POSIX vs. Windows once, rather
-   than re-checking `process.platform` per resource.
-2. Each resource's `observe` to run `icacls <path>` (via `Sh.pwsh` +
-   `shell: "powershell.exe"`, the same seam `Winget.ts`/`Choco.ts` already
-   use) on Windows instead of trusting `fs.stat().mode`, parse it with
-   `parseIcacls`, and fold the three managed principals'
-   `grantedRights`/`isNoBroaderThan` into whatever shape that resource's
-   `matches` already expects.
-3. Each resource's `apply` to run `toIcaclsArgv` on Windows instead of (or
-   in addition to — POSIX systems still need `fs.chmod`) `fs.chmod`, when
-   `props.mode` is set.
-4. A resolution for `directoryMode`'s double life
-   (`Machine.Directory` vs. the `directoryMode` prop on `File`/
-   `ManagedBlock`/`SecretFile` — already flagged as its own P1 item in
-   `docs/TASKS.md`) before duplicating the Windows path in two places.
-5. A decision on the `isNoBroaderThan` asymmetry named in §6 — whether the
-   first Windows-aware `matches` accepts "cannot detect narrower-than-desired
-   access" as a documented, temporary gap, or whether it's worth the extra
-   work of reconstructing a comparable `FilePermissions` from `observed`
-   before wiring anything user-facing on top of it.
-6. A real Windows machine or CI runner to actually run any of the above
-   against — nothing in this repo has deployed to a real machine yet
-   (`AGENTS.md` §14), Windows included.
-
-None of 1–6 is done here, by design: the task was the seam and its
-verification, not the resources.
+The resource wiring is now present: `Platform` is injected, observations
+carry raw `icacls` output, applies use the PowerShell command boundary, and
+`permissionsSatisfied` drives drift detection for `Machine.File`,
+`Machine.Directory`, `Machine.Download`, `Machine.SecretFile` and
+`Machine.Template`. Remaining work is external verification of the ACL
+commands on a Windows runner, plus SDDL support if explicit deny semantics
+become part of the resource contract.

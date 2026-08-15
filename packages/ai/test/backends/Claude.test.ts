@@ -2,6 +2,7 @@ import type { AiToolContext } from "@machine-run/ai";
 import { ClaudeBackend } from "@machine-run/ai";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -48,6 +49,8 @@ const REAL_CLAUDE_JSON = Schema.encodeSync(Schema.fromJsonString(Schema.Json, { 
 });
 
 const layer = NodeServices.layer;
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 const dieExec: AiToolContext["exec"] = () => Effect.die("claude backend never calls exec");
 
@@ -131,11 +134,7 @@ it.effect(
       yield* fs.writeFileString(path.join(home, ".claude.json"), REAL_CLAUDE_JSON);
 
       const ctx: AiToolContext = { exec: dieExec, fs, path, home };
-      yield* ClaudeBackend.mcp!.apply(
-        "second",
-        { command: "npx", args: ["other"] },
-        ctx,
-      );
+      yield* ClaudeBackend.mcp!.apply("second", { command: "npx", args: ["other"] }, ctx);
       yield* ClaudeBackend.mcp!.remove("second", ctx);
 
       const written = yield* decodeWrittenDocument(
@@ -244,44 +243,48 @@ it.effect(
  * needs the mode passed on the write, and a file some other tool already
  * created at 0644 needs the explicit chmod or it keeps those bits forever.
  */
-it.effect("writes a fresh config at 0600, in a 0700 directory", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* fs.makeTempDirectoryScoped();
-    const configDir = path.join(home, "nested");
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "writes a fresh config at 0600, in a 0700 directory",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const configDir = path.join(home, "nested");
 
-    const ctx: AiToolContext = { exec: dieExec, fs, path, home: configDir };
-    yield* ClaudeBackend.mcp!.apply(
-      "newserver",
-      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
-      ctx,
-    );
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home: configDir };
+      yield* ClaudeBackend.mcp!.apply(
+        "newserver",
+        { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+        ctx,
+      );
 
-    const fileInfo = yield* fs.stat(path.join(configDir, ".claude.json"));
-    const dirInfo = yield* fs.stat(configDir);
-    expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
-    expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
-  }).pipe(Effect.provide(layer)),
+      const fileInfo = yield* fs.stat(path.join(configDir, ".claude.json"));
+      const dirInfo = yield* fs.stat(configDir);
+      expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
+      expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("tightens a config another tool already created world-readable", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* fs.makeTempDirectoryScoped();
-    const configPath = path.join(home, ".claude.json");
-    yield* fs.writeFileString(configPath, REAL_CLAUDE_JSON);
-    yield* fs.chmod(configPath, 0o644);
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "tightens a config another tool already created world-readable",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const configPath = path.join(home, ".claude.json");
+      yield* fs.writeFileString(configPath, REAL_CLAUDE_JSON);
+      yield* fs.chmod(configPath, 0o644);
 
-    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
-    yield* ClaudeBackend.mcp!.apply(
-      "newserver",
-      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
-      ctx,
-    );
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+      yield* ClaudeBackend.mcp!.apply(
+        "newserver",
+        { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+        ctx,
+      );
 
-    const info = yield* fs.stat(configPath);
-    expect(Number(info.mode) & 0o777).toBe(0o600);
-  }).pipe(Effect.provide(layer)),
+      const info = yield* fs.stat(configPath);
+      expect(Number(info.mode) & 0o777).toBe(0o600);
+    }).pipe(Effect.provide(layer)),
 );

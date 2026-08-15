@@ -2,7 +2,10 @@ import { CommandError, UnexpectedExit } from "alchemy/Command";
 import type { Exec } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import type { GsettingsRelocatableIdentity } from "../src/Backend.ts";
+import {
+  GsettingsRelocatableIdentity,
+  SettingResetNotCommitted,
+} from "../src/Backend.ts";
 import { DconfBackend } from "../src/backends/Dconf.ts";
 import { GsettingsBackend } from "../src/backends/Gsettings.ts";
 
@@ -35,6 +38,13 @@ const capturingExec =
   (props) => {
     calls.push(props.command);
     return Effect.succeed({ exitCode: 0, stdout, stderr: "" });
+  };
+
+const warningExec =
+  (stderr: string, calls: string[]): Exec =>
+  (props) => {
+    calls.push(props.command);
+    return Effect.succeed({ exitCode: 0, stdout: "", stderr });
   };
 
 // ---------------------------------------------------------------------------
@@ -74,6 +84,16 @@ it.effect("gsettings backend treats a non-existent schema as absent, not a failu
       failingExec("No such schema ?org.gnome.does.not.exist?\n"),
     );
     expect(value).toBeUndefined();
+  }),
+);
+
+it.effect("gsettings backend propagates an unrelated command failure", () =>
+  Effect.gen(function* () {
+    const error = yield* GsettingsBackend.read(
+      { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
+      failingExec("dconf-WARNING **: Cannot autolaunch D-Bus without X11 $DISPLAY\n"),
+    ).pipe(Effect.flip);
+    expect(error).toBeInstanceOf(CommandError);
   }),
 );
 
@@ -129,6 +149,24 @@ it.effect("gsettings backend reset shells out to `gsettings reset <schema> <key>
       { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
       capturingExec("", calls),
     );
+    expect(calls).toEqual(["gsettings reset org.gnome.desktop.interface clock-format"]);
+  }),
+);
+
+it.effect("gsettings backend rejects a successful reset that emits a commit warning", () =>
+  Effect.gen(function* () {
+    const calls: string[] = [];
+    const result = yield* Effect.flip(
+      GsettingsBackend.reset(
+        { _tag: "Gsettings", schema: "org.gnome.desktop.interface", key: "clock-format" },
+        warningExec(
+          "dconf-WARNING **: failed to commit changes to dconf: Cannot autolaunch D-Bus without X11 $DISPLAY\n",
+          calls,
+        ),
+      ),
+    );
+    expect(result).toBeInstanceOf(SettingResetNotCommitted);
+    expect(result).toMatchObject({ backend: "gsettings" });
     expect(calls).toEqual(["gsettings reset org.gnome.desktop.interface clock-format"]);
   }),
 );
@@ -266,6 +304,16 @@ it.effect("dconf backend reads an array value's canonical GVariant text", () =>
     // prints back the canonical single-quoted, space-after-comma spelling.
     const value = yield* DconfBackend.read({ path: "/test/mypath" }, fakeExec("['a', 'b']\n"));
     expect(value).toBe("['a', 'b']");
+  }),
+);
+
+it.effect("dconf backend propagates read failures instead of treating them as an unset key", () =>
+  Effect.gen(function* () {
+    const error = yield* DconfBackend.read(
+      { path: "/test/mypath" },
+      failingExec("error: Cannot autolaunch D-Bus without X11 $DISPLAY\n"),
+    ).pipe(Effect.flip);
+    expect(error).toBeInstanceOf(CommandError);
   }),
 );
 

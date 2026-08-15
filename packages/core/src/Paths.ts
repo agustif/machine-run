@@ -15,7 +15,11 @@ import { homedir } from "node:os";
  */
 export const expandHome = (path: Path.Path, target: string, home: string): string => {
   const expanded =
-    target === "~" ? home : target.startsWith("~/") ? path.join(home, target.slice(2)) : target;
+    target === "~"
+      ? home
+      : target.startsWith("~/") || target.startsWith("~\\")
+        ? path.join(home, target.slice(2))
+        : target;
   return path.resolve(expanded);
 };
 

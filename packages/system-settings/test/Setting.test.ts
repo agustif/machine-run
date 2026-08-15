@@ -2,6 +2,7 @@ import type { ApplyContext, Exec, ObserveContext } from "@machine-run/engine";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import { SettingResetNotCommitted } from "../src/Backend.ts";
 import {
   makeSettingReconciler,
   type SettingProps,
@@ -57,6 +58,16 @@ const resettingExec =
       return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
     }
     return Effect.succeed({ exitCode: 0, stdout: afterReset, stderr: "" });
+  };
+
+const warningResetExec =
+  (stderr: string, calls: string[]): Exec =>
+  (props) => {
+    calls.push(props.command);
+    if (props.command.startsWith("gsettings reset")) {
+      return Effect.succeed({ exitCode: 0, stdout: "", stderr });
+    }
+    return Effect.succeed({ exitCode: 0, stdout: "'12h'", stderr: "" });
   };
 
 const statefulExec = (initial: string | undefined, writtenValue: string): StatefulExec => {
@@ -318,7 +329,7 @@ it.effect(
 );
 
 it.effect(
-  "Setting reconciler unapply: resets the key and confirms the value actually changed",
+  "Setting reconciler unapply: resets the key and rejects a known silent no-op",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
@@ -353,8 +364,7 @@ it.effect(
 );
 
 it.effect(
-  "Setting reconciler unapply: fails loudly when a reset reports success but the value never " +
-    "changed (gsettings' container-verified silent no-op with no session D-Bus, applied to reset)",
+  "Setting reconciler unapply: permits a reset whose resulting value equals the recorded value",
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeSettingReconciler;
@@ -372,22 +382,51 @@ it.effect(
         value: "'12h'",
       };
 
-      // Every read — including the confirmation read `unapply` issues right
-      // after resetting — still returns the value this resource itself
-      // wrote, exactly as `gsettings reset` behaves with no reachable
-      // session D-Bus.
+      // A reset can legitimately leave the same value when the recorded
+      // value already equals the backend's default. Equality is not evidence
+      // that the reset failed.
+      yield* reconciler.unapply!(
+        { props, observed: recorded, recorded },
+        applyCtx(noopWriteExec("'12h'", calls)),
+      );
+
+      // Both the reset and the confirmation read actually ran.
+      expect(calls.length).toBe(2);
+    }),
+);
+
+it.effect(
+  "Setting reconciler unapply: fails closed on gsettings' successful reset warning",
+  () =>
+    Effect.gen(function* () {
+      const reconciler = yield* makeSettingReconciler;
+      const calls: string[] = [];
+      const props: SettingProps = {
+        _tag: "Gsettings",
+        schema: "org.gnome.desktop.interface",
+        key: "clock-format",
+        value: "'12h'",
+      };
+      const recorded: SettingState = {
+        variant: "Gsettings",
+        schema: props.schema,
+        key: props.key,
+        value: "'12h'",
+      };
       const result = yield* Effect.flip(
         reconciler.unapply!(
           { props, observed: recorded, recorded },
-          applyCtx(noopWriteExec("'12h'", calls)),
+          applyCtx(
+            warningResetExec(
+              "dconf-WARNING **: failed to commit changes to dconf: Cannot autolaunch D-Bus without X11 $DISPLAY\n",
+              calls,
+            ),
+          ),
         ),
       );
 
-      expect(result._tag).toBe("SettingResetNotObserved");
-      expect(result).toMatchObject({ unwanted: "'12h'" });
-      expect(result.message).toContain("org.gnome.desktop.interface clock-format");
-      // Both the reset and the confirmation read actually ran.
-      expect(calls.length).toBe(2);
+      expect(result).toBeInstanceOf(SettingResetNotCommitted);
+      expect(calls).toEqual(["gsettings reset org.gnome.desktop.interface clock-format"]);
     }),
 );
 

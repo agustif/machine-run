@@ -1,3 +1,4 @@
+import { DEFAULT_DIRECTORY_MODE } from "@machine-run/core";
 import * as Dotfiles from "@machine-run/dotfiles";
 
 export interface SshHostProps {
@@ -93,7 +94,7 @@ export const sshHostBlockProps = (props: SshHostProps): Dotfiles.ManagedBlockPro
     marker: `ssh-host:${props.name}`,
     content: lines.join("\n"),
     position: "prepend",
-    directoryMode: 0o700,
+    directoryMode: DEFAULT_DIRECTORY_MODE,
     ...(props.after !== undefined ? { after: props.after } : {}),
   };
 };

@@ -2,6 +2,7 @@ import type { AiToolContext } from "@machine-run/ai";
 import { OpenCodeBackend } from "@machine-run/ai";
 import { NodeServices } from "@effect/platform-node";
 import { expect, it } from "@effect/vitest";
+import { platform as nodePlatform } from "node:os";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -47,6 +48,8 @@ const REAL_OPENCODE_JSONC = Schema.encodeSync(Schema.fromJsonString(Schema.Json,
 });
 
 const layer = NodeServices.layer;
+
+const POSIX_PERMISSIONS_AVAILABLE = nodePlatform() !== "win32";
 
 const dieExec: AiToolContext["exec"] = () => Effect.die("opencode backend never calls exec");
 
@@ -161,7 +164,9 @@ it.effect("apply creates the config file and its parent directory when neither e
     const ctx: AiToolContext = { exec: dieExec, fs, path, home };
     yield* OpenCodeBackend.mcp!.apply("first", { command: "npx" }, ctx);
 
-    const written = yield* decodeWrittenDocument(yield* fs.readFileString(configPathOf(path, home)));
+    const written = yield* decodeWrittenDocument(
+      yield* fs.readFileString(configPathOf(path, home)),
+    );
     expect(field(written, "mcp", "first")).toEqual({ type: "local", command: ["npx"] });
   }).pipe(Effect.provide(layer)),
 );
@@ -173,43 +178,47 @@ it.effect("apply creates the config file and its parent directory when neither e
  * here is `~/.config/opencode`, created by this backend rather than the
  * user, which makes the 0700 assertion meaningful rather than incidental.
  */
-it.effect("writes a fresh config at 0600, in a 0700 directory", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* fs.makeTempDirectoryScoped();
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "writes a fresh config at 0600, in a 0700 directory",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
 
-    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
-    yield* OpenCodeBackend.mcp!.apply(
-      "localtest",
-      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
-      ctx,
-    );
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+      yield* OpenCodeBackend.mcp!.apply(
+        "localtest",
+        { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+        ctx,
+      );
 
-    const fileInfo = yield* fs.stat(configPathOf(path, home));
-    const dirInfo = yield* fs.stat(path.join(home, ".config/opencode"));
-    expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
-    expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
-  }).pipe(Effect.provide(layer)),
+      const fileInfo = yield* fs.stat(configPathOf(path, home));
+      const dirInfo = yield* fs.stat(path.join(home, ".config/opencode"));
+      expect(Number(fileInfo.mode) & 0o777).toBe(0o600);
+      expect(Number(dirInfo.mode) & 0o777).toBe(0o700);
+    }).pipe(Effect.provide(layer)),
 );
 
-it.effect("tightens a config another tool already created world-readable", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const home = yield* fs.makeTempDirectoryScoped();
-    yield* fs.makeDirectory(path.join(home, ".config/opencode"), { recursive: true });
-    yield* fs.writeFileString(configPathOf(path, home), REAL_OPENCODE_JSONC);
-    yield* fs.chmod(configPathOf(path, home), 0o644);
+it.effect.skipIf(!POSIX_PERMISSIONS_AVAILABLE)(
+  "tightens a config another tool already created world-readable",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const home = yield* fs.makeTempDirectoryScoped();
+      yield* fs.makeDirectory(path.join(home, ".config/opencode"), { recursive: true });
+      yield* fs.writeFileString(configPathOf(path, home), REAL_OPENCODE_JSONC);
+      yield* fs.chmod(configPathOf(path, home), 0o644);
 
-    const ctx: AiToolContext = { exec: dieExec, fs, path, home };
-    yield* OpenCodeBackend.mcp!.apply(
-      "localtest",
-      { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
-      ctx,
-    );
+      const ctx: AiToolContext = { exec: dieExec, fs, path, home };
+      yield* OpenCodeBackend.mcp!.apply(
+        "localtest",
+        { command: "npx", args: ["-y", "srv"], env: { API_KEY: "super-secret" } },
+        ctx,
+      );
 
-    const info = yield* fs.stat(configPathOf(path, home));
-    expect(Number(info.mode) & 0o777).toBe(0o600);
-  }).pipe(Effect.provide(layer)),
+      const info = yield* fs.stat(configPathOf(path, home));
+      expect(Number(info.mode) & 0o777).toBe(0o600);
+    }).pipe(Effect.provide(layer)),
 );

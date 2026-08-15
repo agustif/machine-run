@@ -20,7 +20,11 @@ const fakeExecFailing = () => ({
     Effect.fail(
       new CommandError({
         command: "defaults export ... | plutil -extract ...",
-        reason: new UnexpectedExit({ exitCode: 1, stderr: "" }),
+        reason: new UnexpectedExit({
+          exitCode: 1,
+          stderr:
+            "<stdin>: Could not extract value, error: No value at that key path or invalid key path: SomeKey",
+        }),
       }),
     ),
 });
@@ -102,7 +106,7 @@ it.effect(
 );
 
 it.effect(
-  "drift: a real value difference reports \"value\" with the canonical XML on each side, no direction",
+  'drift: a real value difference reports "value" with the canonical XML on each side, no direction',
   () =>
     Effect.gen(function* () {
       const reconciler = yield* makeMacDefaultReconciler;
@@ -214,6 +218,27 @@ it.effect(
     }),
 );
 
+it.effect("observe propagates an unrelated command failure instead of treating it as absent", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeMacDefaultReconciler;
+    const error = yield* reconciler
+      .observe(props(true), {
+        exec: () =>
+          Effect.fail(
+            new CommandError({
+              command: "defaults export ... | plutil -extract ...",
+              reason: new UnexpectedExit({
+                exitCode: 1,
+                stderr: "defaults: Operation not permitted",
+              }),
+            }),
+          ),
+      })
+      .pipe(Effect.flip);
+    expect(error).toBeInstanceOf(CommandError);
+  }),
+);
+
 it.effect(
   "observe fails with PlistDecodeError, not absence, when the command succeeds but the output doesn't parse",
   () =>
@@ -233,7 +258,11 @@ it.effect("apply writes the rendered XML and returns the desired state", () =>
     const capturingExec = {
       exec: (p: { command: string }) => {
         calls.push(p.command);
-        return Effect.succeed({ exitCode: 0, stdout: "", stderr: "" });
+        return Effect.succeed({
+          exitCode: 0,
+          stdout: p.command.includes("plutil -extract") ? xmlOf(42) : "",
+          stderr: "",
+        });
       },
       snapshot: () => Effect.succeed(undefined),
     };
@@ -247,8 +276,32 @@ it.effect("apply writes the rendered XML and returns the desired state", () =>
     // `previous` records that the key was absent, which is what `observed:
     // Option.none()` above means — that capture is what makes `unapply` honest.
     expect(result).toEqual({ ...desired, previous: { _tag: "Absent" } });
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0]).toContain("defaults write");
     expect(calls[0]).toContain("com.apple.finder");
+    expect(calls[1]).toContain("plutil -extract");
+  }),
+);
+
+it.effect("apply surfaces a successful write that a fresh read cannot confirm", () =>
+  Effect.gen(function* () {
+    const reconciler = yield* makeMacDefaultReconciler;
+    const desired = yield* reconciler.desired(props(42));
+    const error = yield* reconciler
+      .apply(
+        { props: props(42), observed: Option.none(), desired },
+        {
+          exec: (p: { command: string }) =>
+            Effect.succeed({
+              exitCode: 0,
+              stdout: p.command.includes("plutil -extract") ? xmlOf(1) : "",
+              stderr: "",
+            }),
+          snapshot: () => Effect.succeed(undefined),
+        },
+      )
+      .pipe(Effect.flip);
+
+    expect(error._tag).toBe("MacDefaultNotConverged");
   }),
 );

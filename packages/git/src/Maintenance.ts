@@ -1,4 +1,4 @@
-import { MachinePaths, Sh } from "@machine-run/core";
+import { MachinePaths, Platform } from "@machine-run/core";
 import { type Drift, type Exec, type Reconciler, toProvider } from "@machine-run/engine";
 import type { CommandError } from "alchemy/Command";
 import { Resource } from "alchemy/Resource";
@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema";
 import { resolveGlobalConfigPath, splitNulTerminated } from "./Config.ts";
 import { isExitCode, stderrOf } from "./exitCode.ts";
 import { showToplevel } from "./toplevel.ts";
+import { gitCommand } from "./command.ts";
 
 /**
  * Ensures `git maintenance` background upkeep (incremental `gc`,
@@ -161,8 +162,12 @@ export type GitMaintenanceError =
  * generic command failure for a repository another resource had simply not
  * cloned yet, which made the whole plan unrenderable.
  */
-const resolveRepo = (target: string, exec: Exec): Effect.Effect<string, GitMaintenanceError> =>
-  showToplevel(target, exec).pipe(
+const resolveRepo = (
+  target: string,
+  platform: typeof Platform.Service,
+  exec: Exec,
+): Effect.Effect<string, GitMaintenanceError> =>
+  showToplevel(target, platform, exec).pipe(
     Effect.mapError((cause: CommandError) =>
       /cannot change to|not a git repository/i.test(stderrOf(cause))
         ? new GitMaintenanceRepoNotFound({ repo: target })
@@ -182,12 +187,10 @@ const resolveRepo = (target: string, exec: Exec): Effect.Effect<string, GitMaint
  */
 const isRegistered = (
   repoToplevel: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<boolean, GitMaintenanceCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "config", "--global", "--get-all", "-z", "maintenance.repo"),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "config", "--global", "--get-all", "-z", "maintenance.repo")).pipe(
     Effect.map((result) => splitNulTerminated(result.stdout).includes(repoToplevel)),
     Effect.catch((error) =>
       isExitCode(error, 1)
@@ -206,15 +209,13 @@ const isRegistered = (
  */
 const startMaintenance = (
   repo: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<
   void,
   GitMaintenanceSchedulerUnavailable | GitMaintenanceCommandFailed | GitMaintenanceRepoNotFound
 > =>
-  exec({
-    command: Sh.sh("git", "-C", repo, "maintenance", "start"),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "-C", repo, "maintenance", "start")).pipe(
     Effect.asVoid,
     Effect.catch((error: CommandError) => {
       // `observe` reports an absent repository as `Option.none()` so a plan can
@@ -245,12 +246,10 @@ const startMaintenance = (
  */
 const unregisterMaintenance = (
   repo: string,
+  platform: typeof Platform.Service,
   exec: Exec,
 ): Effect.Effect<void, GitMaintenanceCommandFailed> =>
-  exec({
-    command: Sh.sh("git", "-C", repo, "maintenance", "unregister", "--force"),
-    shell: true,
-  }).pipe(
+  exec(gitCommand(platform, "-C", repo, "maintenance", "unregister", "--force")).pipe(
     Effect.asVoid,
     Effect.catch((error) => Effect.fail(new GitMaintenanceCommandFailed({ repo, cause: error }))),
   );
@@ -258,11 +257,12 @@ const unregisterMaintenance = (
 export const makeGitMaintenanceReconciler: Effect.Effect<
   Reconciler<GitMaintenanceProps, GitMaintenanceState, GitMaintenanceError>,
   never,
-  FileSystem.FileSystem | Path.Path | MachinePaths
+  FileSystem.FileSystem | Path.Path | MachinePaths | Platform
 > = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const paths = yield* MachinePaths;
+  const platform = yield* Platform;
   const globalConfigPath = yield* resolveGlobalConfigPath(fs, path, paths);
 
   return {
@@ -273,7 +273,7 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
     observe: (props, ctx) =>
       Effect.gen(function* () {
         const target = paths.expand(props.repo);
-        const toplevel = yield* resolveRepo(target, ctx.exec).pipe(
+        const toplevel = yield* resolveRepo(target, platform, ctx.exec).pipe(
           Effect.map(Option.some),
           // A repository that does not exist yet is not a failure to observe: no
           // registration for it can be active, which is exactly what
@@ -287,7 +287,7 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
           ),
         );
         if (Option.isNone(toplevel)) return Option.none();
-        const registered = yield* isRegistered(toplevel.value, ctx.exec);
+        const registered = yield* isRegistered(toplevel.value, platform, ctx.exec);
         if (!registered) return Option.none();
         return Option.some({ repo: target });
       }),
@@ -307,7 +307,7 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
 
     apply: ({ desired }, ctx) =>
       Effect.gen(function* () {
-        yield* startMaintenance(desired.repo, ctx.exec);
+        yield* startMaintenance(desired.repo, platform, ctx.exec);
         return desired;
       }),
 
@@ -323,7 +323,7 @@ export const makeGitMaintenanceReconciler: Effect.Effect<
      * something else unregistering the same repository in between, since
      * `unapply` otherwise only runs when `observe` just found it registered.
      */
-    unapply: ({ recorded }, ctx) => unregisterMaintenance(recorded.repo, ctx.exec),
+    unapply: ({ recorded }, ctx) => unregisterMaintenance(recorded.repo, platform, ctx.exec),
   };
 });
 

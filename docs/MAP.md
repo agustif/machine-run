@@ -70,10 +70,10 @@ deployed".
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │
    ┌──────────────────────────────────────┴──────────────────────────────────┐
-   │  @machine-run/core — no dependencies. The shared vocabulary.            │
-   │  MachinePaths (~ expansion) · Backups · FileLock · Sh (quoting,         │
-   │  posix + pwsh + fish + nu) · hash (Crypto) · Sessions (silentSession)   │
-   │  · Providers (services(), incl. NodeCrypto)                            │
+   │  @machine-run/core — no workspace dependencies. The shared vocabulary.  │
+   │  MachinePaths (~ expansion) · Platform · Backups · FileLock · Sh        │
+   │  (quoting, posix + pwsh + fish + nu) · hash (Crypto) · Sessions         │
+   │  (silentSession) · Providers (services(), incl. NodeCrypto)             │
    └──────────────────────────────────────┬──────────────────────────────────┘
                                           │
               ┌───────────────────────────┴───────────────────────────┐
@@ -442,14 +442,11 @@ Provider.delete({olds, output, session})
          └─ observe → already gone? skip : unapply({olds, observed}, ctx)
 ```
 
-**Three resources implement `unapply`** — `Shell.Login` puts back the shell it
-recorded, `System.Setting` resets a key to its schema default, and
-`Git.Maintenance` unregisters one repository (deliberately never `stop`, which
-is machine-wide and would silence every other registered repo). Which of the
-other 20 can honestly reverse themselves is still open, and mostly the answer is "not obviously": uninstalling
-a package someone may now depend on, or deleting a secret file, is not clearly
-the right response to a line being removed from a recipe. This is why the
-removal policy defaults to `retain`.
+**Sixteen resources implement `unapply`.** The seven deliberate refusals are
+documented next to their reconcilers: command execution, generated private keys,
+tool/package/repository ownership and tailnet membership cannot be reversed
+without guessing or risking unrelated machine state. The removal policy still
+defaults to `retain`.
 
 ---
 
@@ -476,15 +473,15 @@ reasoning and the judgement calls.
 ✗ P2  Manifest layer — Brew.Bundle, Mise.Toml, Asdf.ToolVersions, Nix.Flake.
       Complementary to the atomic layer, but a manifest resource must refuse
       to co-manage a manager the atomic layer also manages.
-~ P2  Windows properly — Platform service in core, registry SettingsBackend,
-      bootstrap.ps1 still ✗. The POSIX-mode decision and an ACL (`icacls`)
-      path are researched, designed and prototyped
-      ([notes/windows-permissions.md](./notes/windows-permissions.md),
-      `packages/core/src/windows/`) but not called by any resource yet — see
-      [TASKS.md](./TASKS.md)'s "Windows" entry for exactly what's left.
+~ P2  Windows breadth — the Platform service and ACL (`icacls`) path are
+      implemented for mode-constrained file resources. Registry settings,
+      bootstrap.ps1, and real Windows deploy coverage remain open. The parser,
+      ACL round-trip, and default test suite are verified by the Windows CI
+      jobs; this entry remains open for the missing breadth and deploy work.
 ✗ P3  Doctor / drift report — "what no longer matches", without applying
 ✗ P3  Import an existing machine — `list` on System.Package
-✗ P3  Finish the unmanage story (20 of 23 kinds have no unapply)
+✓ P3  Unmanage decisions recorded (16 of 23 kinds implement `unapply`; the
+      seven remaining kinds document why removal is unsafe or unavailable)
 ✗ P3  LICENSE. `UNLICENSED` with no file blocks any release.
 ✗ P3  Validate the exports maps for a real non-workspace consumer — only ever
       exercised inside this workspace
@@ -497,7 +494,9 @@ reasoning and the judgement calls.
 ```
 ✓ Resource · Provider.effect · Diff · AdoptPolicy · RemovalPolicy ·
   StackServices · ProviderServices · CommandExecutor · localState
-✗ Action        — no imperative one-shot actions bridged
+✓ Action        — audited and deliberately declined; stateful guarded effects
+                  use `Machine.Exec`, while an unguarded one-shot would violate
+                  the reconciler idempotence contract
 ✗ Artifacts     — Machine.Download rolls its own fetch+hash instead
 ✗ KeyPair       — the natural implementation of Ssh.Key
 ✗ Namespace     — no multi-machine scoping
@@ -515,7 +514,7 @@ What actually proves anything, and where.
 tsc -b            17 packages + 2 examples + tsconfig.tests.json
                   (tests were silently unchecked until tsconfig.tests.json;
                    its `references` are what make that work)
-vitest            65 files · 649 tests (646 pass, 3 skip without CI env vars)
+                  vitest            76 files · 797 tests (791 pass, 6 skip)
 oxlint            25 oxlint-plugin-effect rules, ALL enabled
                   0 errors · 736 warnings:
                     noNullish 471 · noTernary 173
@@ -525,13 +524,12 @@ oxlint            25 oxlint-plugin-effect rules, ALL enabled
 
 CI                check (ubuntu)          build + test + lint     ✓ green
                   check (macos)           build + test            ✓ green
-                  typecheck (windows)     build only              ✓ green
-                                          ↑ 16 tests genuinely fail on Windows;
-                                            a green `check` there would require
-                                            skipping them. TASKS.md P2 lists
-                                            all 16 under 3 root causes.
+                  check (windows)        build + test              ~ CI added;
+                                            POSIX-only permission fixtures skip
+                                            explicitly, ACL tools are verified
+                                            separately below.
                   verify winget / choco   real Windows output      ✓ green
-                  verify defaults / mas   real macOS runner        ✓ green
+                  verify defaults         real macOS runner        ✓ green
                   verify dnf / pacman     fedora + arch containers ✓ green
                   deploy-check            plan/deploy/destroy      ✓ GREEN
 

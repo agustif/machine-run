@@ -1,4 +1,4 @@
-import { Backups, FileLock, silentSession } from "@machine-run/core";
+import { Backups, FileLock, Windows, silentSession } from "@machine-run/core";
 import type { ScopedPlanStatusSession } from "alchemy/Cli/Cli";
 import { CommandExecutor } from "alchemy/Command";
 import { Unowned } from "alchemy/AdoptPolicy";
@@ -146,26 +146,38 @@ export const toProvider = <Res extends ResourceLike, E, R>(
       };
 
       // Every command a backend runs goes through here, the one place a locale
-      // can be pinned. Backends parse CLI output — `apt`, `dnf`, `brew`,
-      // `defaults`, `gsettings` — and that output is translated on a non-English
-      // machine, so an unpinned locale is a parser that works in CI and fails on
-      // the operator's laptop. A caller that sets these deliberately still wins,
-      // since its own `env` is spread last.
-      const withLocale = (props: ExecProps): ExecProps => ({
+      // and a default timeout can be applied. Backends parse CLI output —
+      // `apt`, `dnf`, `brew`, `defaults`, `gsettings` — and that output is
+      // translated on a non-English machine, so an unpinned locale is a parser
+      // that works in CI and fails on the operator's laptop. Likewise, a
+      // backend that forgets an explicit timeout must not be allowed to hang a
+      // deploy forever. A caller that sets these deliberately still wins:
+      // `props.env` is spread last and an explicit `props.timeout` is retained.
+      const withExecution = (props: ExecProps): ExecProps => ({
         ...props,
+        timeout: Option.match(Option.fromUndefinedOr(props.timeout), {
+          onNone: () => execution.defaultTimeout,
+          onSome: (timeout) => timeout,
+        }),
         env: { LC_ALL: execution.locale, LANG: execution.locale, ...props.env },
       });
 
       const exec: ObserveContext["exec"] = (props) =>
-        executor.run(withLocale(props), silentSession);
+        executor.run(withExecution(props), silentSession);
 
       const observeCtx: ObserveContext = { exec, execution };
 
-      const applyCtx = (session: ScopedPlanStatusSession): ApplyContext => ({
-        exec: (props) => executor.run(withLocale(props), session),
-        execution,
-        snapshot: (path) => backups.snapshot(path),
-      });
+      const applyCtx = (session: ScopedPlanStatusSession): ApplyContext => {
+        const exec: ObserveContext["exec"] = (props) => executor.run(withExecution(props), session);
+        return {
+          exec,
+          execution,
+          snapshot: (path) =>
+            backups.snapshot(path, (target, mode, permissionsTarget) =>
+              Windows.applyMode(exec, target, mode, permissionsTarget),
+            ),
+        };
+      };
 
       const list = reconciler.list;
 

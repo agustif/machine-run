@@ -9,9 +9,11 @@ import {
   toProvider,
 } from "@machine-run/engine";
 import { Resource } from "alchemy/Resource";
+import type { CommandError } from "alchemy/Command";
 import * as Effect from "effect/Effect";
 import * as Arr from "effect/Array";
 import * as Boolean from "effect/Boolean";
+import * as Data from "effect/Data";
 import * as FileSystem from "effect/FileSystem";
 import * as Match from "effect/Match";
 import * as Option from "effect/Option";
@@ -145,6 +147,12 @@ export const Package = Resource<Package>("System.Package");
  */
 const isApplyPhase = (ctx: ObserveContext): ctx is ApplyContext => "snapshot" in ctx;
 
+/** `command -v`'s empty, exit-1 result means this manager is not installed. */
+const isMissingExecutable = (error: CommandError): boolean =>
+  error.reason._tag === "UnexpectedExit" &&
+  error.reason.exitCode === 1 &&
+  error.reason.stderr === "";
+
 /** The comparable string one `VersionSpec` tag names — see `PackageState.version`'s doc comment. */
 const versionSpecTarget = (spec: VersionSpec): string =>
   Match.value(spec).pipe(
@@ -183,13 +191,43 @@ const resolvedTarget = (props: PackageProps): string | undefined =>
   );
 
 /**
+ * A manager reported a successful install, but its own fresh listing still
+ * disagrees with the requested package state. Returning `desired` without this
+ * check would record a false success and leave the next plan to rediscover the
+ * same drift. The whole props object is carried because the manager and name
+ * together identify the package, while the optional version is policy-shaped.
+ */
+export class PackageNotConverged extends Data.TaggedError("PackageNotConverged")<{
+  props: PackageProps;
+  actual: PackageState | undefined;
+}> {
+  override get message() {
+    const actual =
+      this.actual === undefined
+        ? "missing from the manager's listing"
+        : `listed with version ${this.actual.version === undefined ? "<unreported>" : `"${this.actual.version}"`}`;
+    return `Package "${this.props.name}" (${this.props.manager}) reported installed, but a fresh listing shows it is ${actual}.`;
+  }
+}
+
+/** Desired-state comparison shared by planning and post-apply confirmation. */
+const packageMatches = (observed: PackageState, desired: PackageState): boolean =>
+  observed.manager === desired.manager &&
+  observed.name === desired.name &&
+  (desired.version === undefined || observed.version === desired.version);
+
+/**
  * The provider body, exported separately from `PackageProvider` so a test
  * can build it directly and drive `observe`/`matches`/`apply` without the
  * alchemy engine or a real `CommandExecutor` (see `packages/dotfiles/src/File.ts`
  * for the same pattern).
  */
 export const makePackageReconciler: Effect.Effect<
-  Reconciler<PackageProps, PackageState, BackendError | UnsupportedVersionSpec | CannotDowngrade>,
+  Reconciler<
+    PackageProps,
+    PackageState,
+    BackendError | UnsupportedVersionSpec | CannotDowngrade | PackageNotConverged
+  >,
   never,
   FileSystem.FileSystem | Path.Path
 > = Effect.gen(function* () {
@@ -381,7 +419,9 @@ export const makePackageReconciler: Effect.Effect<
             )
             .pipe(
               Effect.map((result) => result.stdout.trim() !== ""),
-              Effect.orElseSucceed(() => false),
+              Effect.catchTag("CommandError", (error) =>
+                isMissingExecutable(error) ? Effect.succeed(false) : Effect.fail(error),
+              ),
               Effect.flatMap((present) =>
                 Boolean.match(present, {
                   onFalse: () => Effect.succeed<PackageState[]>([]),
@@ -401,10 +441,7 @@ export const makePackageReconciler: Effect.Effect<
         { concurrency: 4 },
       ).pipe(Effect.map((perManager) => perManager.flat())),
 
-    matches: (observed, desired) =>
-      observed.manager === desired.manager &&
-      observed.name === desired.name &&
-      (desired.version === undefined || observed.version === desired.version),
+    matches: packageMatches,
 
     // Must agree with `matches` above: empty exactly when it returns true.
     // `direction` only for `version` — `manager`/`name` are names, not points
@@ -529,7 +566,21 @@ export const makePackageReconciler: Effect.Effect<
         // slightly different name forms (e.g. brew's list vs. its casks)
         // than what a caller passed as `name`.
         yield* applyIndex.packages.invalidate(props.manager);
-        return desired;
+
+        // A successful install command is not proof of convergence: package
+        // managers can queue work, report a no-op as success, or update a
+        // different listing than the one used by this resource. Re-list after
+        // invalidation and return only the state the manager actually reports.
+        const confirmed = yield* observe(props, ctx);
+        if (Option.isNone(confirmed) || !packageMatches(confirmed.value, desired)) {
+          return yield* Effect.fail(
+            new PackageNotConverged({
+              props,
+              actual: Option.getOrUndefined(confirmed),
+            }),
+          );
+        }
+        return confirmed.value;
       }),
   };
 });
