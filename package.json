@@ -33,7 +33,7 @@
     "oxlint": "^1.78.0",
     "oxlint-plugin-effect": "^0.8.2",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "overrides": {
     "@effect/platform-node": "4.0.0-rc.108",
